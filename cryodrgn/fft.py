@@ -8,14 +8,20 @@ def torch_fft3_center(img):
     fft_img_centered = torch.fft.fftshift(fft_img, dim=(-3, -2, -1))
     return fft_img_centered
 
-def torch_rfft3_center(img):
+def torch_rfft3_center(img, center=False):
     img_centered = torch.fft.fftshift(img, dim=(-3, -2, -1))
     fft_img = torch.fft.rfftn(img_centered, dim=(-3, -2, -1), norm=MODE)
-    fft_img_centered = torch.fft.fftshift(fft_img, dim=(-3, -2))
-    return fft_img_centered
+    if center:
+        fft_img_centered = torch.fft.fftshift(fft_img, dim=(-3, -2))
+        return fft_img_centered
+    else:
+        return fft_img
 
-def torch_irfft3_center(fft_img_centered):
-    fft_img = torch.fft.ifftshift(fft_img_centered, dim=(-3, -2))
+def torch_irfft3_center(fft_img_centered, center=False):
+    if center:
+        fft_img = torch.fft.ifftshift(fft_img_centered, dim=(-3, -2))
+    else:
+        fft_img = fft_img_centered
     img_centered = torch.fft.irfftn(fft_img, dim=(-3, -2, -1), norm=MODE)
     img = torch.fft.ifftshift(img_centered, dim=(-3, -2, -1))
     return img

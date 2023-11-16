@@ -106,3 +106,8 @@ ENV/
 *.pkl
 *.txt
 Particles
+logs
+pkls
+*.mrc
+*.out
+err

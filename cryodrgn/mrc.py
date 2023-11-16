@@ -140,6 +140,22 @@ def parse_mrc_list(txtfile, lazy=False):
         particles = [img for x in lines for img in parse_mrc(x.strip(), lazy=True)[0]]
     return particles
 
+def parse_tomo(fname,):
+    # parse the header
+    header = MRCHeader.parse(fname)
+
+    ## get the number of bytes in extended header
+    extbytes = header.fields['next']
+    start = 1024+extbytes # start of image data
+
+    dtype = header.dtype
+    nz, ny, nx = header.fields['nz'], header.fields['ny'], header.fields['nx']
+
+    # load 3d volume as LazyImages
+    array = LazyImage(fname, (nz, ny, nx), dtype, start)
+    #print(header)
+    return array, header
+
 def parse_mrc(fname, lazy=False):
     # parse the header
     header = MRCHeader.parse(fname)

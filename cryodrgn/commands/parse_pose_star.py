@@ -40,19 +40,23 @@ def main(args):
     log(rot[0])
     if args.labels is not None:
         labels = utils.load_pkl(args.labels)
-        for i in range(labels.min(), labels.max()):
+        log(f'Read labels from {args.labels}')
+        for i in range(labels.min(), labels.max()+1):
             out_file = args.outdir + "/pre" + str(i) + ".star"
+            log(f'Writing {np.sum(labels==i)} particles in cluster {i} to {out_file}')
             s.write_subset(out_file, labels==i)
 
     # parse translations
-    trans = np.empty((N,2))
+    trans = np.empty((N,3))
     if '_rlnOriginX' in s.headers and '_rlnOriginY' in s.headers:
         trans[:,0] = s.df['_rlnOriginX']
         trans[:,1] = s.df['_rlnOriginY']
+        trans[:,2] = s.df['_rlnOriginZ']
     elif '_rlnOriginXAngst' in s.headers and '_rlnOriginYAngst' in s.headers:
         assert args.Apix is not None, "Must provide --Apix argument to convert _rlnOriginXAngst and _rlnOriginYAngst translation units"
         trans[:,0] = s.df['_rlnOriginXAngst']
         trans[:,1] = s.df['_rlnOriginYAngst']
+        trans[:,2] = s.df['_rlnOriginZAngst']
         trans /= args.Apix
 
     log('Translations (pixels):')

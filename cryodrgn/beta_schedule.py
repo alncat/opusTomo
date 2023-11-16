@@ -12,7 +12,7 @@ def get_beta_schedule(schedule):
     elif schedule == 'd':
         return LinearSchedule(5, 18, 1000000, 5000000)
     elif schedule == 'cos':
-        return CosSchedule(0.001, 1, 0, 100000)
+        return CosSchedule(0.1, 1, 0, 20000)
     else:
         raise RuntimeError('Wrong beta schedule. Schedule={}'
                            .format(schedule))
@@ -43,7 +43,7 @@ class CosSchedule:
         self.start_x = start_x
         self.start_y = start_y
         self.coef = (end_y - start_y) / (end_x - start_x)
-        self.period = (end_x - start_x)*1.25
+        self.period = (end_x - start_x)*1.35
 
     def __call__(self, x):
         return np.clip(np.mod(x - self.start_x, self.period) * self.coef + self.start_y,

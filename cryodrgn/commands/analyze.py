@@ -67,23 +67,43 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     zdim = z.shape[1]
 
     # Principal component analysis
-    print(z[:5, :])
+    print(z[:4, :])
     log('Perfoming principal component analysis...')
     pc, pca = analysis.run_pca(z)
+    log(f'PCA transformed data shape {pc.shape}')
+    print(pc[:4, :])
     log('Generating volumes...')
     for i in range(num_pcs):
         start, end = np.percentile(pc[:,i],(5,95))
+        log(f'traversing pc {i} from {start} to {end}')
         z_pc = analysis.get_pc_traj(pca, z.shape[1], 10, i+1, start, end)
         if not os.path.exists(f'{outdir}/pc{i+1}'):
             os.mkdir(f'{outdir}/pc{i+1}')
         vg.gen_volumes(f'{outdir}/pc{i+1}', z_pc)
         np.savetxt(f'{outdir}/pc{i+1}/z_pc.txt', z_pc)
 
+    # kmeans clustering in pca domain
+    #log('K-means clustering in PCA...')
+    #K = num_ksamples
+    #z_pc = np.concatenate([np.zeros_like(pc[:, :1]), pc[:, 1:]], axis=-1)
+    #kmeans_labels, centers = analysis.cluster_kmeans(z_pc, K)
+    #centers, centers_ind_pc = analysis.get_nearest_point(z_pc, centers)
+    #centers = centers_pc = pca.inverse_transform(centers)
+    #if not os.path.exists(f'{outdir}/kmeansPC{K}'):
+    #    os.mkdir(f'{outdir}/kmeansPC{K}')
+    #utils.save_pkl(kmeans_labels, f'{outdir}/kmeansPC{K}/labels.pkl')
+    #utils.save_pkl(centers, f'{outdir}/kmeansPC{K}/centers.pkl')
+    #np.savetxt(f'{outdir}/kmeansPC{K}/centers.txt', centers)
+    #np.savetxt(f'{outdir}/kmeansPC{K}/centers_ind.txt', centers_ind_pc, fmt='%d')
+    #log('Generating volumes...')
+    #vg.gen_volumes(f'{outdir}/kmeansPC{K}', centers)
+    #log(f'{np.bincount(kmeans_labels)}')
+
     # kmeans clustering
     log('K-means clustering...')
     K = num_ksamples
     kmeans_labels, centers = analysis.cluster_kmeans(z, K)
-    centers, centers_ind = analysis.get_nearest_point(z, centers)
+    _, centers_ind = analysis.get_nearest_point(z, centers)
     if not os.path.exists(f'{outdir}/kmeans{K}'):
         os.mkdir(f'{outdir}/kmeans{K}')
     utils.save_pkl(kmeans_labels, f'{outdir}/kmeans{K}/labels.pkl')
@@ -92,7 +112,7 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     np.savetxt(f'{outdir}/kmeans{K}/centers_ind.txt', centers_ind, fmt='%d')
     log('Generating volumes...')
     vg.gen_volumes(f'{outdir}/kmeans{K}', centers)
-    print(np.bincount(kmeans_labels))
+    log(f'{np.bincount(kmeans_labels)}')
 
     # UMAP -- slow step
     if zdim > 2:
@@ -136,7 +156,11 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
         pmax = max(xmax, ymax)
         pmin = min(xmin, ymin)
         plt.figure(3)
-        g = sns.jointplot(x=umap_emb[:,0], y=umap_emb[:,1], hue=groups, palette="icefire", s=1.5, alpha=.2, xlim=(pmin, pmax), ylim=(pmin, pmax))
+        g = sns.jointplot(x=umap_emb[:,0], y=umap_emb[:,1], hue=groups, palette="inferno", s=1., alpha=.25, xlim=(xmin, xmax), ylim=(ymin, ymax))
+        g.ax_joint.set_aspect('equal')
+        #cax = g.fig.add_axes([.98, .4, .01, .2])
+        #plt.colorbar(g.ax_joint, cax=cax)
+        #g = sns.scatterplot(x=umap_emb[:,0], y=umap_emb[:,1], hue=groups, palette="icefire", s=1.5, alpha=.2, xlim=(xmin, xmax), ylim=(ymin, ymax))
         g.set_axis_labels('UMAP1','UMAP2')
         #plt.tight_layout()
         plt.savefig(f'{outdir}/umap.png')
@@ -164,11 +188,18 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     plt.savefig(f'{outdir}/kmeans{K}/z_pca_hex.png')
 
     if zdim > 2 and not skip_umap:
+        #analysis.scatter_annotate(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind_pc, annotate=True,
+        #                          xlim=(xmin, xmax), ylim=(ymin, ymax),
+        #                          alpha=.1, s=.5)
+        #plt.xlabel('UMAP1', fontsize=14, weight='bold')
+        #plt.ylabel('UMAP2', fontsize=14, weight='bold')
+        #plt.savefig(f'{outdir}/kmeansPC{K}/umap.png')
+
         analysis.scatter_annotate(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True,
-                                  xlim=(pmin, pmax), ylim=(pmin, pmax),
+                                  xlim=(xmin, xmax), ylim=(ymin, ymax),
                                   alpha=.1, s=.5)
-        plt.xlabel('UMAP1')
-        plt.ylabel('UMAP2')
+        plt.xlabel('UMAP1', fontsize=14, weight='bold')
+        plt.ylabel('UMAP2', fontsize=14, weight='bold')
         plt.savefig(f'{outdir}/kmeans{K}/umap.png')
 
         g = analysis.scatter_annotate_hex(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True)
@@ -211,6 +242,7 @@ def main(args):
     weights = f'{workdir}/weights.{E}.pkl'
     config = f'{workdir}/config.pkl'
     outdir = f'{workdir}/analyze.{E}'
+    outdir_multi = f'{workdir}/defanalyze.{E}'
     if E == -1:
         zfile = f'{workdir}/z.pkl'
         weights = f'{workdir}/weights.pkl'
@@ -222,7 +254,21 @@ def main(args):
     if not os.path.exists(outdir):
         os.mkdir(outdir)
 
+
     if args.vanilla:
+        losses = analysis.parse_loss_vanilla(f"{workdir}/run.log", "validation")
+        #plt.ylabel('validation loss')
+        #plt.xlabel('step')
+        plt.plot(np.arange(1,len(losses)+1), losses, label="validation")
+        #plt.savefig(f"{workdir}/val_losses.png")
+        losses = analysis.parse_loss_vanilla(f"{workdir}/run.log", "training")
+        plt.ylabel('loss')
+        plt.xlabel('epoch')
+        plt.plot(np.arange(1,len(losses)+1), losses, label="training")
+        plt.xticks(range(1, len(losses)+1))
+        plt.legend(loc="upper right")
+        plt.savefig(f"{workdir}/train_losses.png")
+
         z = torch.load(zfile)["mu"].cpu().numpy()
         log("loading {}, z shape {}".format(zfile, z.shape))
         Nimg = z.shape[0]
@@ -232,6 +278,11 @@ def main(args):
         groups = posetracker.euler_groups
         utils.save_pkl(groups, f"{workdir}/groups.pkl")
         log("loading {}".format(poses))
+        # loading z codes for deformation too
+        if posetracker.multi_mu is not None:
+            multi_z = posetracker.multi_mu
+        else:
+            multi_z = None
     else:
         z = utils.load_pkl(zfile)
     zdim = z.shape[1]
@@ -243,6 +294,10 @@ def main(args):
         analyze_z1(z, outdir, vg)
     else:
         analyze_zN(z, outdir, vg, groups, skip_umap=args.skip_umap, num_pcs=args.pc, num_ksamples=args.ksample)
+        if multi_z is not None:
+            if not os.path.exists(outdir_multi):
+                os.mkdir(outdir_multi)
+            analyze_zN(multi_z, outdir_multi, vg, groups, skip_umap=args.skip_umap, num_pcs=min(args.pc, multi_z.shape[1]), num_ksamples=args.ksample)
 
     # copy over template if file doesn't exist
     out_ipynb = f'{outdir}/cryoDRGN_viz.ipynb'

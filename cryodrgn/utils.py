@@ -109,11 +109,13 @@ def standardize_image(y, log=False):
         print(y_mean, y_std)
     return y
 
-def plot_image(axes, y_image, i, j, log=False):
+def plot_image(axes, y_image, i, j, log=False, log_msg=""):
     y_image_std = np.std(y_image)
     y_image_mean = np.mean(y_image)
+    if len(y_image.shape) == 3:
+        y_image = np.sum(y_image, axis=0)
     if log:
-        print(y_image_mean, y_image_std)
+        print(log_msg, y_image_mean, y_image_std)
     axes[i][j].imshow((y_image - y_image_mean)/y_image_std, cmap='gray')
 
 def log(msg):
@@ -262,6 +264,29 @@ def crop_fft(x, out_size):
     x = x[..., head:tail, :out_xdim]
     return x
 
+def crop_fft3d(x, out_size):
+    in_size = x.size(-2)
+    if in_size == out_size:
+        return x
+    assert in_size > out_size
+    out_xdim = out_size//2 + 1
+    head = (in_size - out_size)//2
+    tail = head + out_size
+    x = x[..., head:tail, head:tail, :out_xdim]
+    return x
+
+def pad_fft(x, out_size):
+    in_size = x.size(-2)
+    if in_size == out_size:
+        return x
+    assert in_size < out_size
+    out_xdim = out_size//2 + 1
+    out_x = out_xdim - x.size(-1)
+    head = (out_size - in_size)//2
+    x = F.pad(x, (0, out_x, head, head), 'constant', 0)
+    return x
+
+
 def crop_image(x, out_size):
     in_size = x.size(-2)
     if in_size == out_size:
@@ -270,6 +295,16 @@ def crop_image(x, out_size):
     head = (in_size - out_size)//2
     tail = head + out_size
     x = x[..., head:tail, head:tail]
+    return x
+
+def crop_vol(x, out_size):
+    in_size = x.size(-2)
+    if in_size == out_size:
+        return x
+    assert in_size > out_size
+    head = (in_size - out_size)//2
+    tail = head + out_size
+    x = x[..., head:tail, head:tail, head:tail]
     return x
 
 def downsample_image(img, down_size):
@@ -412,8 +447,8 @@ def compute_cross_corr(mu):
     #mu = F.normalize(mu, dim=1)
     #print(mu, mu.pow(2).sum(-1))
     mu_mean = mu.mean(0)
-    mu_std = mu.std(0)
-    mu = (mu - mu_mean)/(mu_std + 1e-5)
+    #mu_std = mu.std(0)
+    mu = (mu - mu_mean)#/(mu_std + 1e-5)
     kernel = torch.matmul(mu[...,None], mu[...,None,:])
     #print(kernel.shape, torch.eye(mu.shape[-1]))
     #print(kernel.mean(0))
@@ -676,6 +711,30 @@ def R_to_relion_scipy(rot, degrees=True):
     if not degrees:
         euler *= np.pi/180
     return euler
+
+def align_with_z(axis):
+    #R = Ry Rb Ra
+    x = axis[..., 0]
+    y = axis[..., 1]
+    z = axis[..., 2]
+    proj_mod = torch.sqrt(y**2 + z**2)
+    R = torch.zeros(3, 3)#.to(axis.get_device())
+    if proj_mod > 1e-5:
+        R[..., 0, 0] = proj_mod
+        R[..., 0, 1] = -x * y / proj_mod
+        R[..., 0, 2] = -x * z / proj_mod
+        R[..., 1, 0] = 0
+        R[..., 1, 1] = z / proj_mod
+        R[..., 1, 2] = -y / proj_mod
+        R[..., 2, 0] = x
+        R[..., 2, 1] = y
+        R[..., 2, 2] = z
+    else:
+        R[..., 0, 2] = -1 if x > 0 else 1
+        R[..., 1, 1] = 1
+        R[..., 2, 0] = 1 if x > 0 else -1
+    #print(R@axis)
+    return R
 
 def xrot(tilt_deg):
     '''Return rotation matrix associated with rotation over the x-axis'''

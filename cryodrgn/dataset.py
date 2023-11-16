@@ -11,6 +11,28 @@ from . import utils
 from . import starfile
 
 log = utils.log
+def load_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
+    '''
+    Load particle stack from either a .mrcs file, a .star file, a .txt file containing paths to .mrcs files, or a cryosparc particles.cs file
+
+    lazy (bool): Return numpy array if True, or return list of LazyImages
+    datadir (str or None): Base directory overwrite for .star or .cs file parsing
+    '''
+    if mrcs_txt_star.endswith('.star'):
+        # not exactly sure what the default behavior should be for the data paths if parsing a starfile
+        try:
+            star = starfile.Starfile.load(mrcs_txt_star, relion31=relion31)
+            particles = star.get_subtomos(datadir=datadir, lazy=lazy,)# key='_rlnCtfImage')
+            ctfs = star.get_3dctfs(datadir=datadir, lazy=lazy)
+        except Exception as e:
+            if datadir is None:
+                datadir = os.path.dirname(mrcs_txt_star) # assume .mrcs files are in the same director as the starfile
+                particles = starfile.Starfile.load(mrcs_txt_star, relion31=relion31).get_particles(datadir=datadir, lazy=lazy)
+                ctfs = star.get_ctfs(datadir=datadir, lazy=lazy)
+            else: raise RuntimeError(e)
+    else:
+        raise NotImplementedError
+    return particles, ctfs
 
 def load_particles(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
     '''
@@ -36,13 +58,105 @@ def load_particles(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
         particles, _ = mrc.parse_mrc(mrcs_txt_star, lazy=lazy)
     return particles
 
+class LazyTomoMRCData(data.Dataset):
+    '''
+    Class representing an .mrcs stack file -- images loaded on the fly
+    '''
+    def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
+                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75):
+        #assert not keepreal, 'Not implemented error'
+        assert mrcfile.endswith('.star')
+        particles, ctfs = load_subtomos(mrcfile, True, datadir=datadir, relion31=relion31)
+        assert len(particles) == len(ctfs)
+        N = len(particles)
+        ny, nx, nz = particles[0].get().shape
+        assert ny == nx == nz, "Images must be cubic"
+        assert ny % 2 == 0, "Image size must be even"
+        log('Loaded {} {}x{}x{} images'.format(N, ny, nx, nz))
+        self.particles = particles
+        self.N = N
+        self.D = ny + 1 # after symmetrizing HT
+        self.invert_data = invert_data
+        self.real_data = real_data
+        if norm is None:
+            norm = self.estimate_normalization()
+        self.norm = norm
+        log('Image Mean, Std are {} +/- {}'.format(*self.norm))
+        self.window = window_cos_mask(ny, window_r, .95) if window else None
+        if in_mem:
+            log('Reading all images into memory!')
+            #downsample images
+            particles = []
+            self.down_size = int((ny*downfrac)//2)*2
+            down_scale = self.down_size/ny
+            log(f'downsample to {self.down_size}')
+            for i in range(0, self.N):
+                particles.append(torch.tensor(self.particles[i].get()).unsqueeze(0))
+            self.particles = torch.concat(particles, dim=0)
+            print(self.particles.shape)
+            #self.particles = np.asarray([self.particles[i].get() for i in range(0, self.N)])
+        self.in_mem = in_mem
+        self.ctfs = np.stack(ctfs, axis=0)
+        print("ctf is of shape: ", self.ctfs.shape)
+
+    def estimate_normalization(self, n=100):
+        assert self.real_data
+        n = min(n,self.N)
+        if self.real_data:
+            imgs = np.asarray([self.particles[i].get() for i in range(0,self.N, self.N//n)])
+        if self.invert_data: imgs *= -1
+        log('first image: {}'.format(imgs[0]))
+        norm = [np.mean(imgs), np.std(imgs)]
+        norm[0] = 0
+        return norm
+
+    def get(self, i):
+        if self.in_mem:
+            part = self.particles[i]
+            ctf = self.ctfs[i]
+            if self.down_size != self.D-1:
+                #padding zeros
+                part = utils.pad_fft(part, self.D-1)
+                part = torch.fft.ifftshift(part, dim=(-2))
+                part = fft.torch_ifft2_center(part)
+            return part, ctf
+            #return self.particles[i]
+        else:
+            part = self.particles[i].get()
+            #part *= -1/self.norm[1]
+            ctf = self.ctfs[i]
+            return part, ctf
+        img = self.particles[i].get()
+        if self.real_data:
+            return img
+        if self.window is not None:
+            img *= self.window
+        if self.invert_data: img *= -1
+        img = (img - self.norm[0])/self.norm[1]
+        return img
+
+    def get_batch(self, batch):
+        imgs = []
+        ctfs = []
+        for i in range(len(batch)):
+            img, ctf = self.get(batch[i])
+            imgs.append(img)
+            ctfs.append(ctf)
+        return np.concatenate(imgs, axis=0), np.concatenate(ctfs, axis=0)
+
+    def __len__(self):
+        return self.N
+
+    # the getter of the dataset
+    def __getitem__(self, index):
+        return self.get(index), index
 
 class LazyMRCData(data.Dataset):
     '''
     Class representing an .mrcs stack file -- images loaded on the fly
     '''
     def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
-                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=True):
+                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=True, downfrac=0.75):
         #assert not keepreal, 'Not implemented error'
         particles = load_particles(mrcfile, True, datadir=datadir, relion31=relion31)
         N = len(particles)
@@ -62,7 +176,22 @@ class LazyMRCData(data.Dataset):
         self.window = window_cos_mask(ny, window_r, .95) if window else None
         if in_mem:
             log('Reading all images into memory!')
-            self.particles = np.asarray([self.particles[i].get() for i in range(0, self.N)])
+            #downsample images
+            particles = []
+            self.down_size = int((ny*downfrac)//2)*2
+            down_scale = self.down_size/ny
+            log(f'downsample to {self.down_size}')
+            if self.down_size == ny:
+                for i in range(0, self.N):
+                    particles.append(torch.tensor(self.particles[i].get()).unsqueeze(0))
+            else:
+                for i in range(0, self.N):
+                    y_fft = fft.torch_fft2_center(torch.tensor(self.particles[i].get())).unsqueeze(0)
+                    y_fft_s = torch.fft.fftshift(y_fft, dim=(-2))
+                    y_fft_crop = utils.crop_fft(y_fft_s, self.down_size)
+                    particles.append(y_fft_crop)
+            self.particles = torch.concat(particles, dim=0)
+            #self.particles = np.asarray([self.particles[i].get() for i in range(0, self.N)])
         self.in_mem = in_mem
 
     def estimate_normalization(self, n=1000):
@@ -85,12 +214,19 @@ class LazyMRCData(data.Dataset):
 
     def get(self, i):
         if self.in_mem:
-            return self.particles[i]
+            part = self.particles[i]
+            if self.down_size != self.D-1:
+                #padding zeros
+                part = utils.pad_fft(part, self.D-1)
+                part = torch.fft.ifftshift(part, dim=(-2))
+                part = fft.torch_ifft2_center(part)
+            return part
+            #return self.particles[i]
         img = self.particles[i].get()
-        if self.window is not None:
-            img *= self.window
         if self.real_data:
             return img
+        if self.window is not None:
+            img *= self.window
         img = fft.ht2_center(img).astype(np.float32)
         if self.invert_data: img *= -1
         img = fft.symmetrize_ht(img)
@@ -239,6 +375,36 @@ class VolData(data.Dataset):
 
     def get(self):
         return self.volume
+
+    def center_of_mass(self,):
+        mass = ((self.volume > 0)*self.volume).sum()
+        x_idx = torch.linspace(0, self.N-1, self.N) - self.N/2 #[-s, s)
+        grid = torch.meshgrid(x_idx, x_idx, x_idx, indexing='ij')
+        xgrid = grid[2]
+        ygrid = grid[1]
+        zgrid = grid[0]
+        grid = torch.stack([xgrid, ygrid, zgrid], dim=-1)
+        vol = ((self.volume > 0).float()*self.volume).unsqueeze(-1)
+        center = vol*grid
+        center = center.sum(dim=(0,1,2))
+        assert mass.item() > 0
+        center /= mass
+        center = torch.where(center > 0, (center + 0.5).int(), (center - 0.5).int()).float()
+        centered = (grid - center)*vol
+        radius = (centered).pow(2)
+        r = torch.sqrt(radius.sum(dim=(0,1,2))/mass)
+        #principal axes
+        matrix = -centered.unsqueeze(-1) * centered.unsqueeze(-2)
+        radius_sum = torch.eye(3) * (radius.sum(dim=-1, keepdim=True).unsqueeze(-1))
+        matrix = ((matrix+radius_sum)*vol.unsqueeze(-1)).sum(dim=(0, 1, 2))
+        eigvals, eigvecs = np.linalg.eig(matrix.numpy())
+        indices = np.argsort(eigvals)
+        #print(matrix, eigvals[indices])
+        eigvecs = torch.from_numpy(eigvecs[:, indices].T) # eigvecs[0] is the first eigen vector with largest eigenvalues
+        #print(eigvecs @ eigvecs[2])
+
+        return center, r, eigvecs
+
 
 class MRCData(data.Dataset):
     '''

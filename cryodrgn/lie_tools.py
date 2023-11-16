@@ -82,7 +82,7 @@ def rotation_loss(pred_rots, ref_rots):
 
 def translation_loss(pred_trans, ref_trans):
     #print(pred_trans.shape, ref_trans.shape)
-    return (pred_trans - ref_trans).pow(2).sum(-1)
+    return (pred_trans - ref_trans).pow(2).sum(dim=-1)
 
 def SO3_to_quaternions(r):
     """Map batch of SO(3) matrices to quaternions."""
@@ -203,6 +203,18 @@ def quaternions_to_SO3_wiki(q):
         2*(x*z - y*w), 2*(y*z + x*w), 1. - 2*x*x - 2*y*y
         ], -1).view(*q.shape[:-1], 3, 3)
 
+def exp_quaternion(q):
+    '''exponentiate q'''
+    q_norm = q.norm(p=2, dim=-1, keepdim=True)
+    sinc_v = torch.special.sinc(q_norm/np.pi)
+    q = torch.cat([q_norm.cos(), sinc_v*q], dim=-1)
+    return q
+
+def rot_to_axis(R):
+    quat = SO3_to_quaternions_wiki(R)
+    axis = quat[..., 1:]
+    return torch.nn.functional.normalize(axis, p=2, dim=-1)
+
 def zrot(x):
     x = x*np.pi/180.
     ca = x.cos()
@@ -226,6 +238,25 @@ def yrot(x):
         zero, one, zero,
         sa, zero, ca
     ], -1).view(*x.shape, 3, 3)
+
+def rot_2d(x):
+    x = x*np.pi/180.
+    ca = x.cos()
+    sa = x.sin()
+    return torch.stack([
+        ca, -sa,
+        sa, ca
+    ], -1).view(*x.shape, 2, 2)
+
+def zrot_2d(x):
+    x = x*np.pi/180.
+    ca = x.cos()
+    sa = x.sin()
+    return torch.stack([
+        ca, sa,
+        -sa, ca
+    ], -1).view(*x.shape, 2, 2)
+
 
 def euler_to_direction(euler):
     alpha = euler[...,0]*np.pi/180

@@ -16,6 +16,9 @@ class CTFGrid:
         self.x_size = self.vol_size//2 + 1
         x_idx = torch.arange(self.x_size).to(device)/float(self.vol_size) #(0, 0.5]
         if not center:
+            y_idx = torch.arange(-self.x_size+1, self.x_size-1).to(device)/float(self.vol_size) #[-0.5, 0.5)
+            grid  = torch.meshgrid(y_idx, x_idx, indexing='ij')
+            self.centered_freqs = torch.stack((grid[1], grid[0]), dim=-1)
             y_idx = torch.arange(-self.x_size+2, self.x_size).to(device)/float(self.vol_size) #(-0.5, 0.5]
             grid  = torch.meshgrid(y_idx, x_idx, indexing='ij')
             grid_x = grid[1] #change fast [[0,1,2,3]]
@@ -34,11 +37,11 @@ class CTFGrid:
         self.shells_index = torch.round(torch.sqrt(torch.sum((self.freqs2d * self.vol_size) ** 2, dim=-1)))
         self.shells_index = self.shells_index.type(torch.int64)
         self.max_r = self.shells_index.max()
-        log("creating ctf grid {} with grid {}".format(center, self.shells_index))
+        log("lattice: creating ctf grid {} with grid {}".format(center, self.shells_index))
         shells_index_val = self.shell_to_grid(torch.arange(self.vol_size).unsqueeze(0).to(device))
-        print((shells_index_val - self.shells_index).sum())
+        log("lattice: difference: {}".format((shells_index_val - self.shells_index).sum()))
 
-        log("created ctf grid with shape: {}, max_r: {}".format(self.freqs2d.shape, self.max_r))
+        log("lattice: created ctf grid with shape: {}, max_r: {}".format(self.freqs2d.shape, self.max_r))
         #get number of frequencies per shell
         self.shells_weight = torch.ones_like(self.shells_index, dtype=torch.float32)
 
@@ -145,6 +148,18 @@ class CTFGrid:
         bfactor = torch.exp(-b/4*s2*4* np.pi**2)
         return bfactor
 
+    def get_b_factor_bc(self, b=None):
+        s2 = self.s2
+        b = b.to(s2.get_device())
+        bfactor = torch.exp(-b.unsqueeze(-1).unsqueeze(-1)/4*s2*4* np.pi**2)
+        return bfactor
+
+    def get_ddefocus_bc(self, b=None):
+        s2 = self.s2
+        b = b.to(s2.get_device())
+        bfactor = torch.cos(-0.5*b.unsqueeze(-1).unsqueeze(-1)*s2*2* np.pi)
+        return bfactor
+
     def sample_local_translation(self, img, k, sigma):
         assert k > 0
         t = torch.randn((img.shape[0], k, 2))*sigma
@@ -163,6 +178,35 @@ class CTFGrid:
         return img*phase_shift
 
     def translate_ft(self, img, t):
+        '''
+        Translate an image by phase shifting its Fourier transform
+
+        Inputs:
+            img: FT of image (B x img_dims x 2)
+            t: shift in pixels (B x T x 2)
+            mask: Mask for lattice coords (img_dims x 1)
+
+        Returns:
+            Shifted images (B x T x img_dims x 2)
+
+        img_dims can either be 2D or 1D (unraveled image)
+        '''
+        # F'(k) = exp(-2*pi*k*x0)*F(k)
+        coords = self.freqs2d.to(img.get_device()) #(H, W, 2)
+        # img = img # Bxhxw
+        t = t.to(img.get_device())
+        t = t.unsqueeze(-2).unsqueeze(-1) # BxCx1x2x1 to be able to do bmm
+        tfilt = coords @ t * 2 * np.pi # BxCxHxWx1
+        tfilt = tfilt.squeeze(-1) # BxCxHxW
+        #print(coords.shape, t.shape, tfilt.shape)
+        c = torch.cos(tfilt) # BxHxW
+        s = torch.sin(tfilt) # BxHxN
+        phase_shift = torch.view_as_complex(torch.stack([c, s], -1))#.unsqueeze(1)
+        #phase_shift = phase_shift.to(img.get_device())
+        #print(t.shape, img.shape, phase_shift.shape)
+        return (img*phase_shift)
+
+    def translate_ft3d(self, img, t):
         '''
         Translate an image by phase shifting its Fourier transform
 

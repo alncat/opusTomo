@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint_sequential
-from . import sync_batchnorm
 import matplotlib.pyplot as plt
 import healpy as hp
 from . import pose_encoder
@@ -18,6 +17,7 @@ from . import mrc
 from . import symm_groups
 from . import unet
 from . import healpix_sampler
+from . import ctf
 
 log = utils.log
 ALIGN_CORNERS = utils.ALIGN_CORNERS
@@ -45,7 +45,11 @@ class HetOnlyVAE(nn.Module):
             symm = None,
             render_size=140,
             downfrac=0.5,
-            templateres=192):
+            templateres=192,
+            tmp_prefix="ref",
+            window_r=0.85,
+            masks_params=None,
+            num_bodies=0):
         super(HetOnlyVAE, self).__init__()
         self.lattice = lattice
         self.zdim = zdim
@@ -56,6 +60,7 @@ class HetOnlyVAE(nn.Module):
         self.fixed_deform = False
         self.device = device
         self.render_size = (int((lattice.D - 1)*downfrac)//2)*2
+        self.num_bodies = num_bodies
         if ref_vol is not None:
             in_vol_nonzeros = torch.nonzero(ref_vol)
             in_vol_mins, _ = in_vol_nonzeros.min(dim=0)
@@ -63,12 +68,17 @@ class HetOnlyVAE(nn.Module):
             log("model: loading mask with nonzeros between {}, {}, {}".format(in_vol_mins, in_vol_maxs, ref_vol.shape))
             in_vol_maxs = ref_vol.shape[-1] - in_vol_maxs
             in_vol_min = min(in_vol_maxs.min(), in_vol_mins.min())
-            mask_frac = (ref_vol.shape[-1] - in_vol_min*2 + 6) / ref_vol.shape[-1]
-            log("model: masking volume using fraction: {}".format(mask_frac))
+            mask_frac = (ref_vol.shape[-1] - in_vol_min*2 + 4) / ref_vol.shape[-1]
             self.window_r = min(mask_frac, 0.95)
+            log("model: cropping volume using fraction: {}".format(self.window_r))
+            if templateres == 256:
+                self.window_r = min(self.window_r, 0.85)
         else:
-            self.window_r = downfrac
+            self.window_r = window_r
         self.down_vol_size = int(self.render_size*self.window_r)//2*2
+        self.encoder_crop_size = self.down_vol_size
+        self.encoder_image_size = int(self.render_size*self.encoder_crop_size/self.down_vol_size)//2*2
+        log("model: image supplemented into encoder will be of size {}".format(self.encoder_image_size))
         self.ref_vol = ref_vol
 
         if encode_mode == 'conv':
@@ -85,23 +95,16 @@ class HetOnlyVAE(nn.Module):
                             qdim, # hidden_dim
                             zdim*2, # out_dim
                             activation) #in_dim -> hidden_dim
-        elif encode_mode == 'tilt':
-            self.encoder = TiltEncoder(in_dim,
-                            qlayers,
-                            qdim,
-                            zdim*2,
-                            activation)
         elif encode_mode == 'fixed':
-            #self.zdim = 256
-            self.encoder = FixedEncoder(self.num_struct, self.zdim)
-            self.pose_encoder = pose_encoder.PoseEncoder(image_size=128)
+            self.encoder = FixedEncoder(self.num_struct, self.zdim+4)
+            #self.pose_encoder = pose_encoder.PoseEncoder(image_size=128)
         elif encode_mode == 'deform':
-            #self.zdim = 256
             self.encoder = FixedEncoder(self.num_struct, self.zdim)
             self.fixed_deform = True
         elif encode_mode == 'grad':
-            self.encoder = Encoder(self.zdim, lattice.D, crop_vol_size=110, in_mask=ref_vol)
-            #self.shape_encoder = pose_encoder.PoseEncoder(image_size=128, mode="shape")
+            self.encoder = Encoder(self.zdim, lattice.D, crop_vol_size=self.encoder_crop_size,
+                                   in_mask=ref_vol, window_r=self.window_r, render_size=self.encoder_image_size,
+                                   masks_params=masks_params)
             self.fixed_deform = True
         else:
             raise RuntimeError('Encoder mode {} not recognized'.format(encode_mode))
@@ -113,13 +116,16 @@ class HetOnlyVAE(nn.Module):
         self.symm = symm
         self.deform_emb_size = deform_emb_size
         self.templateres = templateres
+        self.masks_params = masks_params
+        self.Apix = Apix
         self.decoder = get_decoder(3+zdim, lattice.D, players, pdim, domain, enc_type, enc_dim,
                                    activation, ref_vol=ref_vol, Apix=Apix,
                                    template_type=self.template_type, templateres=self.templateres,
                                    warp_type=self.warp_type,
                                    symm=self.symm, ctf_grid=ctf_grid,
                                    fixed_deform=self.fixed_deform, deform_emb_size=self.deform_emb_size,
-                                   render_size=self.render_size, down_vol_size=self.down_vol_size)
+                                   render_size=self.encoder_image_size, down_vol_size=self.down_vol_size, tmp_prefix=tmp_prefix,
+                                   masks_params=self.masks_params, num_bodies=self.num_bodies)
 
     @classmethod
     def load(self, config, weights=None, device=None):
@@ -198,10 +204,11 @@ class HetOnlyVAE(nn.Module):
     def get_fixedcode(self):
         return self.encoder()
 
-    def vanilla_encode(self, img, rots=None, trans=None, eulers=None, num_gpus=4):
+    def vanilla_encode(self, img, rots=None, trans=None, eulers=None, num_gpus=4, snr2=1., body_poses=[None, None], ctf_param=None):
         if self.encode_mode == 'fixed':
             z = self.encoder()
-            encout = {'encoding': None}
+            z = z.repeat(num_gpus, 1)
+            encout = {'encoding': None, 'z_mu': z}
         elif self.encode_mode == 'fixed_blur':
             #split encodings to template and blur kernel
             zs = self.encoder()
@@ -210,11 +217,13 @@ class HetOnlyVAE(nn.Module):
             encout = {"encoding": zs[1:, :]}
             #print(z.shape, encout['encoding'].shape)
         elif self.encode_mode == "grad":
-            encout = self.encoder(img, rots, trans, losslist=["kldiv"], eulers=eulers)
+            snr = np.sqrt(np.abs(snr2))
+            ctf_embedding = None #ctf.compute_ctf_embedding(64, *torch.split(ctf_param, 1, 1))
+            encout = self.encoder(img, rots, trans, losslist=["kldiv"], eulers=eulers, snr=snr,
+                                  body_euler=body_poses[0], body_trans=body_poses[1], ctf_embedding=ctf_embedding)
             mu     = encout["z_mu"]
             logstd = encout["z_logstd"]
             z      = encout["z"]
-            #z  = mu + torch.exp(logstd) * torch.randn(*logstd.size(), device=logstd.device)
             encout["encoding"] = z
             x3d_center = encout["rotated_x"]
             #diff = (x3d_center.unsqueeze(1) - x3d_center.unsqueeze(0)).pow(2).sum(dim=(-1,-2))
@@ -222,12 +231,13 @@ class HetOnlyVAE(nn.Module):
             top = torch.topk(diff, k=3, dim=-1, largest=False, sorted=True)
             #print(top.values)
             #print(top.indices[:, 1:], mu)
-            encout["z_knn"] = mu[top.indices[:, 1:],:]
+            encout["z_knn"] = mu[top.indices[:, 1:],:self.zdim]
             #print(encout["z_knn"])
         return z, encout
 
     def vanilla_decode(self, rots, trans, z=None, save_mrc=False, eulers=None,
-                       ref_fft=None, ctf=None, encout=None, others=None, mask=None):
+                       ref_fft=None, ctf_param=None, encout=None, others=None, mask=None,
+                       body_poses=(None, None), ctf_grid=None, estpose=False,):
         in_template = None
         if self.encode_mode != 'deform':
             #randomly perturb rotation
@@ -239,78 +249,36 @@ class HetOnlyVAE(nn.Module):
             #for deform embdding, the encoding will come from z
             encout = {'encoding': None}
         decout = self.decoder(rots, trans, z=z, in_template=in_template, save_mrc=save_mrc,
-                              euler=eulers, ref_fft=ref_fft, ctf=ctf, others=others)
-        decout["y_recon_ori"] = y_recon_ori = decout["y_recon"]
-        #y_recon_ori = decout["y_recon"]*utils.crop_image(mask, self.down_vol_size)
+                        euler=eulers, ref_fft=ref_fft, ctf_param=ctf_param,
+                        body_euler=body_poses[0], body_trans=body_poses[1], ctf_grid=ctf_grid, estimate_pose=estpose)
+        #decout["y_recon_ori"] = y_recon_ori = decout["y_recon"]
+        y_recon_ori = decout["y_recon_ori"]
         pad_size = (self.render_size - self.down_vol_size)//2
-        #y_recon_ori = F.pad(y_recon_ori, (pad_size, pad_size, pad_size, pad_size))
-        if self.ref_vol is not None:
-            decout["mask"] = F.pad(decout["mask"], (pad_size, pad_size, pad_size, pad_size))
 
-        if len(ctf.shape) == 3:
-            #print("ctf: ", ctf[0], others["ctf"].shape)
-            ctf = ctf.unsqueeze(1)
-        #print(y_recon_ori.shape, ctf.shape)
-        #y_recon_ori  = torch.view_as_complex(y_recon_fft)
-        #decout["y_recon_fft"] = y_recon_ori*ctf # ctf is (B, C, H, W) (B, 1, H, W, 2) x (B, 1, H, W, 1)
-        #y_recon_fft   = decout["y_recon_fft"]
-        #y_ref_fft   = torch.view_as_complex(decout["y_ref_fft"])
-        #print(y_recon_fft.shape, y_ref_fft.shape, ctf.shape)
-        # convert to image
-        #y_recon_fft_s = torch.fft.fftshift(y_recon_fft, dim=(-2))
-        #y_recon = fft.torch_ifft2_center(y_recon_fft_s)
+        #freqs = ctf_grid.freqs2d.unsqueeze(0)/self.Apix
+        #c = ctf.compute_3dctf(ref_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), plot=True)
+        #c = decout["ctf"]
+        #if len(c.shape) == 4:
+        #    c = c.unsqueeze(1)
+        ## downsample ctf to render_size
+        #if c.shape[-2] != self.render_size:
+        #    c = torch.fft.fftshift(c, dim=(-3,-2))
+        #    c = utils.crop_fft3d(c, self.render_size)
+        #    c = torch.fft.fftshift(c, dim=(-3,-2))
+        #print(y_recon_ori.shape, c.shape)
 
-        # put zero frequency on border
-        #y_recon_fft_s = torch.fft.fftshift(y_recon_ori, dim=(-2))
-        #y_recon_ori = fft.torch_ifft2_center(y_recon_fft_s)*mask
+        #retrieve fft of reconstruction from decout
+        #y_recon_fft = torch.view_as_complex(decout["y_recon"])*c
+        #decout["y_recon"] = fft.torch_irfft3_center(y_recon_fft)
 
-        ctf = torch.fft.fftshift(ctf, dim=(-2))
-        ctf = utils.crop_fft(ctf, self.render_size)
-        ctf = torch.fft.fftshift(ctf, dim=(-2))
-
-        y_recon_fft = fft.torch_fft2_center(y_recon_ori)*ctf
-        # put zero frequency in center
-        #y_recon_fft = torch.fft.fftshift(y_recon_fft, dim=(-2))*ctf
-        # put zero frequency on border
-        #y_recon_fft = torch.fft.fftshift(y_recon_fft, dim=(-2))
-
-        #y_ref_fft_s = torch.fft.fftshift(ref_fft, dim=(-2))
-        #y_ref = fft.torch_ifft2_center(ref_fft)
-        #print(y_ref.shape)
-
-        decout["y_recon_fft"] = torch.view_as_real(y_recon_fft)
-        #decout["y_ref_fft"] = torch.view_as_real(ref_fft)
-
-        decout["y_recon"] = fft.torch_ifft2_center(y_recon_fft)
-        #decout["y_recon_ori"] = y_recon_ori
-        #decout["y_ref"] = y_ref
-
-        if self.encode_mode in ["fixed"]:
-            #decout["probs"] = torch.ones(z.shape[0], 1, 1).to(z.get_device())
-            B = z.shape[0]
-            latent_dist = -(z.unsqueeze(1) - z.unsqueeze(0)).pow(2).sum(-1)*0.5
-            #remove diagonal
-            diag_mask = ~torch.eye(B, dtype=bool).to(z.get_device())
-            latent_dist = latent_dist.masked_select(diag_mask).view(B, B-1)
-            #get probs
-            latent_log_probs = F.log_softmax(latent_dist, dim=-1)
-            #stack and pass to encoder
-            B, C, H, W = y_recon.shape #(B is batch, C represent different views)
-            #compute transition probabilities
-            dist = -y_ref.pow(2)*0.5 + y_recon.detach()*y_ref - y_recon.detach().pow(2)*0.5
-            dist = dist.sum(dim=(-1, -2))*32/128**2
-            #remove diagonal
-            #dist_diag = torch.diagonal(dist)
-            dist = dist.masked_select(diag_mask).view(B, B-1)
-            probs = F.softmax(dist, dim=-1)
-            #print(probs)
-            decout["losses"]["pairkld"] = -probs*latent_log_probs
-            #keep diagonal
-            decout["y_recon_fft"] = torch.view_as_real(torch.diagonal(y_recon_fft).permute(dims=[2,0,1]).unsqueeze(1))
-            decout["y_ref_fft"]   = torch.view_as_real(torch.diagonal(y_ref_fft).permute(dims=[2,0,1]).unsqueeze(1))
-
-            decout["y_recon"] = torch.diagonal(y_recon).permute(dims=[2,0,1]).unsqueeze(1)
-            decout["y_ref"]   = torch.diagonal(y_ref).permute(dims=[2,0,1]).unsqueeze(1)
+        # crop reconstruction here
+        decout["y_recon"] = utils.crop_vol(decout["y_recon"], self.encoder_crop_size)
+        #images = decout["y_recon"]
+        #decout["y_recon_mean"] = images.detach().mean(dim=1, keepdim=True)
+        # substract reconstruction to form diff image
+        #rnd_factor = torch.rand([images.shape[0], 1, 1, 1], device=images.device)*0.2
+        #decout["y_ref"] -= decout["y_recon_mean"]*rnd_factor
+        #decout["y_ref"] /= (1. - rnd_factor)
 
         return decout
 
@@ -367,7 +335,8 @@ def load_decoder(config, weights=None, device=None):
 
 def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activation=nn.ReLU, templateres=128,
                 ref_vol=None, Apix=1., template_type=None, warp_type=None,
-                symm=None, ctf_grid=None, fixed_deform=False, deform_emb_size=2, render_size=140, down_vol_size=140):
+                symm=None, ctf_grid=None, fixed_deform=False, deform_emb_size=2, render_size=140,
+                down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0):
     if enc_type == 'none':
         if domain == 'hartley':
             model = ResidLinearMLP(in_dim, layers, dim, 1, activation)
@@ -376,14 +345,12 @@ def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activati
             model = FTSliceDecoder(in_dim, D, layers, dim, activation)
         return model
     elif enc_type == 'vanilla':
-        #model = VanillaDecoder
-        #if template_type is None:
-        #    assert ref_vol is not None
         return VanillaDecoder(D, ref_vol, Apix, template_type=template_type, templateres=templateres, warp_type=warp_type,
                               symm_group=symm, ctf_grid=ctf_grid,
                               fixed_deform=fixed_deform,
                               deform_emb_size=deform_emb_size,
-                              zdim=in_dim - 3, render_size=render_size, down_vol_size=down_vol_size)
+                              zdim=in_dim - 3, render_size=render_size,
+                              down_vol_size=down_vol_size, tmp_prefix=tmp_prefix, masks_params=masks_params, num_bodies=num_bodies)
     else:
         model = PositionalDecoder if domain == 'hartley' else FTPositionalDecoder
         return model(in_dim, D, layers, dim, activation, enc_type=enc_type, enc_dim=enc_dim)
@@ -399,7 +366,7 @@ class FixedEncoder(nn.Module):
         return self.encoding1
 
 class ConvTemplate(nn.Module):
-    def __init__(self, in_dim=256, outchannels=1, templateres=128, affine=False):
+    def __init__(self, in_dim=256, outchannels=1, templateres=128, affine=False, num_bodies=0):
 
         super(ConvTemplate, self).__init__()
 
@@ -408,8 +375,20 @@ class ConvTemplate(nn.Module):
         self.templateres = templateres
         templateres = 256
 
+
         self.template1 = nn.Sequential(nn.Linear(self.zdim, 512), nn.LeakyReLU(0.2),
                                        nn.Linear(512, 2048), nn.LeakyReLU(0.2))
+        # output affine parameter
+        self.use_affine = False
+        if affine:
+            self.affine_hidden = 512
+            self.num_bodies = num_bodies
+            #self.affine_out = nn.Sequential(nn.Linear(2048, self.affine_hidden), nn.LeakyReLU(0.2), nn.Linear(self.affine_hidden, num_bodies*6))
+            self.z_affine_dim = 4
+            self.affine_out = nn.Sequential(nn.Linear(self.z_affine_dim, self.affine_hidden), nn.LeakyReLU(0.2), nn.Linear(self.affine_hidden, (num_bodies+1)*6))
+            torch.nn.init.zeros_(self.affine_out[2].weight)
+            torch.nn.init.zeros_(self.affine_out[2].bias)
+            self.use_affine = True
         template2 = []
         inchannels, outchannels = 2048, 1024
         template2.append(nn.ConvTranspose3d(inchannels, outchannels, 2, 2, 0))
@@ -418,43 +397,73 @@ class ConvTemplate(nn.Module):
         inchannels, outchannels = 1024, 512
         template2.append(nn.ConvTranspose3d(inchannels, outchannels, 2, 2, 0))
         template2.append(nn.LeakyReLU(0.2))
-        self.template2 = nn.Sequential(*template2)
+        if self.templateres != templateres:
+            self.template2 = nn.Sequential(*template2)
 
-        inchannels, outchannels = 512, 256
-        template3 = []
-        template4 = []
-        for i in range(int(np.log2(templateres)) - 3):
-            if i < 3: #2:
-                template3.append(nn.ConvTranspose3d(inchannels, outchannels, 4, 2, 1))
-                template3.append(nn.LeakyReLU(0.2))
-            else:
-                template4.append(nn.ConvTranspose3d(inchannels, outchannels, 4, 2, 1))
-                template4.append(nn.LeakyReLU(0.2))
-            inchannels = outchannels
-            outchannels = inchannels//2 #max(inchannels // 2, 16)
-        self.template3 = nn.Sequential(*template3)
-        self.template4 = nn.Sequential(*template4)
+            inchannels, outchannels = 512, 256
+            template3 = []
+            template4 = []
+            for i in range(int(np.log2(templateres)) - 3):
+                if i < 2: #2:
+                    template3.append(nn.ConvTranspose3d(inchannels, outchannels, 4, 2, 1))
+                    template3.append(nn.LeakyReLU(0.2))
+                else:
+                    template4.append(nn.ConvTranspose3d(inchannels, outchannels, 4, 2, 1))
+                    template4.append(nn.LeakyReLU(0.2))
+                inchannels = outchannels
+                outchannels = inchannels//2 #max(inchannels // 2, 16)
+            self.template3 = nn.Sequential(*template3)
+            self.template4 = nn.Sequential(*template4)
+            for m in [self.template1, self.template2, self.template3, self.template4]:
+                utils.initseq(m)
+        else:
+            inchannels, outchannels = 512, 256
+            for i in range(int(np.log2(templateres)) - 3):
+                template2.append(nn.ConvTranspose3d(inchannels, outchannels, 4, 2, 1))
+                template2.append(nn.LeakyReLU(0.2))
+                inchannels = outchannels
+                outchannels = inchannels//2 #max(inchannels // 2, 16)
+            self.template2 = nn.Sequential(*template2)
+            self.template3 = self.template4 = []
+            for m in [self.template1, self.template2]:
+                utils.initseq(m)
+
         self.conv_out = nn.ConvTranspose3d(inchannels, 1, 4, 2, 1)
         #self.conv_out = nn.Conv3d(inchannels, 1, 3, 1, 1)
-        for m in [self.template1, self.template2, self.template3, self.template4]:
-            utils.initseq(m)
-        utils.initmod(self.conv_out, gain=1./np.sqrt(templateres//2))
 
-        self.intermediate_size = int(32*self.templateres/256)
+        utils.initmod(self.conv_out, gain=1./np.sqrt(templateres))
+        #utils.initmod(self.conv_out)
+        self.intermediate_size = int(16*self.templateres/256)
         log('convtemplate: the output volume is of size {}, intermediate activations will be resampled from 32 to {}'.format(self.templateres, self.intermediate_size))
-
+        # fourier features
+        self.fourier_feature = ctf.FourierFeatures(self.intermediate_size, 10)
+        #self.fourier_mlp = nn.Sequential(nn.Conv3d(10*3*2, 128, 1), nn.SiLU(), nn.Conv3d(128, 128, 1))
         # output rigid grid transformations
 
-    def forward(self, encoding):
+    def forward(self, encoding,):
         #modules = [module for k, module in self.template2._modules.items()]
         #return checkpoint_sequential(modules, 2, self.template1(encoding).view(-1, 1024, 1, 1, 1))
-        template2 = self.template2(self.template1(encoding).view(-1, 2048, 1, 1, 1))
-        template3 = self.template3(template2) #(B, 64, 32, 32, 32)
-        #can revise this to achieve other resolutions, current output of size 24*2^3
-        template3 = F.interpolate(template3, size=self.intermediate_size, mode="trilinear", align_corners=ALIGN_CORNERS)
-        template4 = self.template4(template3)
+        template1 = self.template1(encoding[..., :self.zdim])
+        template2 = self.template2(template1.view(-1, 2048, 1, 1, 1))
+        affine = None
+        if self.use_affine and encoding.shape[-1] > self.zdim:
+            #affine = self.affine_out(template1).view(-1, self.num_bodies, 6)
+            affine = self.affine_out(encoding[..., self.zdim:]).view(-1, (self.num_bodies+1), 6)
+            one = torch.ones_like(affine[..., :1])*4.
+            quat = torch.cat([one, affine[..., :3]], dim=-1)
+            #quat = lie_tools.exp_quaternion(affine[..., :3])
+            trans = affine[..., 3:]
+            affine = (quat, trans)
+        if self.templateres != 256:
+            template3 = self.template3(template2) #(B, 64, 32, 32, 32)
+            #can revise this to achieve other resolutions, current output of size 24*2^3
+            template3 = F.interpolate(template3, size=self.intermediate_size, mode="trilinear", align_corners=ALIGN_CORNERS)
+            # compute positional encodings
+            template4 = self.template4(template3)
+        else:
+            template4 = template2
 
-        return self.conv_out(template4), None
+        return self.conv_out(template4), affine
 
 class AffineMixWeight(nn.Module):
     def __init__(self, in_dim=8, out_dim=3, out_size=32):
@@ -487,50 +496,104 @@ class AffineMixWeight(nn.Module):
         return out
 
 class Encoder(nn.Module):
-    def __init__(self, zdim, D, crop_vol_size, in_mask=None):
+    def __init__(self, zdim, D, crop_vol_size, in_mask=None, window_r=None, render_size=None, masks_params=None):
         super(Encoder, self).__init__()
 
         self.zdim = zdim
         self.inchannels = 1
         self.vol_size = D - 1
-        self.crop_vol_size = crop_vol_size #int(160*self.scale_factor)
+        self.render_size = render_size
+        self.crop_vol_size = crop_vol_size #int(render_size*window)
+        self.scale = self.render_size/(self.crop_vol_size-1)*2.
+        self.crop_scale = (self.crop_vol_size-1)/(self.render_size-1)
+        self.window_r = window_r #(the cropping fraction of input mask)
         #downsample volume
-        self.transformer_e = SpatialTransformer(self.crop_vol_size, render_size=self.crop_vol_size)
-        self.out_dim = (self.crop_vol_size)//128 + 1
+        self.transformer_e = SpatialTransformer(self.crop_vol_size, render_size=self.render_size)
+        #self.out_dim = (self.crop_vol_size)//128 + 1
+        self.out_dim = 1
+        log("encoder: the input after cropping is {}, render size is {}, original size is {}".format(
+                                                self.crop_vol_size, self.render_size, self.vol_size))
+        log("encoder: the crop fraction is {}, the scale is {}".format(self.crop_scale, self.scale))
+        # create 3d frequencies
+        self.x_size = self.render_size//2 + 1
+        #y_idx = torch.arange(-self.x_size+2, self.x_size)/float(self.render_size) #(-0.5, 0.5]
+        y_idx = torch.arange(-self.x_size+1, self.x_size-1)/float(self.render_size) #[-0.5, 0.5)
+        x_idx = torch.arange(self.x_size)/float(self.render_size) #(0, 0.5]
+        grid  = torch.meshgrid(y_idx, y_idx, x_idx, indexing='ij')
+        grid_x = grid[2] #change fast [[0,1,2,3]]
+        grid_y = grid[1]
+        grid_z = grid[0]
+        #grid_y = torch.roll(grid[1], shifts=(self.x_size,), dims=(1,)) #fft shifted, center at the corner
+        #grid_z = torch.roll(grid[0], shifts=(self.x_size,), dims=(0,))
+        freqs3d = torch.stack((grid_x, grid_y, grid_z), dim=-1)
+        print(freqs3d[0,...].pow(2).sum(dim=-1))
+        x_idx = torch.linspace(-1., 1., self.render_size) #[-s, s)
+        grid  = torch.meshgrid(x_idx, x_idx, indexing='ij')
+        xgrid = grid[1] #change fast [[0,1,2,3]]
+        ygrid = grid[0]
+        grid2d = torch.stack((xgrid, ygrid), dim=-1).unsqueeze(0)
+        self.register_buffer("freqs2d", grid2d)
+        print(self.freqs2d.shape)
+        self.register_buffer("freqs3d", freqs3d)
+        #print(self.freqs3d)
+
+        self.num_bodies = 1
+
         #downsample mask
         if in_mask is not None:
-            crop_mask_size = (int(in_mask.shape[-1]*(self.crop_vol_size/128))//2)*2
-            log("encoder: cropping mask from {} to {}".format(in_mask.shape, crop_mask_size))
+            crop_mask_size = (int(in_mask.shape[-1]*self.window_r)//2)*2 #(self.crop_vol_size/128) previous default
+            log("encoder: cropping mask from {} to {} using window {},".format(in_mask.shape, crop_mask_size, self.window_r))
             in_mask = self.transformer_e.crop(in_mask, crop_mask_size).unsqueeze(0).unsqueeze(0)
             # downsample
             in_mask = self.transformer_e.sample(in_mask)
             self.register_buffer("in_mask", in_mask)
+            print(self.in_mask.shape)
             self.use_mask = True
         else:
             self.register_buffer("mask", (self.transformer_e.grid.pow(2).sum(dim=-1) < 1).float())
             self.use_mask = True
 
-        #self.init_conv = nn.Sequential(
-        #                    nn.Conv2d(1, 8, 4, 2, 1),
-        #                    nn.LeakyReLU(0.1)
-        #                )
-
         downsample = []
         n_layers = int(np.log2(128//2))
         inchannels = 1
         outchannels = 32
+        self.down2 = []
+        downsample1 = []
+        self.intermediate_size = 12
         for i in range(n_layers):
-            downsample.append(nn.Conv3d(inchannels, outchannels, 4, 2, 1))
-            downsample.append(nn.LeakyReLU(0.2))
+            if i < 3:
+                downsample.append(nn.Conv3d(inchannels, outchannels, 4, 2, 1))
+                if i < 2:
+                    downsample.append(nn.LeakyReLU(0.2))
+            else:
+                #if i == 3:
+                #    inchannels += 16
+                if i == n_layers - 1:
+                    downsample1.append(nn.Conv3d(inchannels, outchannels, 3,))
+                else:
+                    downsample1.append(nn.Conv3d(inchannels, outchannels, 4, 2, 1))
+                downsample1.append(nn.LeakyReLU(0.2))
             inchannels = outchannels
             #if inchannels == outchannels:
-            outchannels = min(inchannels * 2, 512)
+            outchannels = min(inchannels * 2, 1024)
             #else:
         self.out_channels = inchannels
-        #downsample.append(nn.Conv3d(inchannels, self.out_channels, 4, 2, 1))
-        #downsample.append(nn.LeakyReLU(0.2))
+        downsample1.insert(0, nn.LeakyReLU(0.2))
         self.down1 = nn.Sequential(*downsample)
-        #downsample.append(nn.ConvTranspose3d(inchannels, outchannels, 4, 2, 1))
+        self.down2 = nn.Sequential(*downsample1)
+        # mlp for ctf embedding
+        #self.ctf_emb_dim = 128 + 32
+        #self.ctf_embed_mlp = nn.Sequential(nn.Linear(self.ctf_emb_dim, 128, bias=False), nn.LeakyReLU(0.2), nn.Linear(128, 128, bias=False))
+        ##torch.nn.init.zeros_(self.ctf_embed_mlp[0].weight)
+        #torch.nn.init.uniform_(self.ctf_embed_mlp[0].weight, -1./self.ctf_emb_dim, 1./self.ctf_emb_dim)
+        #torch.nn.init.zeros_(self.ctf_embed_mlp[2].weight)
+        ## coordinate embedding
+        #self.coordinate_feature = ctf.FourierFeatures(self.intermediate_size, 10)
+        #self.random_matrix = nn.parameter.Parameter(data=torch.randn(128, 3), requires_grad=False)
+        #self.fourier_mlp = nn.Sequential(nn.Conv3d(60, 128, 1), nn.SiLU(), nn.Conv3d(128, 128, 1))
+        #torch.nn.init.uniform_(self.fourier_mlp[0].weight, -1./128, 1./128)
+        #torch.nn.init.uniform_(self.fourier_mlp[2].weight, -1./128, 1./128)
+        #torch.nn.init.zeros_(self.fourier_mlp[2].weight)
 
         #self.down1 = nn.Sequential(
         #        nn.Conv3d(self.inchannels, 16, 4, 2, 1),    nn.LeakyReLU(0.2),#40
@@ -539,14 +602,16 @@ class Encoder(nn.Module):
         #        nn.Conv3d(32, 32, 4, 2, 1), nn.LeakyReLU(0.2),#5
         #        nn.Conv3d(32, 64, 4, 2, 1), nn.LeakyReLU(0.2),#2
         #        nn.Conv3d(64, self.out_channels, 4, 2, 1), nn.LeakyReLU(0.2))#1
-        self.down2 = nn.Sequential(
+        self.down3 = nn.Sequential(
                 nn.Linear(self.out_channels * self.out_dim ** 3, 512), nn.LeakyReLU(0.2))
 
-        self.mu = nn.Linear(512, self.zdim)
-        self.logstd = nn.Linear(512, self.zdim)
+        self.z_affine_dim = 4
+        self.mu = nn.Linear(512, self.zdim+self.z_affine_dim)
+        self.logstd = nn.Linear(512, self.zdim+self.z_affine_dim)
 
         utils.initseq(self.down1)
         utils.initseq(self.down2)
+        utils.initseq(self.down3)
         utils.initmod(self.mu)
         utils.initmod(self.logstd)
 
@@ -566,20 +631,63 @@ class Encoder(nn.Module):
         neighbor_eulers = torch.stack([neighbor_euler0, neighbor_euler1], dim=-1) #(s, neighbor, 2)
         #flatten eulers
         neighbor_eulers_flatten = neighbor_eulers.view(2) #(s*neighbor, 2)
-        #print(neighbor_eulers.shape, neighbor_eulers_flatten.shape)
         return neighbor_eulers_flatten
 
-    def forward(self, x, rots, trans, losslist=[], eulers=None):
-        #2d to 3d suppose x is (N, 1, H, W)
-        B = x.shape[0]
-        #x = self.init_conv(x).unsqueeze(2)
-        x = utils.crop_image(x, self.crop_vol_size).unsqueeze(2)
-        # randomly scale and invert image
-        #x = x*(0.75 + 0.5*torch.rand((B, 1, 1, 1, 1)).float().to(x.get_device())) \
-        #    + 0.1*torch.randn((B, 1, 1, 1, 1)).to(x.get_device())
+    def bicubic_translate(self, img, t, euler, scale=1.):
+        assert img.shape[0] == 1
+        assert len(t.shape) == 1
+        W = img.shape[-1]
+        img = img.view(1, W, W, W)
+        rot_ref = lie_tools.zrot_2d(euler).unsqueeze(1) #(B, 1, 3, 3)
+        t_grid = self.freqs2d@rot_ref + t[:2]
+        img = F.grid_sample(img, t_grid, align_corners=ALIGN_CORNERS, mode='bicubic')
+        H = img.shape[-1]
+        img = img.reshape(1, 1, W, H, H)
+        img = torch.permute(img, [0, 1, 4, 3, 2]) # z,y,x -> x,y,z
+        zero = torch.zeros_like(t[2:])
+        t_z = torch.cat((t[2:], zero))
+        t_grid = self.freqs2d + t_z
+        img = F.grid_sample(img.squeeze(0), t_grid, align_corners=ALIGN_CORNERS, mode='bicubic')
+        img = img.reshape(1, 1, H, H, H)
+        img = torch.permute(img, [0, 1, 4, 3, 2]) # x,y,z -> z,y,x
+        return img
 
-        pixrad = hp.max_pixrad(32)
-        #x3d = x.repeat(1, 1, self.crop_vol_size, 1, 1) #(N, D, H, W)
+    def bfactor_blurring(self, img, bfactor):
+        s2 = self.freqs3d.pow(2).sum(dim=-1)
+        img = img*torch.exp(-s2*bfactor*np.pi**2)
+        return img
+
+    def translate_ft3d(self, img, t):
+        '''
+        Inputs:
+            img: FT of image (B x img_dims x 3)
+            t: shift in pixels (B x T x 3)
+        Returns:
+            Shifted images (B x T x img_dims x 2)
+        '''
+        # F'(k) = exp(-2*pi*k*x0)*F(k)
+        coords = self.freqs3d #(D, H, W, 3)
+        t = t.unsqueeze(-2).unsqueeze(-1) # BxCx1x3x1 to be able to do bmm
+        #print(t.shape)
+        tfilt = coords @ t * 2 * np.pi # BxCxHxWx1
+        tfilt = tfilt.squeeze(-1) # BxCxHxW
+        #print(coords.shape, t.shape, tfilt.shape)
+        c = torch.cos(tfilt) # BxHxW
+        s = torch.sin(tfilt) # BxHxN
+        phase_shift = torch.view_as_complex(torch.stack([c, s], -1))#.unsqueeze(1)
+        #phase_shift = phase_shift.to(img.get_device())
+        #print(t.shape, img.shape, phase_shift.shape)
+        return (img*phase_shift)
+
+    def forward(self, x, rots, trans, losslist=[], eulers=None, snr=1., body_euler=None, body_trans=None, ctf_embedding=None):
+        #2d to 3d suppose x is (N, 1, D, H, W)
+        B = x.shape[0]
+        #print(x.shape)
+        if ctf_embedding is not None:
+            ctf_embedding = None #self.ctf_embed_mlp(ctf_embedding).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+            #ctf_embedding = ctf_embedding.repeat(1, 1, self.intermediate_size, self.intermediate_size, self.intermediate_size)
+
+        pixrad = hp.max_pixrad(128)
         encs = []
         x3d_downs = []
         x3d_center = []
@@ -591,39 +699,75 @@ class Encoder(nn.Module):
             # convert to hopf
             #hopf = lie_tools.euler_to_hopf(euler_i)
             o_rot = lie_tools.hopf_to_SO3(euler01)
-
+            #o_rot = lie_tools.hopf_to_SO3(euler_i)
             # perturb z axis
-            rand_z = lie_tools.random_direction(1, pixrad*180/np.pi).to(o_rot.get_device())
-            rand_z = torch.transpose(o_rot, -2, -1) @ rand_z.unsqueeze(-1)
-            rand_z = rand_z.squeeze(-1)
-            # to radian
-            rand_e = lie_tools.direction_to_hopf(rand_z)
-            #new rotation
-            rot = lie_tools.hopf_to_SO3(rand_e.squeeze(0))
+            #rand_rot = lie_tools.random_biased_SO3(1, 3e3, o_rot.get_device())
+            #rot = o_rot @ rand_rot.squeeze()
 
+            rot = o_rot
+            #print(o_rot.shape, rand_rot.shape, o_rot @ rand_rot)
+            #rand_z = lie_tools.random_direction(1, pixrad*180/np.pi).to(o_rot.get_device())
+            #print(lie_tools.hopf_to_SO3(lie_tools.direction_to_hopf(rand_z)), rand_rot)
+            #rand_z = torch.transpose(o_rot, -2, -1) @ rand_z.unsqueeze(-1)
+            #rand_z = rand_z.squeeze(-1)
+            # to radian
+            #rand_e = lie_tools.direction_to_hopf(rand_z)
+            #new rotation
+            #rot = lie_tools.hopf_to_SO3(rand_e.squeeze(0))
             #print(rand_e-euler01, torch.acos((torch.diag(o_rot.T @ rot).sum() - 1)/2)*180/np.pi)
+
             # minus z hopf angle == z euler angle
             euler2 = -euler2
-            #pos = self.transformer_e.rotate(rot) # + 1)/2*(self.crop_vol_size - 1) #(B, 1, H, W, D, 3) x ( B, 1, 1, 3, 3) -> (B, 1, H, W, D, 3)
-            #if self.use_mask:
-            #    mask_2d = F.grid_sample(self.in_mask, pos, align_corners=ALIGN_CORNERS)
-            #    mask_2d = (torch.sum(mask_2d, axis=-3) > 0.).squeeze(1)
-
             # if using hopf angles, use positive angle, if using euler, use negative
-            x_i = self.transformer_e.rotate_2d(x[i], -euler2, mode='bicubic') #(1, 1, H, W)
+            #x_i = self.transformer_e.rotate_2d(x[i], -euler2, mode='bicubic') #(1, 1, H, W)
+
+            x_i = x[i:i+1]
+            # downsample volume if render_size < vol_size
+            if self.render_size < self.vol_size:
+                x_fft = fft.torch_rfft3_center(x_i, center=True)
+                x_fft = utils.crop_fft3d(x_fft, self.render_size)*(self.render_size/self.vol_size)**3
+                x_fft = self.translate_ft3d(x_fft, -trans[i:i+1]*self.render_size/self.vol_size)
+                b_factor = np.random.rand() - 0.25
+                x_fft_b = self.bfactor_blurring(x_fft, b_factor)
+                # x_i is randomly augmented
+                x_i = fft.torch_irfft3_center(x_fft_b, center=True)
+                # x_i_ori is the original image after shifting
+                x_i_ori = fft.torch_irfft3_center(x_fft, center=True)
+            else:
+                x_i_ori = x_i = x[i:i+1]
+            # translate volume in real space
+            #trans_i_int = trans[i].round()
+            #trans_i_frac = trans[i] - trans_i_int
+            #t_grid = self.transformer_e.translate(-trans[i]*2./(self.crop_vol_size-1))*self.crop_scale
+            #t_grid = self.transformer_e.translate(-trans[i]*self.scale/self.vol_size)*self.crop_scale
+            #x_i = F.grid_sample(x[i:i+1], t_grid, align_corners=ALIGN_CORNERS)
             #print(x_i.shape, rot.T.shape)
-            x3d_center.append(x_i.squeeze(1))#*mask_2d)
+            # translate volume in fourier space
+            #x_i = fft.torch_rfft3_center(x[i:i+1])
+            #x_i = self.translate_ft3d(x_i, -trans[i:i+1])
+            #x_i = fft.torch_irfft3_center(x_i)
+            # using bicubic sampling
+            #print(trans[i])
+            #x_i = self.bicubic_translate(x_i, -trans[i]*(self.render_size/self.vol_size)*2./(self.render_size - 1), -euler2, scale=1.)
+            x_i_ori = utils.crop_vol(x_i_ori, self.crop_vol_size)
+            x3d_center.append(x_i_ori.squeeze(1))
 
+            x_i = utils.crop_vol(x_i, self.crop_vol_size)
+            x_i = self.transformer_e.rotate_2d(x_i.squeeze(0), -euler2, mode='bicubic').unsqueeze(0) #(1, 1, H, W)
+
+
+            # data augmentation
             if self.training:
-                x_i = x_i*(0.75 + 0.5*torch.rand(1).float().to(x.get_device())) \
-                + 0.2*torch.randn(1).to(x.get_device()) #+ 0.05*torch.rand_like(x_i)
-
-            pos = self.transformer_e.rotate(rot.T) # + 1)/2*(self.crop_vol_size - 1) #(B, 1, H, W, D, 3) x ( B, 1, 1, 3, 3) -> (B, 1, H, W, D, 3)
+                x_i = x_i *(1. + snr*0.3*(torch.rand(1).float().to(x.get_device()) - 0.5)) \
+                    + 0.2*snr*torch.randn(1).to(x.get_device())
 
             # construct pseudo volume
-            x3d_i = x_i.unsqueeze(0).repeat(1, 1, self.crop_vol_size, 1, 1) #(N, C, D, H, W)
-
+            #x3d_i = x_i.unsqueeze(0).repeat(1, 1, self.crop_vol_size, 1, 1) #(N, C, D, H, W)
+            x3d_i = x_i
             # rotate the pseudo volume
+            pos = self.transformer_e.rotate(rot.T) #- trans_i_frac*self.scale/self.vol_size
+            # - 2.*trans[i]/(self.render_size-1) #(B, 1, H, W, D, 3) x ( B, 1, 1, 3, 3) -> (B, 1, H, W, D, 3)
+
             x3d_down = F.grid_sample(x3d_i, pos, align_corners=ALIGN_CORNERS)
             x3d_downs.append(x3d_down)
 
@@ -642,8 +786,15 @@ class Encoder(nn.Module):
 
         enc1 = self.down1(x3d_downs)
         #print(enc1.shape, self.out_channels, self.out_dim)
-        encs = enc1.view(B, self.out_dim ** 3 *self.out_channels)
-        encs = self.down2(encs)
+        enc1 = F.interpolate(enc1, size=self.intermediate_size, mode="trilinear", align_corners=ALIGN_CORNERS) # 12^3
+        #compute embeddings for coordinate
+        #coordinate_embeddings = self.coordinate_feature.get_embedding(self.random_matrix)
+        #coordinate_embeddings = self.fourier_mlp(coordinate_embeddings)
+        #print(coordinate_embeddings.shape, enc1.shape)
+        #enc2 = self.down2(torch.cat((enc1, ctf_embedding), dim=1))# + coordinate_embeddings)
+        enc2 = self.down2(enc1)# + coordinate_embeddings)# + ctf_embedding)# )
+        enc2 = enc2.view(B, self.out_dim ** 3 *self.out_channels)
+        encs = self.down3(enc2)
 
         mu = self.mu(encs)
         if self.training:
@@ -651,7 +802,7 @@ class Encoder(nn.Module):
             z = mu + torch.exp(logstd) * torch.randn(*logstd.size(), device=logstd.device)
             #z = mu
         else:
-            logstd = torch.tensor(0.).to(mu.device)
+            logstd = torch.zeros_like(mu).to(mu.device)
             z = mu
 
         losses = {}
@@ -662,7 +813,7 @@ class Encoder(nn.Module):
             #losses["kldiv"] = torch.mean(- logstd + 0.5 * mu ** 2 + 0.5 * torch.exp(2 * logstd), dim=-1)
             #losses["kldiv"] = torch.sum(-logstd, dim=-1) + 0.5*losses["std2"] + 0.5*losses["mu2"]
 
-        return {"z":z, "z_mu": mu, "losses": losses, "z_logstd": logstd, "rotated_x": x3d_center}
+        return {"z":z, "z_mu": mu, "losses": losses, "z_logstd": logstd, "rotated_x": x3d_center, "skip": enc2}
 
 
 class SpatialTransformer(nn.Module):
@@ -706,7 +857,18 @@ class SpatialTransformer(nn.Module):
         grid = torch.stack([xgrid, ygrid, zgrid], dim=-1).unsqueeze(0)
         self.register_buffer("grid", grid)
 
-        x_idx = torch.linspace(-1., 1., self.render_size) #[-s, s)
+        x_idx = torch.linspace(-1., 1., self.templateres//2) #[-s, s)
+        grid = torch.meshgrid(x_idx, x_idx, x_idx, indexing='ij')
+        xgrid = grid[2]
+        ygrid = grid[1]
+        zgrid = grid[0]
+        grid = torch.stack([xgrid, ygrid, zgrid], dim=-1).unsqueeze(0)
+        self.register_buffer("grid_coarse", grid)
+
+        self.scale = self.render_size/(self.templateres - 1)*2
+
+        #x_idx = torch.linspace(-1., 1., self.render_size) #[-s, s)
+        x_idx = torch.linspace(-1., 1., self.templateres) #[-s, s)
         grid  = torch.meshgrid(x_idx, x_idx, indexing='ij')
         xgrid = grid[1] #change fast [[0,1,2,3]]
         ygrid = grid[0]
@@ -718,12 +880,116 @@ class SpatialTransformer(nn.Module):
     def rotate(self, rot):
         return self.grid @ rot #(1, 1, H, W, D, 3) @ (N, 1, 1, 1, 3, 3)
 
+    def translate(self, trans):
+        if trans.shape[-1] == 2:
+            zero = torch.zeros_like(trans)[..., :1]
+            trans = torch.cat([trans, zero], dim=-1)
+        #trans = trans*self.scale #(n, 3)
+        return self.grid + trans #(1, 1, H, W, D, 3) @ (N, 1, 1, 1, 3, 3)
+
+    def translate_rotate(self, trans, rot):
+        # must scale trans by yourself
+        if trans.shape[-1] == 2:
+            zero = torch.zeros_like(trans)[..., :1]
+            trans = torch.cat([trans, zero], dim=-1)
+        return (self.grid + trans) @ rot #(1, 1, H, W, D, 3) @ (N, 1, 1, 1, 3, 3)
+
+    def multi_body_displace(self, rot_resi, coms, trans, tbody, radius=None):
+        # tbody should be added to grid
+        zero = torch.zeros_like(tbody)[..., :1]
+        tbody = tbody*self.scale
+        #tbody = torch.cat([tbody, zero], dim=-1)*self.scale #(n, 3)
+        tcom = -coms.unsqueeze(1) #@ torch.transpose(rot_ori.squeeze(1).squeeze(1), -1, -2) #coms: (n, 1, 3) x rot_resi: (n, 3, 3)
+        #tbody_r = (tbody.unsqueeze(1) @ rot_resi.detach()).squeeze(1)
+        #print(tbody_r)
+        tcom = tcom*self.scale
+        rot = rot_resi.unsqueeze(1).unsqueeze(1) #(1, 1, 1, 3, 3) x (n, 1, 1, 3, 3)
+        #map tbody to image frame tbody_img = tbody_r @ rot_resi.T @ rot_ori.T
+        tbody_img = ((tbody).unsqueeze(1) @ torch.transpose(rot.squeeze(1).squeeze(1), -1, -2)).squeeze(1)
+        #roted = (self.grid + (tcom + (trans*self.scale + tbody).unsqueeze(1)).unsqueeze(1).unsqueeze(1)) @ rot #+ (coms*self.scale).unsqueeze(1).unsqueeze(1).unsqueeze(1)
+        roted = (self.grid + (tcom + (trans*self.scale).unsqueeze(1)).unsqueeze(1).unsqueeze(1)) @ rot + tbody.unsqueeze(1).unsqueeze(1).unsqueeze(1)
+        grid_size = self.templateres
+        assert roted.shape == torch.Size([coms.shape[0], grid_size, grid_size, grid_size, 3])
+        #resample weight to new frame
+        radius = radius.unsqueeze(1).unsqueeze(1).unsqueeze(1) * self.scale
+        #mask_weights = roted - (coms*self.scale).unsqueeze(1).unsqueeze(1).unsqueeze(1)
+        #mask_weights = torch.exp(-(roted.detach().pow(2).sum(dim=-1, keepdim=True))*0.5/radius**2) + 1e-5
+        mask_weights = torch.exp(-1.5*(roted.detach().pow(2)/radius**2).sum(dim=-1, keepdim=True)) + 1e-5
+        mask_weights /= mask_weights.sum(dim=0, keepdim=True)
+        assert mask_weights.shape == torch.Size([coms.shape[0], grid_size, grid_size, grid_size, 1])
+        body_grid = (mask_weights*(roted + (coms*self.scale).unsqueeze(1).unsqueeze(1).unsqueeze(1))).sum(dim=0, keepdim=True)
+        return body_grid, tbody_img
+
+    def multi_body_grid(self, rot_ori, rot_resi, coms, trans, tbody, radius=None, encode=False, save=None, Apix=1.):
+        # tbody should be added to grid
+        zero = torch.zeros_like(tbody)[..., :1]
+        #tbody = tbody*self.scale
+        #tbody = torch.cat([tbody, zero], dim=-1)*self.scale #(n, 3)
+        # t + com is the rotated com
+        #print(tbody, coms)
+        tcom = (coms).unsqueeze(1) * self.scale
+        Rtcom = tcom @ torch.transpose(rot_ori.squeeze(1).squeeze(1), -1, -2) #coms: (n, 1, 3) x rot_resi: (n, 3, 3)
+        #tbody_r = (tbody.unsqueeze(1) @ rot_resi.detach()).squeeze(1)
+        #print(tbody_r)
+        rot_axis = lie_tools.rot_to_axis(rot_resi)
+        #tbody = tbody[...,:1]*rot_axis
+        rot = rot_ori@rot_resi.unsqueeze(1).unsqueeze(1) #(1, 1, 1, 3, 3) x (n, 1, 1, 3, 3)
+        #map tbody to image frame tbody_img = tbody_r @ rot_resi.T @ rot_ori.T
+        tbody_img = ((tbody).unsqueeze(1) @ torch.transpose(rot.squeeze(1).squeeze(1), -1, -2)).squeeze(1)
+        if not encode:
+            #roted = (self.grid + (tcom + (trans*self.scale + tbody).unsqueeze(1)).unsqueeze(1).unsqueeze(1)) @ rot #+ (coms*self.scale).unsqueeze(1).unsqueeze(1).unsqueeze(1)
+            roted = (self.grid_coarse + (-Rtcom + (trans).unsqueeze(1)).unsqueeze(1).unsqueeze(1)) @ rot + tbody.unsqueeze(1).unsqueeze(1).unsqueeze(1)
+
+        else:
+            roted = (self.grid_coarse - (coms*self.scale).unsqueeze(1).unsqueeze(1).unsqueeze(1))@torch.transpose(rot, -1, -2) \
+                    - (tcom + (trans*self.scale + tbody).unsqueeze(1)).unsqueeze(1).unsqueeze(1)
+        grid_size = self.templateres//2
+        assert roted.shape == torch.Size([coms.shape[0], grid_size, grid_size, grid_size, 3])
+        #resample weight to new frame
+        #weight = F.grid_sample(weight.squeeze().unsqueeze(1), roted, align_corners=ALIGN_CORNERS).squeeze().unsqueeze(-1)
+        #radius = (coms*self.scale).norm(dim=-1, keepdim=True) + 1e-5
+        #raidus = radius * self.scale
+        radius = radius.unsqueeze(1).unsqueeze(1).unsqueeze(1) * self.scale
+        #mask_weights = roted - (coms*self.scale).unsqueeze(1).unsqueeze(1).unsqueeze(1)
+        #mask_weights = torch.exp(-(roted.detach().pow(2).sum(dim=-1, keepdim=True))*0.5/radius**2) + 1e-5
+        mask_weights = torch.exp(-1.*(roted.detach().pow(2)/radius**2).sum(dim=-1, keepdim=True)) + 1e-5
+        mask_weights /= mask_weights.sum(dim=0, keepdim=True)
+        assert mask_weights.shape == torch.Size([coms.shape[0], grid_size, grid_size, grid_size, 1])
+        #sample_grid = self.grid_coarse @ rot_ori
+        #sample_grid = torch.permute(sample_grid, dims=[0,4,1,2,3])
+        #sample_grid = F.interpolate(sample_grid, size=self.templateres, mode="trilinear", align_corners=ALIGN_CORNERS)
+        #sample_grid = torch.permute(sample_grid, dims=[0,2,3,4,1])
+        #print((self.grid@rot_ori - sample_grid).norm())
+        #body_grid = (mask_weights*(roted + (coms*self.scale).unsqueeze(1).unsqueeze(1).unsqueeze(1))).sum(dim=0, keepdim=True)
+        body_grid = (mask_weights*(roted + (tcom).unsqueeze(1).unsqueeze(1))).sum(dim=0, keepdim=True)
+        # resample body_grid to target resolution
+        body_grid = torch.permute(body_grid, dims=[0,4,1,2,3])
+        body_grid = F.interpolate(body_grid, size=self.templateres, mode="trilinear", align_corners=ALIGN_CORNERS)
+        body_grid = torch.permute(body_grid, dims=[0,2,3,4,1])
+        #print(weight.min(), weight.max(), weight.mean(), 1./coms.shape[0])
+        #valid = ((weight > 1./coms.shape[0]).float()*weight).sum(dim=0, keepdim=True).squeeze(-1).unsqueeze(1)
+        #valid = (valid > 0.5).float()*valid
+        #self.save_mrc(valid, "mas", Apix=Apix)
+        valid = None
+        if save is not None:
+            tmp = ((mask_weights > 1./coms.shape[0]).float()*mask_weights).sum(dim=0)
+            self.save_mrc(tmp, save, Apix=Apix)
+        return body_grid, valid, tbody_img
+
+    def save_mrc(self, template, filename, Apix=1., flip=False):
+        with torch.no_grad():
+            dev_id = template.get_device()
+            template = template.squeeze()
+            if flip:
+                template = template.flip(0)
+            mrc.write(filename + str(dev_id) + ".mrc", template.detach().cpu().numpy(), Apix=Apix, is_vol=True)
+
     def rotate_2d(self, ref, euler, out_size=None, mode='bicubic'):
         #euler (B,)
         rot_ref = lie_tools.zrot(euler).unsqueeze(1) #(B, 1, 3, 3)
         #print(ref.shape, rot_ref.shape)
         #grid (1, 1, H, W, 3) x (B, 1, 3, 3) -> (1, B, H, W, 3)
-        #print(self.grid2d.shape, rot_ref.shape)
+        #print(self.grid2d.shape, ref.shape)
         if out_size is not None:
             head = (self.render_size - out_size)//2
             tail = head + out_size
@@ -733,6 +999,19 @@ class SpatialTransformer(nn.Module):
 
         pos_ref = grid_r @ rot_ref
         rotated_ref = F.grid_sample(ref, pos_ref[..., :2].squeeze(0), align_corners=ALIGN_CORNERS, mode=mode)
+        return rotated_ref
+
+    def translate_2d(self, ref, trans, rot=None, out_size=None, mode='bicubic'):
+        #grid (1, 1, H, W, 3) x (B, 1, 3, 3) -> (1, B, H, W, 3)
+        if rot is not None:
+            rot_ref = lie_tools.zrot(euler).unsqueeze(1)
+            grid_r = self.grid2d @ rot_ref
+            pos_ref = (grid_r[..., :2] + trans).squeeze(0)
+        else:
+            pos_ref = (self.grid2d[..., :2] + trans).squeeze(0)
+        if ref.shape[0] != pos_ref.shape[0]:
+            pos_ref = pos_ref.repeat(ref.shape[0], 1, 1, 1)
+        rotated_ref = F.grid_sample(ref, pos_ref, align_corners=ALIGN_CORNERS, mode=mode)
         return rotated_ref
 
     def rotate_euler(self, ref, euler):
@@ -765,6 +1044,14 @@ class SpatialTransformer(nn.Module):
         if pad_size == 0:
             return src
         return F.pad(src, (pad_size, pad_size, pad_size, pad_size))
+
+    def pad3d(self, src, out_size):
+        #pad the 2d output
+        src_size = src.shape[-1]
+        pad_size = (out_size - src_size)//2
+        if pad_size == 0:
+            return src
+        return F.pad(src, (pad_size, pad_size, pad_size, pad_size, pad_size, pad_size))
 
     def crop(self, src, out_size):
         #pad the 2d output
@@ -802,7 +1089,7 @@ class SpatialTransformer(nn.Module):
 class VanillaDecoder(nn.Module):
     def __init__(self, D, in_vol=None, Apix=1., template_type=None, templateres=256, warp_type=None, symm_group=None,
                  ctf_grid=None, fixed_deform=False, deform_emb_size=2, zdim=8, render_size=140,
-                 use_fourier=False, down_vol_size=140):
+                 use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0):
         super(VanillaDecoder, self).__init__()
         self.D = D
         self.vol_size = (D - 1)
@@ -813,9 +1100,9 @@ class VanillaDecoder(nn.Module):
         self.use_conv_template = False
         self.fixed_deform = fixed_deform
         self.crop_vol_size = down_vol_size
-        self.out_size = 128
         self.render_size = render_size
         self.use_fourier = use_fourier
+        self.tmp_prefix = tmp_prefix
 
         if symm_group is not None:
             self.symm_group = symm_groups.SymmGroup(symm_group)
@@ -838,14 +1125,35 @@ class VanillaDecoder(nn.Module):
             if self.use_fourier:
                 self.template = ConvTemplate(in_dim=self.zdim, outchannels=1, templateres=self.templateres)
             else:
-                self.template = ConvTemplate(in_dim=self.zdim, templateres=self.templateres, affine=False)
-                x_idx = torch.linspace(-1., 1., 96) #[-s, s)
+                self.num_bodies = num_bodies
+                self.scale = self.render_size/(self.crop_vol_size - 1)*2.
+                # render_size = crop_vol_size + pad
+                log(f"decoder: the output size, aka, render_size {self.render_size}, crop_vol_size, aka, the size before padding {self.crop_vol_size}, scale {self.scale}")
+                if masks_params is not None:
+                    self.num_bodies = masks_params["com_bodies"].shape[0]
+                    #remove com from relatives
+                    self.register_buffer("in_relatives", (masks_params["in_relatives"] - masks_params["com_bodies"])/self.vol_size)
+                    self.register_buffer("rotate_directions", masks_params["rotate_directions"]/self.vol_size)
+                    self.register_buffer("com_bodies", masks_params["com_bodies"])
+                    self.register_buffer("orient_bodies", masks_params["orient_bodies"])
+                    self.register_buffer("orient_bodiesT", torch.transpose(masks_params["orient_bodies"], 1, 2))
+                    self.register_buffer("principal_axes", masks_params["principal_axes"])
+                    self.register_buffer("principal_axesT", torch.transpose(masks_params["principal_axes"], 1, 2))
+                    self.register_buffer("A_rot90", lie_tools.yrot(torch.tensor(-90)))
+                    #scale change the original scale in render_size to the volume size after cropping
+                    self.register_buffer("radius", masks_params["radii_bodies"]/self.vol_size)
+                    log(f"decoder: com of bodies are {self.com_bodies}, rg of bodies are {self.radius*self.scale}, scale is {self.scale}")
+                    log(f"decoder: rotate_directions are {self.rotate_directions}, orient_bodies are {self.orient_bodies}")
+                #self.template = ConvTemplate(in_dim=self.zdim, templateres=self.templateres, affine=masks_params is not None, num_bodies=self.num_bodies)
+                self.template = ConvTemplate(in_dim=self.zdim, templateres=self.templateres, affine=True, num_bodies=self.num_bodies)
+                x_idx = torch.linspace(-1., 1., self.crop_vol_size) #[-s, s)
                 grid = torch.meshgrid(x_idx, x_idx, x_idx, indexing='ij')
                 xgrid = grid[2]
                 ygrid = grid[1]
                 zgrid = grid[0]
                 grid = torch.stack([xgrid, ygrid, zgrid], dim=-1).unsqueeze(0)
                 self.register_buffer("grid_affine_weight", grid)
+
         else:
             self.template = nn.Parameter(in_vol)
 
@@ -861,15 +1169,19 @@ class VanillaDecoder(nn.Module):
 
             self.fourier_transformer = healpix_sampler.SpatialTransformer(self.templateres, use_fourier=True, render_size=self.render_size)
         else:
-            #crop_vol_size is the size of volume with density of interest, render_size is the size of output image after padding zeros
+            # crop_vol_size is the size of volume with density of interest, which is obtained after cropping,
+            # render_size is obtained after padding cropped volume
+            # render_size also is equal to the size of downsampled experimental image
             self.transformer = SpatialTransformer(self.crop_vol_size, render_size=self.render_size)
             self.fourier_transformer = None #healpix_sampler.SpatialTransformer(self.crop_vol_size, use_fourier=True, render_size=self.crop_vol_size)
             if in_vol is not None:
                 log("decoder: loading mask {}, volume render size is {}, volume of interest is {}".format(in_vol.shape, self.render_size, self.crop_vol_size))
                 #resample input mask to render_size
-                mask_frac = (self.crop_vol_size - 4)/self.render_size
+                mask_frac = (self.crop_vol_size - 2)/self.render_size
                 crop_size = int(in_vol.shape[-1]*mask_frac)//2*2
                 crop_vol = self.transformer.crop(in_vol, crop_size).unsqueeze(0).unsqueeze(0)
+                #if self.num_bodies > 1:
+                #    crop_vol = self.transformer.crop(masks_params["consensus_mask"], crop_size).unsqueeze(0).unsqueeze(0)
 
                 in_vol_nonzeros = torch.nonzero(crop_vol.squeeze())
                 in_vol_mins, _ = in_vol_nonzeros.min(dim=0)
@@ -884,15 +1196,27 @@ class VanillaDecoder(nn.Module):
                 crop_vol = self.transformer.sample(crop_vol)
                 log("decoder: cropping mask from {} to {}, cropping fraction is {}, downsample to {}".format(in_vol.shape[-1], crop_size, mask_frac, crop_vol.shape))
                 self.register_buffer("ref_mask", crop_vol)
+                self.register_buffer("mask_sum", (crop_vol > 0).sum().detach())
 
-                apix_ori = self.Apix
-                self.Apix = (in_vol.shape[-1])/self.render_size*self.Apix
-                log("decoder: changing apix from {} to {}".format(apix_ori, self.Apix))
+                if masks_params is not None:
+                    # crop and downsample mask weights
+                    log(f"decoder: radius of coms are {(self.com_bodies/self.vol_size*self.scale).norm(dim=-1)}")
+                    #mask_weights = masks_params["weights"]
+                    #assert mask_weights.shape[-1] == in_vol.shape[-1] and mask_weights.shape[-1] == self.vol_size, \
+                    #        f"mask shape should agrees with consensus mask"
+                    #mask_weights = self.transformer.crop(mask_weights, crop_size).unsqueeze(1)
+                    #mask_weights = F.interpolate(mask_weights, size=self.crop_vol_size, mode="trilinear", align_corners=ALIGN_CORNERS)
+                    #log(f"decoder: downsample masks to {mask_weights.shape}, {mask_weights.min()}, {mask_weights.max()}")
+                    #self.register_buffer("mask_weights", mask_weights.squeeze().unsqueeze(-1))
+
+                self.apix_ori = self.Apix
+                self.Apix = self.vol_size/self.render_size*self.Apix
+                log("decoder: changing apix from {} to {}".format(self.apix_ori, self.Apix))
                 #self.ref_mask_com = (self.transformer.grid*self.ref_mask.unsqueeze(-1)).mean(dim=(0, 1, 2, 3, 4))
                 #print(self.ref_mask_com)
 
-            self.register_buffer("sphere_mask", (torch.sum(self.transformer.grid ** 2, dim=-1) < 1.).float())
-            self.register_buffer("mask_sum", (torch.sum(self.sphere_mask, axis=-3) > 0).sum().detach())
+            #self.register_buffer("sphere_mask", (torch.sum(self.transformer.grid ** 2, dim=-1) < 1.).float())
+            #self.register_buffer("mask_sum", (torch.sum(self.sphere_mask, axis=-3) > 0).sum().detach())
 
         self.warp_type = warp_type
 
@@ -914,6 +1238,23 @@ class VanillaDecoder(nn.Module):
         #symm_trans = self.symm_trans @ rots
         return symm_rots
 
+    def multi_body_grid(self, rot_ori, rot_resi, coms, trans, tbody, weight):
+        #print(self.grid_affine_weight.shape, t.shape, rot.shape, weight_32.shape)
+        zero = torch.zeros_like(tbody)[..., :1]
+        tbody = torch.cat([tbody, zero], dim=-1)*self.scale #(n, 3)
+        #print(rot_ori.shape, trans.shape, coms.shape)
+        tcom = (trans.unsqueeze(1) - coms.unsqueeze(1) @ torch.transpose(rot_ori.squeeze(1).squeeze(1), -1, -2)) #+ coms.unsqueeze(1) #coms: (n, 1, 3) x rot_resi: (n, 3, 3)
+        tcom = tcom/self.vol_size*self.scale
+        rot = rot_ori@rot_resi.unsqueeze(1).unsqueeze(1) #(1, 1, 1, 3, 3) x (n, 1, 1, 3, 3)
+        #print(rot_ori.shape, rot.shape, coms.shape, tcom, self.grid_affine_weight.shape, tbody)
+        # tbody should be added to grid
+        roted = (self.grid_affine_weight + (tcom + tbody.unsqueeze(1)).unsqueeze(1).unsqueeze(1)) @ rot \
+                    + (coms/self.vol_size*self.scale).unsqueeze(1).unsqueeze(1).unsqueeze(1)
+        grid_size = self.crop_vol_size
+        assert weight.shape == torch.Size([coms.shape[0], grid_size, grid_size, grid_size, 1]) \
+            and roted.shape == torch.Size([coms.shape[0], grid_size, grid_size, grid_size, 3])
+        grid = (weight*roted).sum(dim=0, keepdim=True)
+        return grid
 
     def affine_mixture(self, rot, t, weight):
         #print(weight.shape) #(64, 16, 16, 16)
@@ -1120,45 +1461,46 @@ class VanillaDecoder(nn.Module):
         #neighbor_euler1 = torch.cat([coords[:, 1].float(), neighbor_euler1], dim=-1)
 
         neighbor_eulers = torch.stack([neighbor_euler0, neighbor_euler1], dim=-1) #(s, neighbor, 2)
-        #print(neighbor_eulers)
         #flatten eulers
         neighbor_eulers_flatten = neighbor_eulers.view(-1, 2) #(s*neighbor, 2)
         return neighbor_eulers_flatten
 
     def lasso(self, template):
-        head = self.vol_bound[2] #28
+        head = self.vol_bound[2]
         tail  = template.shape[-1] - head + 1
-        head_y = self.vol_bound[1] #28
+        head_y = self.vol_bound[1]
         tail_y  = template.shape[-1] - head_y + 1
-        head_z = self.vol_bound[0] #1
+        head_z = self.vol_bound[0]
         tail_z  = template.shape[-1] - head_z + 1
         #print(head, head_y, head_z, tail, tail_y, tail_z)
         assert head >=1 and head_y >=1 and head_z >=1 and head < tail and head_y < tail_y and head_z < tail_z
-        return (template[:, :, head_z:tail_z, head_y:tail_y, head:tail]).abs()
+        cropped_template = template[:, :, head_z:tail_z, head_y:tail_y, head:tail].abs()
+        #return ((cropped_template) + 1e-1).log()
+        return cropped_template
 
     def total_variation(self, template, vol_bound=None, sqrt=True):
-        head = vol_bound[2] #28
+        head = vol_bound[2]
         tail  = template.shape[-1] - head + 1
-        head_y = vol_bound[1] #28
+        head_y = vol_bound[1]
         tail_y  = template.shape[-1] - head_y + 1
-        head_z = vol_bound[0] #1
+        head_z = vol_bound[0]
         tail_z  = template.shape[-1] - head_z + 1
         assert head >=1 and head_y >=1 and head_z >=1 and head < tail and head_y < tail_y and head_z < tail_z
         out = (template[:, :, head_z:tail_z, head_y:tail_y, head:tail] - template[:, :, head_z:tail_z, head_y:tail_y, head-1:tail-1])**2 + \
                   (template[:, :, head_z:tail_z, head_y:tail_y, head:tail] - template[:, :, head_z:tail_z, head_y-1:tail_y-1, head:tail])**2 + \
                   (template[:, :, head_z:tail_z, head_y:tail_y, head:tail] - template[:, :, head_z-1:tail_z-1, head_y:tail_y, head:tail])**2
         if sqrt:
+            #return (torch.sqrt(1e-8 + out) + 1e-2).log()
             return torch.sqrt(1e-8 + out)
         else:
             return out
 
-    def forward(self, rots, trans, z=None, in_template=None, euler=None, ref_fft=None, ctf=None,
-                others=None, save_mrc=False, refine_pose=True, euler_particles=None,):
+    def forward(self, rots, trans, z=None, in_template=None, euler=None, ref_fft=None, ctf_param=None,
+                others=None, save_mrc=False, refine_pose=True, body_euler=None, body_trans=None, ctf_grid=None, estimate_pose=False):
         if others is not None:
             others["y_fft"] = torch.view_as_complex(others["y_fft"])
         #ref_fft = torch.view_as_complex(ref_fft)
         #generate a projection
-        # global rotation
         if self.use_conv_template:
             #print((z[0] == z[1]).sum())
             template, affine = self.template(z)
@@ -1181,8 +1523,6 @@ class VanillaDecoder(nn.Module):
         if self.training:
             losses["l2"] = torch.mean(self.lasso(template)).unsqueeze(0)
             losses["tvl2"] = torch.mean(self.total_variation(template, vol_bound=self.vol_bound)).unsqueeze(0) #torch.tensor(0.).to(template.get_device())
-            if affine is not None:
-                losses["tvl2"] = losses["tvl2"] + torch.mean(self.total_variation(affine[0], vol_bound=[1,1,1], sqrt=False)).unsqueeze(0)
         else:
             losses["l2"] = torch.tensor(0.).to(z.device)
             losses["tvl2"] = torch.tensor(0.).to(z.device)
@@ -1202,28 +1542,22 @@ class VanillaDecoder(nn.Module):
         images = []
         refs = []
         masks = []
+        mask_sums = []
         euler_samples = []
         B = rots.shape[0]
         #theta = np.zeros((3,4), dtype=np.float32)
 
-        valid = self.sphere_mask #(torch.sum(self.transformer.grid ** 2, dim=-1) < 1.).float()
+        #valid = self.sphere_mask #(torch.sum(self.transformer.grid ** 2, dim=-1) < 1.).float()
         if not refine_pose:
             mask_i = self.ref_mask.repeat(ref_fft.shape[1], 1, 1, 1, 1)
             if len(euler.shape) == 2:
                 euler = euler.unsqueeze(1)
-        for i in range(B):
-            # compute affine transformation
-            if affine is not None:
-                affine_grid = torch.permute(self.grid_affine_weight, [0,4,1,2,3])
-                #print(affine_grid)
-                affine_grid = F.grid_sample(affine_grid, self.transformer.grid, align_corners=True)
-                affine_grid = torch.permute(affine_grid, [0,2,3,4,1])
-            #pos = F.affine_grid(torch.tensor(theta).unsqueeze(0), (1,1,self.vol_size,self.vol_size,self.vol_size))
-            #pos = self.grid @ rots[i]#.transpose(-1, -2)
-            #if not self.use_fourier:
-            #    pos = self.transformer.rotate(rots[i])
 
-            #valid = torch.prod((pos > -1.) * (pos < 1.), dim=-1).float()
+        body_rots_pred = []
+        body_rots = []
+        body_trans_pred = []
+        for i in range(B):
+            mask_sums.append(self.mask_sum)
 
             if self.fixed_deform:
                 if not self.use_fourier:
@@ -1241,37 +1575,131 @@ class VanillaDecoder(nn.Module):
                         #print(R, Rz - Rz1, Rz @ Rh)
 
                         rand_ang = (torch.rand(1, 1).to(euler.get_device()) - .5)*360
+                        #zero euler2
                         #rand_ang = torch.zeros(1, 1).to(euler.get_device())
+                        # random ang is just eluer2, which means we rotate the 3d volume to target pose directly !
+                        #rand_ang = euler_i[:, 2:]
 
                         euler2_sample_i = -euler_i[:, 2] #(1,) hopf angle == minus of euler angle
                         euler2 = euler2_sample_i + rand_ang.squeeze(1) # use minus if using euler
 
                         euler01 = euler_i[..., :2]
-                        neighbor_eulers = self.get_particle_hopfs(euler01, hp_order=64, depth=0)
+                        neighbor_eulers = self.get_particle_hopfs(euler01, hp_order=32, depth=0) #hp_order=64, depth=0)
 
                         len_euler = neighbor_eulers.shape[0]
-                        n_eulers = torch.cat([neighbor_eulers, rand_ang.repeat(len_euler, 1)], dim=-1)
-                        rot = lie_tools.hopf_to_SO3(n_eulers).unsqueeze(1).unsqueeze(1)
+                        #n_eulers = torch.cat([neighbor_eulers, rand_ang.repeat(len_euler, 1)], dim=-1)
+                        #rot = lie_tools.hopf_to_SO3(n_eulers).unsqueeze(1).unsqueeze(1)
+
+                        #reset rot to local samples
+                        zero_eulers = torch.zeros_like(euler01)
+                        local_sample = self.get_particle_hopfs(zero_eulers, hp_order=32, depth=0) #hp_order=64, depth=0)
+                        rot = lie_tools.hopf_to_SO3(local_sample).unsqueeze(1).unsqueeze(1)
 
                         i_euler = torch.cat([euler_i[..., :2], rand_ang], dim=-1)
                         rot_i = lie_tools.hopf_to_SO3(i_euler).unsqueeze(1).unsqueeze(1)
+                        t_i = trans[i:i+1, ...]
+                        t_i -= t_i#.round()
+
+                        # get the residual rotation, and body trans
+                        if self.num_bodies > 1:
+                            body_quat_i = affine[0][i, ...]
+                            #body_trans_i = affine[1][i, ...]/self.vol_size
+                            one = torch.ones_like(affine[1][i, :, :1])*8.
+                            body_trans_i = torch.cat([one, affine[1][i, ...]], dim=-1)
+                            body_trans_i = lie_tools.quaternions_to_SO3_wiki(body_trans_i)
+
+
+                            if body_euler is not None:
+                                body_euler_i = body_euler[i, ...] #(N_body, 3)
+                                body_trans_i_exp = body_trans[i, ...] #(N_body, 2)
+                                rot_resi_i_exp = lie_tools.euler_to_SO3(body_euler_i)
+                                rot_resi_i_exp = self.orient_bodiesT @ self.A_rot90 @ rot_resi_i_exp @ self.orient_bodies
+                                body_rots.append(rot_resi_i_exp)
+                            #print(rot_resi_i)
+                            rot_resi_i = lie_tools.quaternions_to_SO3_wiki(body_quat_i)
+
+                            # multiply rot_i by an estimated global rot
+                            # rot_i = rot_i @ rot_resi_i[self.num_bodies:, ...].unsqueeze(1).unsqueeze(1)
+                            global_trans_i = affine[1][i, self.num_bodies:, ...]
+                            #print(rot_resi_i, body_trans_i)
+
+                            rot_resi_i = self.orient_bodiesT @ rot_resi_i[:self.num_bodies, ...] @ self.orient_bodies
+                            #rot_resi_i = self.principal_axesT @ rot_resi_i[:self.num_bodies, ...] @ self.principal_axes
+                            # rotate com according to rotate direction
+                            body_trans_i = self.orient_bodiesT @ body_trans_i[:self.num_bodies, ...] @ self.orient_bodies
+                            body_trans_i = (body_trans_i @ self.rotate_directions.unsqueeze(-1)) - self.rotate_directions.unsqueeze(-1)
+                            body_trans_i = body_trans_i.squeeze(-1)
+                            body_rots_pred.append(rot_resi_i)
+                            #zero_eulers = torch.zeros_like(euler01)
+                            #local_sample = self.get_particle_hopfs(zero_eulers, hp_order=32, depth=0) #hp_order=64, depth=0)
+                            #rot = lie_tools.hopf_to_SO3(local_sample).unsqueeze(1).unsqueeze(1)
+                            #rot = torch.transpose(rot_i, -1, -2) @ rot
+                            #print(lie_tools.so3_to_hopf(rot.squeeze()), lie_tools.so3_to_hopf(rot_resi_i))
+                            #convert to multibody field
+                            #t_i = trans[i:i+1, ...]
+                            #t_i -= t_i.round()
+                            zero = torch.zeros_like(t_i[..., :1])
+                            #transform to the scale of cropped volume
+                            t_i_3d = torch.cat([t_i, zero], dim=-1)/self.vol_size*self.scale #(n, 3)
+                            affine_grid_i, valid, trans_img = self.transformer.multi_body_grid(rot_i, rot_resi_i, self.com_bodies/self.vol_size,
+                                                                             t_i_3d, body_trans_i, radius=self.radius,)
+
+                            body_trans_pred.append(trans_img[..., :2]*self.vol_size/self.scale)
+                            pos = self.transformer.rotate(rot_i)
+                            valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
+                            #if save_mrc and i == 0:
+                            #    self.save_mrc(valid, self.tmp_prefix+"mas")
+                        else:
+                            assert self.num_bodies == 0
+                            # rotation
+                            body_quat_i = affine[0][i, ...]
+                            rot_resi_i = lie_tools.quaternions_to_SO3_wiki(body_quat_i)
+                            # rotation corrected by mlp
+                            #rot_i = rot_i @ rot_resi_i[self.num_bodies:, ...].unsqueeze(1).unsqueeze(1)
+                            # translation
+                            global_trans_delta = affine[1][i, self.num_bodies:, ...]
+                            # transform the estimate global translation to experimental reference system
+                            R_global_trans_i = rot_i @ global_trans_delta.unsqueeze(-1)
+                            #print(R_global_trans_i.shape, rot_i.shape, global_trans_i.shape)
+
+                            #apply estimated global rotation and translation in this step
+                            #pos = self.transformer.translate_rotate(t_i/self.vol_size*self.scale, rot_i)
+                            if estimate_pose:
+                                #print(global_trans_delta)
+                                pos = self.transformer.rotate(rot_i) + global_trans_delta/self.vol_size*self.scale
+                            else:
+                                pos = self.transformer.rotate(rot_i)
+                            #valid = F.grid_sample(self.sphere_mask.unsqueeze(1), pos, align_corners=ALIGN_CORNERS)
+                            valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
+                            # convert body_rots_pred to hopf_angles
+                            rot_i_pred = lie_tools.so3_to_hopf(rot_i)
+                            body_rots_pred.append(rot_i_pred)
+                            body_trans_pred.append(R_global_trans_i.squeeze() + trans[i:i+1, ...])
 
                         #print(euler2.shape, neighbor_eulers.shape, rot.shape)
-                        ref_i = ref_fft[i:i+1,...].repeat(euler2.shape[0], 1, 1, 1)
+                        ref_i = ref_fft[i:i+1,...]
+                        #ref_i = ref_fft[i:i+1,...].repeat(euler2.shape[0], 1, 1, 1)
                         # convert neighbor_eulers to a list
                         euler_sample_i = neighbor_eulers#.repeat(2, 1)
                         euler2_sample_i = euler2_sample_i.unsqueeze(0).repeat(len_euler, 1).view(len_euler, -1)
                         euler_sample_i = torch.cat([euler_sample_i, -euler2_sample_i], dim=1)
                         #euler_samples.append(euler_sample_i)
 
-                        pos = self.transformer.rotate(rot_i)
-                        valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
                         if self.fourier_transformer is None:
                             template_i = template[i:i+1,...].repeat(rot.shape[0], 1, 1, 1, 1)
-                            if affine is not None:
-                                pos = affine_grid @ rot
+                            if self.num_bodies > 1:
+                                pos = affine_grid_i @ rot + global_trans_i/self.vol_size*self.scale
                             else:
-                                pos = self.transformer.rotate(rot)
+                                # if you want to translate the 3D reconstruction
+                                # rot represents the local perturbation
+                                #pos = self.transformer.translate_rotate(t_i/self.vol_size*self.scale, rot_i @ rot)
+                                # create the 3d grid for reconstruction
+                                #print(global_trans_delta)
+                                if estimate_pose:
+                                    pos = self.transformer.rotate(rot_i @ rot) + global_trans_delta/self.vol_size*self.scale
+                                else:
+                                    pos = self.transformer.rotate(rot_i @ rot)
+                                #pos = self.transformer.translate_rotate(t_i/self.vol_size*self.scale, rot_i @ rot)
                         else:
                             template_i = template[i:i+1,...]
                     else:
@@ -1291,6 +1719,7 @@ class VanillaDecoder(nn.Module):
                         euler_sample_i = euler_i#.repeat(2, 1)
                         #print(euler_sample_i, euler2_sample_i)
                         pos = self.transformer.rotate(rot)
+                        # the 3d mask after rotation
                         valid = F.grid_sample(mask_i, pos, align_corners=ALIGN_CORNERS)
                     #else:
                     #    euler_i = euler[i:i+1,...] #(B, 3)
@@ -1313,22 +1742,34 @@ class VanillaDecoder(nn.Module):
                     #    #    image.append(torch.sum(image_j, axis=-3).squeeze(0))
 
                     # rotate reference
-                    ref = self.transformer.rotate_2d(ref_i, -euler2).squeeze(1)
+                    if self.num_bodies >= 0:
+                        ref_i = self.transformer.rotate_2d(ref_i, -euler2, mode='bicubic').unsqueeze(0)
+                        #applying 3d mask here
+                        ref = ref_i*(valid>0)
+                        ref = ref.squeeze(1)
+                        # if you want to translate the 2d experimental image
+                        #ref = self.transformer.translate_2d(ref_i, -t_i/self.vol_size*2.).squeeze(1)
+                    else:
+                        pass
+                        #ref = self.transformer.rotate_2d(ref_i, -euler2).squeeze(1)
                     refs.append(ref)
                     #pos = self.transformer.rotate(rot) # + 1)/2*(self.crop_vol_size - 1) #(B, 1, H, W, D, 3) x ( B, 1, 1, 3, 3) -> (B, 1, H, W, D, 3)
-                    mask_i = (torch.sum(valid, axis=-3) > 0).detach().squeeze(1)
-                    masks.append(mask_i)
+                    #mask_i = (torch.sum(valid, axis=-3) > 0).detach().squeeze(1)
+                    #masks.append(mask_i)
 
                     # sample reference image from template
                     if self.fourier_transformer is None:
                         vol = F.grid_sample(template_i, pos, align_corners=ALIGN_CORNERS)
                         #vol = self.transformer.rotate_euler(template_i, euler_i)
-                        #pos = self.transformer.rotate(rot_i)
-                        #valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
                         #vol = vol*valid
-                        #image = torch.sum(vol, axis=-2)
-                        image = torch.sum(vol, axis=-3).squeeze(1)
-                        # Mask template using moving mask, generate projections
+                        #image = torch.sum(vol, axis=-3)#.squeeze(1)
+                        image = self.transformer.pad3d(vol, self.render_size)
+                        #print('image shape: ', image.shape)
+                        # if you want to translate the 2d reconstruction
+                        #image = self.transformer.translate_2d(image, (t_i)/self.vol_size*2.)
+                        image = image.squeeze(1)
+                        #if save_mrc and i == 0:
+                        #    self.save_mrc(vol[0,...], self.tmp_prefix, flip=False)
                     else:
                         # sample reference image from template using fourier transform
                         template_FT_i = self.fourier_transformer.fourier_transform(template_i)
@@ -1396,7 +1837,7 @@ class VanillaDecoder(nn.Module):
                     ref = ref.squeeze(0)
                     refs.append(ref)
 
-            elif self.warp_type == "affine" or self.warp_type is None:
+            elif self.warp_type == "affine":
                 if self.use_fourier:
                     image, ref = self.fourier_transformer.hp_sample_(template_FT,
                                                                euler[i:i+1,...], ref_fft[i:i+1,...], ctf[i:i+1,...],
@@ -1405,22 +1846,80 @@ class VanillaDecoder(nn.Module):
                     ref = ref.squeeze(0) #(1, B, H, W)
                     refs.append(ref)
             else:
-                raise RuntimeError
+                if refine_pose:
+                    euler_i = euler[i:i+1,...] #(B, 3)
+
+                    rand_ang = (torch.rand(1, 1).to(euler.get_device()) - .5)*360
+
+                    euler2_sample_i = -euler_i[:, 2] #(1,) hopf angle == minus of euler angle
+                    euler2 = euler2_sample_i + rand_ang.squeeze(1) # use minus if using euler
+
+                    euler01 = euler_i[..., :2]
+                    neighbor_eulers = self.get_particle_hopfs(euler01, hp_order=32, depth=0) #hp_order=64, depth=0)
+
+                    len_euler = neighbor_eulers.shape[0]
+                    n_eulers = torch.cat([neighbor_eulers, rand_ang.repeat(len_euler, 1)], dim=-1)
+                    rot = lie_tools.hopf_to_SO3(n_eulers).unsqueeze(1).unsqueeze(1)
+
+                    i_euler = torch.cat([euler_i[..., :2], rand_ang], dim=-1)
+                    rot_i = lie_tools.hopf_to_SO3(i_euler).unsqueeze(1).unsqueeze(1)
+
+                    ref_i = ref_fft[i:i+1,...].repeat(euler2.shape[0], 1, 1, 1)
+                    # convert neighbor_eulers to a list
+                    euler_sample_i = neighbor_eulers#.repeat(2, 1)
+                    euler2_sample_i = euler2_sample_i.unsqueeze(0).repeat(len_euler, 1).view(len_euler, -1)
+                    euler_sample_i = torch.cat([euler_sample_i, -euler2_sample_i], dim=1)
+                    pos = self.transformer.rotate(rot_i)
+                    valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
+                    template_i = template.repeat(rot.shape[0], 1, 1, 1, 1)
+                    if affine is not None:
+                        pos = affine_grid @ rot
+                    else:
+                        pos = self.transformer.rotate(rot)
+                    vol = F.grid_sample(template_i, pos, align_corners=ALIGN_CORNERS)
+                    image = torch.sum(vol, axis=-3).squeeze(1)
+                    # rotate reference
+                    ref = self.transformer.rotate_2d(ref_i, -euler2).squeeze(1)
+                    refs.append(ref)
+                    mask_i = (torch.sum(valid, axis=-3) > 0).detach().squeeze(1)
+                    masks.append(mask_i)
+                else:
+                    raise RuntimeError
             images.append(image)
         images = torch.stack(images, 0)
         refs   = torch.stack(refs, 0)
-        masks  = torch.stack(masks, 0)
+        #print("images and refs shape: ", images.shape, refs.shape)
+        #masks  = torch.stack(masks, 0)
+        mask_sums = torch.stack(mask_sums, 0)
         if len(euler_samples):
             euler_samples = torch.stack(euler_samples, 0)
+        if len(body_rots_pred):
+            if len(body_rots):
+                body_rots = torch.stack(body_rots, 0)
+            body_rots_pred = torch.stack(body_rots_pred, 0)
+            body_trans_pred = torch.stack(body_trans_pred, 0)
+            #print(body_rots_pred.shape, body_trans_pred.shape,)
+            body_poses_pred = [body_rots_pred, body_rots, body_trans_pred, body_trans]
+        else:
+            body_poses_pred = None
         # pad to original size
         if not self.use_fourier:
-            images = self.transformer.pad(images, self.render_size)
+            images = self.transformer.pad3d(images, self.render_size)
+            images_fft = fft.torch_rfft3_center(images)
+            # compute ctf here
+            freqs = ctf_grid.freqs2d.unsqueeze(0)/self.Apix
+            c = ctf.compute_3dctf(images_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False)
+            images_fft = images_fft*c.unsqueeze(1)
+            images_fft = fft.torch_irfft3_center(images_fft)
+            images = utils.crop_vol(images, self.crop_vol_size)
+
         if save_mrc:
             if self.use_fourier:
-                self.save_mrc(template_FT[0:1, ...], 'reference', flip=True)
+                self.save_mrc(template_FT[0:1, ...], self.tmp_prefix, flip=False)
             else:
-                self.save_mrc(template[0:1, ...], 'ref', flip=False)
-        return {"y_recon": images, "losses": losses, "y_ref": refs, "mask": masks, "euler_samples": euler_samples}
+                self.save_mrc(template[0:1, ...], self.tmp_prefix, flip=False)
+        return {"y_recon_ori": images, "y_recon": images_fft,"losses": losses, "y_ref": refs, "mask_sum": mask_sums,
+                "affine": body_poses_pred,}
 
     def save_mrc(self, template, filename, flip=False):
         with torch.no_grad():
@@ -1444,10 +1943,32 @@ class VanillaDecoder(nn.Module):
     @torch.no_grad()
     def save(self, filename, z=None, encoding=None, flip=False, Apix=1.):
         if self.template_type == "conv":
-            template, _ = self.template(z)
-            if self.transformer.templateres != self.templateres:
+            template, affine = self.template(z)
+            if affine is not None:
+                body_quat_i = affine[0][0, ...]
+                one = torch.ones_like(affine[1][0, :, :1])*8.
+                body_trans_i = torch.cat([one, affine[1][0, ...]], dim=-1)
+                body_trans_i = lie_tools.quaternions_to_SO3_wiki(body_trans_i)
+
+                i_euler = torch.zeros(1, 2).to(body_quat_i.get_device())
+                rot_i = lie_tools.hopf_to_SO3(i_euler).unsqueeze(1).unsqueeze(1)
+
+                rot_resi_i = lie_tools.quaternions_to_SO3_wiki(body_quat_i)
+                # multiply rot_i by an estimated global rot
+                #global_trans_i = affine[1][0, self.num_bodies:, ...]
+
+                rot_resi_i = self.orient_bodiesT @ rot_resi_i[:self.num_bodies, ...] @ self.orient_bodies
+                # rotate com according to rotate direction
+                body_trans_i = self.orient_bodiesT @ body_trans_i[:self.num_bodies, ...] @ self.orient_bodies
+                body_trans_i = (body_trans_i @ self.rotate_directions.unsqueeze(-1)) - self.rotate_directions.unsqueeze(-1) #+ self.in_relatives.unsqueeze(-1)
+                body_trans_i = body_trans_i.squeeze(-1)
+                zero_3d = torch.zeros(1, 3).to(body_quat_i.get_device())
+                affine_grid_i, valid, trans_img = self.transformer.multi_body_grid(rot_i, rot_resi_i, self.com_bodies/self.vol_size,
+                                                                                zero_3d, body_trans_i, radius=self.radius,)
+                template = F.grid_sample(template, affine_grid_i, align_corners=ALIGN_CORNERS)
+
+            elif self.transformer.templateres != self.templateres:
                 #resample
-                #template = F.grid_sample(template, self.grid, align_corners=True)
                 template = self.transformer.sample(template)
             template = template.squeeze(0).squeeze(0)
         else:
@@ -1896,97 +2417,6 @@ class VAE(nn.Module):
             img = img.view(B,self.D, self.D)
         return y_hat, img, z_mu, z_std, w_eps, tmu, tlogvar
 
-class TiltVAE(nn.Module):
-    def __init__(self,
-            lattice, tilt,
-            qlayers, qdim,
-            players, pdim,
-            no_trans=False,
-            enc_mask=None
-            ):
-        super(TiltVAE, self).__init__()
-        self.lattice = lattice
-        self.D = lattice.D
-        self.in_dim = lattice.D*lattice.D if enc_mask is None else enc_mask.sum()
-        self.enc_mask = enc_mask
-        assert qlayers > 3
-        self.encoder = ResidLinearMLP(self.in_dim,
-                                      qlayers-3,
-                                      qdim,
-                                      qdim,
-                                      nn.ReLU)
-        self.so3_encoder = SO3reparameterize(2*qdim, 3, qdim) # hidden_dim -> SO(3) latent variable
-        self.trans_encoder = ResidLinearMLP(2*qdim, 2, qdim, 4, nn.ReLU)
-        self.decoder = FTSliceDecoder(3, self.D, players, pdim, nn.ReLU)
-        assert tilt.shape == (3,3), 'Rotation matrix input required'
-        self.tilt = torch.tensor(tilt)
-        self.no_trans = no_trans
-
-    def reparameterize(self, mu, logvar):
-        if not self.training:
-            return mu
-        std = torch.exp(.5*logvar)
-        eps = torch.randn_like(std)
-        return eps*std + mu
-
-    def eval_volume(self, norm):
-        return self.decoder.eval_volume(self.lattice.coords, self.D, self.lattice.extent, norm)
-
-    def encode(self, img, img_tilt):
-        img = img.view(img.size(0), -1)
-        img_tilt = img_tilt.view(img_tilt.size(0), -1)
-        if self.enc_mask is not None:
-            img = img[:,self.enc_mask]
-            img_tilt = img_tilt[:,self.enc_mask]
-        enc1 = self.encoder(img)
-        enc2 = self.encoder(img_tilt)
-        enc = torch.cat((enc1,enc2), -1) # then nn.ReLU?
-        z_mu, z_std = self.so3_encoder(enc)
-        rot, w_eps = self.so3_encoder.sampleSO3(z_mu, z_std)
-        if self.no_trans:
-            tmu, tlogvar, t = (None,None,None)
-        else:
-            z = self.trans_encoder(enc)
-            tmu, tlogvar = z[:,:2], z[:,2:]
-            t = self.reparameterize(tmu, tlogvar)
-        return z_mu, z_std, w_eps, rot, tmu, tlogvar, t
-
-    def forward(self, img, img_tilt):
-        B = img.size(0)
-        z_mu, z_std, w_eps, rot, tmu, tlogvar, t = self.encode(img, img_tilt)
-        if not self.no_trans:
-            t = t.unsqueeze(1) # B x 1 x 2
-            img = self.lattice.translate_ht(img.view(B,-1), -t)
-            img_tilt = self.lattice.translate_ht(img_tilt.view(B,-1), -t)
-            img = img.view(B, self.D, self.D)
-            img_tilt = img_tilt.view(B, self.D, self.D)
-
-        # rotate lattice by rot.T
-        x = self.lattice.coords @ rot # R.T*x
-        y_hat = self.decoder(x)
-        y_hat = y_hat.view(-1, self.D, self.D)
-
-        # tilt series pair
-        x = self.lattice.coords @ self.tilt @ rot
-        y_hat2 = self.decoder(x)
-        y_hat2 = y_hat2.view(-1, self.D, self.D)
-        return y_hat, y_hat2, img, img_tilt, z_mu, z_std, w_eps, tmu, tlogvar
-
-# fixme: this is half-deprecated (not used in TiltVAE, but still used in tilt BNB)
-class TiltEncoder(nn.Module):
-    def __init__(self, in_dim, nlayers, hidden_dim, out_dim, activation):
-        super(TiltEncoder, self).__init__()
-        assert nlayers > 2
-        self.encoder1 = ResidLinearMLP(in_dim, nlayers-2, hidden_dim, hidden_dim, activation)
-        self.encoder2 = ResidLinearMLP(hidden_dim*2, 2, hidden_dim, out_dim, activation)
-        self.in_dim = in_dim
-
-    def forward(self, x, x_tilt):
-        x_enc = self.encoder1(x)
-        x_tilt_enc = self.encoder1(x_tilt)
-        z = self.encoder2(torch.cat((x_enc,x_tilt_enc),-1))
-        return z
-
 class ResidLinearMLP(nn.Module):
     def __init__(self, in_dim, nlayers, hidden_dim, out_dim, activation):
         super(ResidLinearMLP, self).__init__()
@@ -2022,36 +2452,6 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.main(x)
-
-# Adapted from soumith DCGAN
-class ConvEncoder(nn.Module):
-    def __init__(self, hidden_dim, out_dim):
-        super(ConvEncoder, self).__init__()
-        ndf = hidden_dim
-        self.main = nn.Sequential(
-            # input is 1 x 64 x 64
-            nn.Conv2d(1, ndf, 4, 2, 1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf) x 32 x 32
-            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
-            #nn.BatchNorm2d(ndf * 2),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 16 x 16
-            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
-            #nn.BatchNorm2d(ndf * 4),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
-            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
-            #nn.BatchNorm2d(ndf * 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(ndf * 8, out_dim, 4, 1, 0, bias=False),
-            # state size. out_dims x 1 x 1
-        )
-    def forward(self, x):
-        x = x.view(-1,1,64,64)
-        x = self.main(x)
-        return x.view(x.size(0), -1) # flatten
 
 class SO3reparameterize(nn.Module):
     '''Reparameterize R^N encoder output to SO(3) latent variable'''
