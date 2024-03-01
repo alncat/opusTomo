@@ -8,6 +8,7 @@ import argparse
 import pickle
 from datetime import datetime as dt
 import math
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -64,7 +65,6 @@ def add_args(parser):
     group.add_argument('--datadir', type=os.path.abspath, help='Path prefix to particle stack if loading relative paths from a .star or .cs file')
     group.add_argument('--relion31', action='store_true', help='Flag if relion3.1 star format')
     group.add_argument('--lazy-single', default=True, action='store_true', help='Lazy loading if full dataset is too large to fit in memory')
-    group.add_argument('--lazy', action='store_true', help='Memory efficient training by loading data in chunks')
     group.add_argument('--preprocessed', action='store_true', help='Skip preprocessing steps if input data is from cryodrgn preprocess_mrcs')
     group.add_argument('--max-threads', type=int, default=16, help='Maximum number of CPU cores for FFT parallelization (default: %(default)s)')
 
@@ -245,7 +245,7 @@ def _unparallelize(model):
 def sample_neighbors(posetracker, data, euler, rot, ind, ctf_params, ctf_grid, grid, args, W, out_size):
     device = euler.get_device()
     B = euler.shape[0]
-    mus, idices, top_mus, neg_mus = posetracker.sample_neighbors(euler.cpu(), ind.cpu(), num_pose=8)
+    mus, idices, top_mus, neg_mus = posetracker.sample_full_neighbors(euler.cpu(), ind.cpu(), num_pose=8)
     other_euler = None #posetracker.get_euler(idices).to(device).view(B, -1, 3)
     other_rot, other_tran = None, None #posetracker.get_pose(idices)
     other_y, other_y_fft = None, None
@@ -280,9 +280,11 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         z_mu, z_logvar, z = 0., 0., 0.
 
     # add bfactors to ctf_params, the second from last column stores bfactor, the last column stores scale
-    c[...,-2] = c[...,-2] + args.bfactor*(4*np.pi**2)
+    #random_b = np.random.rand()*1.5
+    random_b = np.random.gamma(1., 0.6)
+    c[...,-2] = c[...,-2] + (args.bfactor+random_b)*(4*np.pi**2)
 
-    plot = args.plot and it % (args.log_interval) == B
+    plot = args.plot and it % (args.log_interval*2) == B
     if plot:
         f, axes = plt.subplots(2, 3)
     # decode
@@ -342,8 +344,8 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         # set the encoding of each particle
         if args.encode_mode == "grad":
             # keep only the compositional encoding
-            z_mu = encout["z_mu"][:, :args.zdim]
-            z_logstd = encout["z_logstd"][:, :args.zdim]
+            z_mu = encout["z_mu"]#[:, :args.zdim]
+            z_logstd = encout["z_logstd"]#[:, :args.zdim]
             #z = encout["encoding"]
         y_recon_ori = decout["y_recon_ori"]
         # retrieve mask
@@ -416,10 +418,13 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
     top_euler = None
     if C > 1:
         y_recon2 = (y_recon**2).sum(dim=(-1,-2,-3)).view(B, -1)
-        l2_diff = (-2.*y_recon*y).sum(dim=(-1,-2,-3)).view(B, -1) + y_recon2
+        l2_diff = (-2.*y_recon*y).sum(dim=(-1,-2,-3)).view(B, -1)
+        #l2_diff_std = l2_diff.std().detach()
+        #print(l2_diff_std/2., W*0.125)
+        l2_diff = l2_diff + y_recon2
         #print(l2_diff)
         #print(y_recon.shape, y.shape, mask_sum.shape, l2_diff)
-        probs = F.softmax(-l2_diff.detach()/(W*0.15), dim=-1).detach()
+        probs = F.softmax(-l2_diff.detach()/(W*0.125), dim=-1).detach()
         #print(probs)
         #get argmax
         #inds = torch.argmax(probs, dim=-1, keepdim=True)
@@ -475,7 +480,8 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         mu2 = losses["mu2"]
     if "std2" in losses:
         std2 = losses["std2"]
-        z_snr = (mu2/std2)
+        #z_snr = (mu2/std2)
+        z_snr = std2
         #z_mu_diff = z_mu.unsqueeze(1) - z_mu.unsqueeze(0) #(B, B, z)
         #print(z_mu_diff.shape, z_mu.shape)
         #logvar_diff = z_logstd.unsqueeze(1) - z_logstd.unsqueeze(0) #(B, B, z)
@@ -484,9 +490,9 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
 
     #print(losses["kldiv"].shape, losses["tvl2"].shape)
 
-    lamb = args.lamb * (1. - torch.exp(-torch.clamp((snr.detach()/0.01)**2, max=16)))*torch.clamp(snr.abs().sqrt().detach(), max=1.)
+    lamb = args.lamb * (1. - torch.exp(-torch.clamp((snr.detach()/0.01)**2, max=16))) #*torch.clamp(snr.abs().sqrt().detach(), max=1.)
     eps = 1e-3
-    kld, mu2 = utils.compute_kld(z_mu, z_logstd)
+    #kld, mu2 = utils.compute_kld(z_mu, z_logstd)
     #cross_corr = utils.compute_cross_corr(z_mu)
     loss = gen_loss + beta_control*beta*(kld)/mask_sum + torch.clamp(snr.abs().sqrt().detach(), max=0.5)*torch.mean(1e-1*losses['tvl2'] + 3e-1*losses['l2'])/(mask_sum)
     if body_poses_pred is not None:
@@ -528,10 +534,11 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         #group_stat.plot_variance(ind[0])
         log(f"mask_sum {mask_sum.detach().cpu()}")
         torch.set_printoptions(precision=3, sci_mode=False, linewidth=120)
-        print(probs)
+        #print(probs)
         torch.set_printoptions(profile='default')
         #print(logvar_diff.mean().detach(), z_mu_diff2.mean().detach(), var_diff.mean().detach())
-        plt.show()
+        plt.savefig(args.tmp_prefix+'.png')
+        #plt.show()
 
     return loss, gen_loss, snr, mu2.mean(), z_snr.mean(), rot_loss, tran_loss, top_euler, y2.mean()
 
@@ -699,22 +706,13 @@ def main(args):
         args.use_real = args.encode_mode == 'conv'
         args.real_data = args.pe_type == 'vanilla'
 
-        if args.lazy:
-            #assert args.preprocessed, "Dataset must be preprocesed with `cryodrgn preprocess_mrcs` in order to use --lazy data loading"
-            assert not args.ind, "For --lazy data loading, dataset must be filtered by `cryodrgn preprocess_mrcs`"
-            #data = dataset.PreprocessedMRCData(args.particles, norm=args.norm)
-            raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
-        elif args.lazy_single:
+        if args.lazy_single:
             data = dataset.LazyTomoMRCData(args.particles, norm=args.norm,
                                        real_data=args.real_data, invert_data=args.invert_data,
                                        ind=ind, keepreal=args.use_real, window=False,
                                        datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac)
         else:
-            data = dataset.MRCData(args.particles, norm=args.norm,
-                                   invert_data=args.invert_data, ind=ind,
-                                   keepreal=args.use_real, window=args.window,
-                                   datadir=args.datadir, relion31=args.relion31,
-                                   max_threads=args.max_threads, window_r=args.window_r)
+            raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
 
     Nimg = data.N
     D = data.D #data dimension
@@ -917,6 +915,7 @@ def main(args):
     else:
         log(f'loading train validation split from {args.split}')
         rand_split = torch.load(args.split)
+        assert len(rand_split) == Nimg, "the split file should have length {Nimg}"
     Nimg_train = int(Nimg*(1. - args.valfrac))
     Nimg_test = int(Nimg*args.valfrac)
     train_split, val_split = rand_split[:Nimg_train], rand_split[Nimg_train:]
@@ -939,7 +938,8 @@ def main(args):
     global_it = 0
     bfactor = args.bfactor
     lamb = args.lamb
-    args.log_interval = args.batch_size*20
+    if args.log_interval % args.batch_size != 0:
+        args.log_interval = args.batch_size*10
 
     for epoch in range(start_epoch, num_epochs):
         t2 = dt.now()
@@ -965,8 +965,10 @@ def main(args):
         log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
                         lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
 
-        for minibatch in data_generator:
-            ind = minibatch[-1].to(device)
+        loop = tqdm(enumerate(data_generator), total=len(data_generator), leave=True, colour='green', file=sys.stdout)
+        for batch_idx, minibatch in loop:
+        #for minibatch in data_generator:
+            ind = minibatch[-1]#.to(device)
             y = minibatch[0][0].to(device)
             ctf_param = minibatch[0][1].float().to(device)
             #apixs = torch.ones(ctf_param.shape[:-1]).to(device)*args.angpix
@@ -1038,16 +1040,22 @@ def main(args):
             snr_accum += snr*B
             loss_accum += loss*B
 
+            #if batch_it % args.log_interval == 0:
+            #    log('# [Train Epoch: {}/{}] [{}/{} images] ' #gen_loss={:.6f}, '\
+            #        'snr2_mu={:.3f}, beta={:.3f}, '                               \
+            #        'loss={:.4f}, l1={:.3f}, tv={:.3f}, '                     \
+            #        'mu={:.3f}, std={:.3f}, gen_loss_mu={:.4f}, ' \
+            #        'gen_loss_std={:.3f}, mse_mu={:.3f}, mse_std={:.3f}, ' \
+            #        'rot_mu={:.4f}, rot_std={:.4f}, trans_mu={:.4f}, trans_std={:.4f}'.format(epoch+1, num_epochs, batch_it,
+            #                                        Nimg_train, snr_ema, beta, loss, l1_loss, tv_loss,
+            #                                         np.sqrt(mu2), np.sqrt(std2), gen_loss_ema, np.sqrt(gen_loss_var_ema),
+            #                                        mse_ema, np.sqrt(mse_var_ema), mmd_ema, np.sqrt(mmd_var_ema), c_mmd_ema, np.sqrt(c_mmd_var_ema)))
+            loop.set_description(f'Train Epoch: [{epoch+1}/{num_epochs}]')
+            loop.set_postfix(beta=beta, loss=loss, snr=snr, mu=np.sqrt(mu2), std=np.sqrt(std2),)
             if batch_it % args.log_interval == 0:
-                log('# [Train Epoch: {}/{}] [{}/{} images] ' #gen_loss={:.6f}, '\
-                    'snr2_mu={:.3f}, beta={:.3f}, '                               \
-                    'loss={:.4f}, l1={:.3f}, tv={:.3f}, '                     \
-                    'mu={:.3f}, std={:.3f}, gen_loss_mu={:.4f}, ' \
-                    'gen_loss_std={:.3f}, mse_mu={:.3f}, mse_std={:.3f}, ' \
-                    'rot_mu={:.4f}, rot_std={:.4f}, trans_mu={:.4f}, trans_std={:.4f}'.format(epoch+1, num_epochs, batch_it,
-                                                    Nimg_train, snr_ema, beta, loss, l1_loss, tv_loss,
-                                                     np.sqrt(mu2), np.sqrt(std2), gen_loss_ema, np.sqrt(gen_loss_var_ema),
-                                                    mse_ema, np.sqrt(mse_var_ema), mmd_ema, np.sqrt(mmd_var_ema), c_mmd_ema, np.sqrt(c_mmd_var_ema)))
+                tqdm.write("Additional info at {}, l1={:.5f}, tv={:.5f}, snr={:.4f}, mse={:.4f}, gen_loss={:.5f}".format(
+                                        batch_it, l1_loss, tv_loss, snr_ema, mse_ema, gen_loss_ema), file=sys.stdout)
+
             if batch_it % (args.log_interval*10) == 0:
                 out_z = '{}/z.{}.pkl'.format(args.outdir, epoch)
                 log('save {}'.format(out_z))
@@ -1063,7 +1071,9 @@ def main(args):
 
         # validation
         gen_loss_accum, snr_accum, loss_accum = 0, 0, 0
-        for minibatch in val_data_generator:
+        loop = tqdm(enumerate(val_data_generator), total=len(val_data_generator), leave=True, file=sys.stdout)
+        for batch_idx, minibatch in loop:
+        #for minibatch in val_data_generator:
             ind = minibatch[-1]
             yt = None
             y = minibatch[0][0].to(device)

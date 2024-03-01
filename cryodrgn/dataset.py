@@ -4,13 +4,49 @@ from torch.utils import data
 import os
 import multiprocessing as mp
 from multiprocessing import Pool
+import torch.nn.functional as F
 
 from . import fft
 from . import mrc
 from . import utils
 from . import starfile
+from . import lie_tools
 
 log = utils.log
+def load_structs(mrcs_txt_star, datadir):
+    '''
+    Load particle stack from a file containing paths to .mrcs files
+
+    datadir (str or None): Base directory overwrite for .star or .cs file parsing
+    '''
+    # not exactly sure what the default behavior should be for the data paths if parsing a starfile
+    try:
+        star = np.loadtxt(mrcs_txt_star, dtype='S4')
+        #read in the list of struct files
+        #read in the mainchains of all structures
+        particles = []
+        sidechains = []
+        sidechain_lens = []
+        maps = []
+        filenames = []
+        print(star)
+        for i in range(len(star)):
+            particles.append(np.load(datadir+'/main4/'+star[i].astype('U')+'.main4.npy'))
+            sidechains.append(np.load(datadir+'/main4/'+star[i].astype('U')+'.side9.npy'))
+            sidechain_lens.append(np.load(datadir+'/main4/'+star[i].astype('U')+'.side9l.npy'))
+            #map_i = (datadir + '/EMD_' + star[i].astype('U')[0] + '/' + star[i].astype('U') + '/' + 'emd_normalized_map.mrc')
+            map_i = (datadir + '/' + star[i].astype('U') + '/' + 'deposited.mrc')
+            vol_i, header_i = mrc.parse_tomo(map_i)
+            #correct_order = header_i.get_order()
+            #particles[-1] = np.stack([particles[-1][:, correct_order[0]], particles[-1][:, correct_order[1]], particles[-1][:, correct_order[2]]], axis=-1)
+            #if np.any(vol_i.origin != 0.):
+            print(star[i].astype('U'), vol_i.Apix, vol_i.origin, vol_i.shape, header_i.get_order())
+            maps.append(vol_i)
+            filenames.append(star[i].astype('U'))
+    except Exception as e:
+        raise RuntimeError(e)
+    return maps, particles, filenames, sidechains, sidechain_lens
+
 def load_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
     '''
     Load particle stack from either a .mrcs file, a .star file, a .txt file containing paths to .mrcs files, or a cryosparc particles.cs file
@@ -58,6 +94,192 @@ def load_particles(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
         particles, _ = mrc.parse_mrc(mrcs_txt_star, lazy=lazy)
     return particles
 
+class LazyStructMRCData(data.Dataset):
+    '''
+    Class representing an .mrcs stack file -- images loaded on the fly
+    '''
+    def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
+                 datadir=None, apix=1.125):
+        #assert not keepreal, 'Not implemented error'
+        particles, structs, filenames, sidechains, sidechain_lens = load_structs(mrcfile, datadir=datadir)
+        assert len(particles) == len(structs)
+        N = len(particles)
+        ny, nx, nz = particles[0].get().shape
+        log('Loaded {} images, the first one is of dimension {}x{}x{}'.format(N, ny, nx, nz))
+        self.particles = particles
+        self.sidechains = sidechains
+        self.sidechain_lens = sidechain_lens
+        self.filenames = filenames
+        self.N = N
+        self.invert_data = invert_data
+        self.real_data = real_data
+        #if norm is None:
+        #    norm = self.estimate_normalization()
+        self.norm = norm
+        self.apix = apix
+        self.structs = structs
+        self.training_cubic_size = 64
+        self.D = self.training_cubic_size + 1#set D to training size
+        self.training_length = 512
+        x_idx = torch.linspace(-1., 1., self.training_cubic_size) #[-s, s)
+        grid = torch.meshgrid(x_idx, x_idx, x_idx, indexing='ij')
+        xgrid = grid[2]
+        ygrid = grid[1]
+        zgrid = grid[0]
+        self.grid = torch.stack([xgrid, ygrid, zgrid], dim=-1).unsqueeze(0) #(1, D, H, W, 3)
+
+    def estimate_normalization(self, n=100):
+        assert self.real_data
+        n = min(n,self.N)
+        imgs = np.asarray([np.mean(self.particles[i].get()) for i in range(0,self.N, self.N//n)])
+        log('first image: {}'.format(imgs[0]))
+        norm = [np.mean(imgs), np.std(imgs)]
+        norm[0] = 0
+        return norm
+
+    def get(self, i):
+        sample_R = lie_tools.random_biased_SO3(1, bias=0.25) #(1, 3, 3)
+        grid_R = self.grid @ sample_R.unsqueeze(1).unsqueeze(1)
+        img = self.particles[i].get()
+        stru = self.structs[i]
+        sidechains = self.sidechains[i]
+        sidechain_lens = self.sidechain_lens[i]
+        ori_apix = self.particles[i].Apix
+        origin = self.particles[i].origin
+        order = [2 - x for x in self.particles[i].order]
+        order.reverse()
+        #order = self.particles[i].order
+        stru = stru - origin*ori_apix
+        sidechains = sidechains - origin*ori_apix
+        #stru = stru + origin*ori_apix
+        #sidechains = sidechains + origin*ori_apix
+
+        #NOTE: permute the map to get correct order
+        img = np.transpose(img, axes=order)
+        #print(self.filenames[i], img.shape, order)
+
+        center = np.array(img.shape)//2
+        min_coords = np.min(stru/ori_apix, axis=0).astype(np.int32)
+        #if np.any(min_coords < 0):
+        #    stru = stru + center*ori_apix
+        #    min_coords = np.min(stru/ori_apix, axis=0).astype(np.int32)
+        mean_coords = np.mean(stru/ori_apix, axis=0).astype(np.int32)
+        min_coords = np.min(stru/ori_apix, axis=0).astype(np.int32)
+        max_coords = np.max(stru/ori_apix, axis=0).astype(np.int32)
+        coord_range = max_coords - min_coords
+
+        #compute crop size
+        scale = ori_apix/self.apix
+        crop_size = int(self.training_cubic_size/scale)
+        assert np.all(max_coords >= crop_size), f"{self.filenames[i]}, {min_coords}, {max_coords}, {origin}"
+
+        #print(self.filenames[i], ori_apix, self.particles[i].origin)
+        #for j in range(3):
+        #    if max_coords[j] - crop_size - 2 < min_coords[j]:
+        #        min_coords[j] = max_coords[j] - crop_size
+        #print("coords: ", min_coords, max_coords, img.shape, mean_coords)
+        #assert mean_coords == center, f"{stru.shape}, {mean_coords}, {center}"
+        #assert np.all(min_coords > 0), f"{self.filenames[i]}, {min_coords}, {max_coords}"
+        L = len(stru)//4
+        assert len(stru) % 4 == 0 and L > 0
+        stru = stru.reshape(L, 4, 3)
+
+        #start = [np.random.randint(max(min_coords[j]-4, 0), max(max_coords[j]-crop_size, min_coords[j])) for j in range(3)]
+        start_idx = np.random.randint(L)
+        start = (stru[start_idx, 1, :]/ori_apix).astype(np.int32)
+        #the start must fill a cubic of size crop_size
+        start = np.minimum(np.array(img.shape) - crop_size, start - crop_size//2)
+        start = np.maximum(start, 0)
+        #start = np.array(start)
+        end = np.array([crop_size]*3) + start
+        #print("sampled: ", start, end, img.shape)
+        sidechains = sidechains[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
+        sidechain_lens = sidechain_lens[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
+        stru = stru[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
+
+        #crop struct to 512 long
+        max_len = 512
+        if stru.shape[0] > max_len:
+            crop_idx = np.random.randint(0, stru.shape[0]-max_len)
+            stru = stru[crop_idx:crop_idx+max_len]
+            sidechains = sidechains[crop_idx:crop_idx+max_len]
+            sidechain_lens = sidechain_lens[crop_idx:crop_idx+max_len]
+        assert stru.shape[0] > 0, f"{self.filenames[i]}, {stru.shape}"
+
+        #NOTE: remember the x y z cooresponds to 2, 1, 0 in index
+        img = img[start[2]:end[2],
+                  start[1]:end[1],
+                  start[0]:end[0]]
+        output_size = int(img.shape[-1]*scale)
+        #print(output_size, self.particles[i].Apix, self.apix)
+        #cropping fourier
+        img = torch.from_numpy(img)
+        #img = F.interpolate(img.unsqueeze(0).unsqueeze(0), size=[self.training_cubic_size]*3, mode='trilinear', align_corners=utils.ALIGN_CORNERS)
+        #sample R
+        #print(img.shape, grid_R.shape)
+        img = F.grid_sample(img.unsqueeze(0).unsqueeze(0), grid_R, mode='bilinear', align_corners=utils.ALIGN_CORNERS)
+        img = (img - img.mean())/(img.std() + 1e-5)
+        img = img.squeeze()
+        #select structure that is inside the box
+        #stru = stru[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
+        #center stru
+        #stru = torch.from_numpy(stru).float()
+        center = (self.training_cubic_size - 1.)/2.
+        stru = stru - (start)*ori_apix - center*self.apix
+        stru = stru @ np.transpose(sample_R.numpy(), [0, 2, 1]) #(L, 4, 3), (1, 3, 3)
+        #stru = stru + (crop_size/2)*ori_apix
+        stru = stru + center*self.apix
+
+        #sidechain_lens_o = sidechain_lens
+        sidechain_lens = sidechain_lens[np.logical_and(np.all(stru[:, 1, :] < self.training_cubic_size*self.apix, axis=-1), np.all(stru[:, 1, :] >= 0., axis=-1))]
+        #sidechains_o = sidechains
+        sidechains = sidechains[np.logical_and(np.all(stru[:, 1, :] < self.training_cubic_size*self.apix, axis=-1), np.all(stru[:, 1, :] >= 0., axis=-1))]
+
+        stru = stru[np.logical_and(np.all(stru[:, 1, :] < self.training_cubic_size*self.apix, axis=-1), np.all(stru[:, 1, :] >= 0., axis=-1))]
+
+        #retrieve sidechains
+        sidechains = sidechains.reshape(stru.shape[0]*10, 3)
+        sidechain_lens = sidechain_lens.reshape(stru.shape[0]*10)
+        sidechains = sidechains[sidechain_lens]
+
+        sidechains = sidechains - (start)*ori_apix - center*self.apix
+        sidechains = sidechains @ np.transpose(sample_R.numpy(), [0, 2, 1]) #(L, 4, 3), (1, 3, 3)
+        sidechains = sidechains + center*self.apix
+        #if self.filenames[i] == '6WCA':
+        #    print(sidechains_o)
+
+        #convert to a single list
+        #sidechains_out = None
+        #for j in range(len(sidechains)):
+        #    if sidechain_lens[j] > 0:
+        #        if sidechains_out is None:
+        #            sidechains_out = sidechains[j, :sidechain_lens[j]]
+        #        else:
+        #            sidechains_out = np.concatenate([sidechains_out, sidechains[j, :sidechain_lens[j]]], axis=0)
+        #if sidechains_out is None:
+        #    print(sidechains_o, sidechain_lens_o)
+        return img, stru, sidechains, self.filenames[i]
+
+    def get_batch(self, batch,):
+        imgs = []
+        strus = []
+        sidechains = []
+        filenames = []
+        for i in range(len(batch)):
+            img, stru, sidechain, filename = self.get(batch[i])
+            imgs.append(img)
+            strus.append(stru)
+            sidechains.append(sidechain)
+            filenames.append(filename)
+        return np.concatenate(imgs, axis=0), strus, sidechain, filenames
+
+    def __len__(self):
+        return self.N
+
+    # the getter of the dataset
+    def __getitem__(self, index):
+        return self.get(index), index
+
 class LazyTomoMRCData(data.Dataset):
     '''
     Class representing an .mrcs stack file -- images loaded on the fly
@@ -83,18 +305,6 @@ class LazyTomoMRCData(data.Dataset):
         self.norm = norm
         log('Image Mean, Std are {} +/- {}'.format(*self.norm))
         self.window = window_cos_mask(ny, window_r, .95) if window else None
-        if in_mem:
-            log('Reading all images into memory!')
-            #downsample images
-            particles = []
-            self.down_size = int((ny*downfrac)//2)*2
-            down_scale = self.down_size/ny
-            log(f'downsample to {self.down_size}')
-            for i in range(0, self.N):
-                particles.append(torch.tensor(self.particles[i].get()).unsqueeze(0))
-            self.particles = torch.concat(particles, dim=0)
-            print(self.particles.shape)
-            #self.particles = np.asarray([self.particles[i].get() for i in range(0, self.N)])
         self.in_mem = in_mem
         self.ctfs = np.stack(ctfs, axis=0)
         print("ctf is of shape: ", self.ctfs.shape)
@@ -111,29 +321,10 @@ class LazyTomoMRCData(data.Dataset):
         return norm
 
     def get(self, i):
-        if self.in_mem:
-            part = self.particles[i]
-            ctf = self.ctfs[i]
-            if self.down_size != self.D-1:
-                #padding zeros
-                part = utils.pad_fft(part, self.D-1)
-                part = torch.fft.ifftshift(part, dim=(-2))
-                part = fft.torch_ifft2_center(part)
-            return part, ctf
-            #return self.particles[i]
-        else:
-            part = self.particles[i].get()
-            #part *= -1/self.norm[1]
-            ctf = self.ctfs[i]
-            return part, ctf
-        img = self.particles[i].get()
-        if self.real_data:
-            return img
-        if self.window is not None:
-            img *= self.window
-        if self.invert_data: img *= -1
-        img = (img - self.norm[0])/self.norm[1]
-        return img
+        part = self.particles[i].get()
+        #part *= -1/self.norm[1]
+        ctf = self.ctfs[i]
+        return part, ctf
 
     def get_batch(self, batch):
         imgs = []
@@ -244,6 +435,30 @@ class LazyMRCData(data.Dataset):
 
     def __getitem__(self, index):
         return self.get(index), index
+
+class SplitBatchSampler(data.Sampler):
+    def __init__(self, batch_size, ind, split, rank=0, size=1):
+        #self.weights = torch.as_tensor(weights)
+        self.batch_size = batch_size
+        #filter poses_ind not in split
+        ind = ind[np.isin(ind.numpy(), split.numpy())]
+        self.num_samples = len(ind)
+        #filter particles not in this rank
+        ind_size = self.num_samples//size
+        self.ind = ind[rank*ind_size:(rank+1)*ind_size]
+        self.num_samples = len(self.ind)
+        print("num_samples: ", self.num_samples)
+        print(self.ind)
+
+    def __iter__(self,):
+        rand_perms = torch.randperm(self.num_samples)
+        #print("rand_perms: ", rand_perms)
+        for i in range(self.num_samples//self.batch_size):
+            sample_ind = rand_perms[i*self.batch_size:(i+1)*self.batch_size]
+            yield self.ind[sample_ind]
+
+    def __len__(self,):
+        return self.num_samples//self.batch_size
 
 class ClassSplitBatchSampler(data.Sampler):
     def __init__(self, batch_size, poses_ind, split):

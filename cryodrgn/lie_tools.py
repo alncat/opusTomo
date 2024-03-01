@@ -192,9 +192,10 @@ def SO3_to_quaternions_wiki(r):
     return quaternions.view(*batch_dims, 4)
 
 
-def quaternions_to_SO3_wiki(q):
+def quaternions_to_SO3_wiki(q, normalize=True):
     '''Normalizes q and maps to group matrix.'''
-    q = q / q.norm(p=2, dim=-1, keepdim=True)
+    if normalize:
+        q = q / q.norm(p=2, dim=-1, keepdim=True)
     w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
 
     return torch.stack([

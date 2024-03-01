@@ -49,7 +49,7 @@ def ncc_loss(y_true, y_pred, win=None, ndims=2):
     win = [9] * ndims if win is None else win
 
     # compute filters
-    sum_filt = torch.ones([1, 1, *win]).to("cuda")
+    sum_filt = torch.ones([1, 1, *win]).to(y_true.get_device())#to("cuda")
 
     pad_no = math.floor(win[0]/2)
 
@@ -780,3 +780,356 @@ def zero_sphere(vol):
     vol[tmp] = 0
     return vol
 
+def get_label_frame(backbone):
+    # backbone (1, L, 4, 3) 1.coor 2.N, CA, C
+    x1 = backbone[:, :, 0, :,] # N
+    x2 = backbone[:, :, 1, :,] # CA
+    x3 = backbone[:, :, 2, :,] # C
+    v1 = x3 - x2
+    v1 /= torch.norm(v1, dim=-1, keepdim=True) # (1, L, 3)
+    v2 = x1 - x2
+    #v2p = torch.einsum("ijbl,ijbl->jbl", v1, v2) # (1, L, 3)
+    v2p = torch.einsum("bli,bli->bl", v1, v2)
+    v2p = v2p.unsqueeze(-1) # (1, 1, 1, L)
+    v2 = v2 - v2p * v1
+    v2 /= torch.norm(v2, dim=-1, keepdim=True) # (3, 1, 1, L)
+    v3 = torch.cross(v1, v2, dim=-1)
+    return torch.stack([v1, v2, v3], dim=-1) # (1, L, 3 ,3)
+
+def get_loss_fape(pred_rots, pred_trans, pred, target_rots, target_trans, target, l1_clamp_distance=10, epsilon=1e-4):
+    # pred_rots, pred_trans, pred, target_rots, target_trans, target all have shapes as described in the comments
+
+    # pred #(1, L, 4, 3), pred_rots #(1, L, 3, 3)
+    # Adjusting the operations for PyTorch
+    #print(pred.shape, pred[0,0,])
+    pred = pred.unsqueeze(2) - pred_trans.unsqueeze(1)  # (1, L, L, 4, 3)
+    #invrot_pred = torch.einsum("ijbl,icblk->jcblk", pred_rots, pred)  # (3, 3, b, L, L)
+    invrot_pred = torch.einsum("blji,blkcj->blkci", pred_rots, pred)
+
+    target = target.unsqueeze(2) - target_trans.unsqueeze(1)
+    #target = target.unsqueeze(3) - target_trans.unsqueeze(4)
+    invrot_target = torch.einsum("blji,blkcj->blkci", target_rots, target)
+    #invrot_target = torch.einsum("ijbl,icblk->jcblk", target_rots, target)
+    lit_coords = torch.tile(torch.tensor([[[[-0.525, 1.363, 0.],
+                                                [0., 0., 0.],
+                                                [1.526, -0., -0.],
+                                                [2.2, -0.4, 0.9]]]]), (1, 1, 1, 1))
+    #print("invrot", invrot_target[0,0,0],)# invrot_target[0, 5, 5])
+    #print("lit_coords: ", lit_coords)
+    fape_diff = invrot_pred - invrot_target
+    fape_diff = fape_diff * fape_diff
+    fape_diff = torch.sqrt(torch.sum(fape_diff, dim=3) + epsilon)  # (L, L, c, 3)
+    fape_diff = torch.mean(torch.minimum(fape_diff, torch.tensor(l1_clamp_distance)))
+
+    return fape_diff
+
+def convert_to_coords(rots, trans):
+    # Literal coordinates initialization
+    device = rots.get_device()
+    L = rots.shape[1]
+    lit_coords = torch.tile(torch.tensor([[[[-0.525, 1.363, 0.],
+                                                [0., 0., 0.],
+                                                [1.526, -0., -0.],
+                                                [-0.529, -0.774, -1.205]]]]), (1, L, 1, 1)).to(device)
+
+    pred_backbone = torch.einsum("blij,blkj->blki", rots, lit_coords)
+    #print(pred_backbone.shape, trans.shape)
+    pred_backbone = pred_backbone + trans # trans (1, L, 1, 3)
+
+    return pred_backbone
+
+def xyzgram_from_positions(rots, positions,):
+    #positions #(1, L, 4, 3)
+    positions = positions.unsqueeze(-3) - positions.unsqueeze(-4)  # (1, L, L, 4, 3)
+    return positions.squeeze(-2)
+    #invrot_pred = torch.einsum("ijbl,icblk->jcblk", pred_rots, pred)  # (3, 3, b, L, L)
+    #invrot_pos = torch.einsum("blji,blkcj->blkci", rots, positions)
+    #return invrot_pos.squeeze(-2)
+
+
+def dgram_from_positions(positions, num_bins=15, min_bin=3.25, max_bin=20.75):
+    """Compute distogram from amino acid positions in PyTorch.
+
+    Arguments:
+      positions: [N_res, 3] Position coordinates.
+      num_bins: The number of bins in the distogram.
+      min_bin: The left edge of the first bin.
+      max_bin: The left edge of the final bin.
+
+    Returns:
+      Distogram with the specified number of bins.
+    """
+
+    def squared_difference(x, y):
+        return torch.pow(x - y, 2)
+
+    lower_breaks = np.linspace(min_bin, max_bin, num_bins)
+    lower_breaks = np.square(lower_breaks)
+    upper_breaks = np.concatenate([lower_breaks[1:],
+                                   np.array([1e8], dtype=np.float32)], axis=-1)
+
+    device = positions.get_device()
+    # Convert numpy arrays to torch tensors
+    lower_breaks = torch.tensor(lower_breaks, dtype=torch.float32).to(device)
+    upper_breaks = torch.tensor(upper_breaks, dtype=torch.float32).to(device)
+    #print("CA", positions.shape)
+
+    dist2 = torch.sum(
+        squared_difference(
+            positions.unsqueeze(-2),
+            positions.unsqueeze(-3)),
+        dim=-1, keepdim=True)
+
+    #print(lower_breaks, upper_breaks)
+    dgram = (torch.gt(dist2, lower_breaks) & torch.lt(dist2, upper_breaks)).float()
+    return dist2.squeeze(-1), dgram
+
+def gather_from_3dmap(img, indices):
+    #convert xyz indices to 1d index
+    Z, Y, X, D = img.shape
+    indices_1d = indices[:, 0] + indices[:, 1]*X + indices[:, 2]*Y*X
+    device = img.get_device()
+    print(img.shape)
+    img = img.view(-1, D)
+    return torch.index_select(img, 0, indices_1d.long().to(device))
+
+def get_accuracy_lddt(predictions, references, L, bb_size, cutoff=15., per_residue=False):
+    """
+    cutoff: maximum distance for a pair of points to be included
+    per_residue: return the lddt score for each residue
+    """
+    # predictions, references (1, L, 3, 3)
+
+    X = predictions.reshape(L * bb_size, 3)
+    Y = references.reshape(L * bb_size, 3)
+
+    dmat_true = Y.unsqueeze(-2) - Y.unsqueeze(-3)
+    dmat_true = torch.sqrt(1e-10 + torch.sum(torch.pow(dmat_true, 2), dim=-1))
+
+    dmat_predicted = X.unsqueeze(-2) - X.unsqueeze(-3)
+    dmat_predicted = torch.sqrt(1e-10 + torch.sum(torch.pow(dmat_predicted, 2), dim=-1))
+
+    dist_to_score = (dmat_true < cutoff).float() * (1 - torch.eye(L * bb_size).to(dmat_true.get_device()))
+
+    dist_l1 = torch.abs(dmat_true - dmat_predicted)
+
+    score = 0.25 * ((dist_l1 < 0.5).float() +
+                    (dist_l1 < 1.0).float() +
+                    (dist_l1 < 2.0).float() +
+                    (dist_l1 < 4.0).float())
+
+    if per_residue:
+        norm = torch.sum(dist_to_score, dim=-1)
+        norm = torch.sum(norm.view(L, bb_size), dim=-1)
+        dist_to_score = torch.sum(dist_to_score * score, dim=-1)
+        dist_to_score = torch.sum(dist_to_score.view(L, bb_size), dim=-1)
+        score = (1e-10 + dist_to_score) / (1e-10 + norm)
+    else:
+        norm = 1. / (1e-10 + torch.sum(dist_to_score, dim=(-2, -1)))
+        score = norm * (1e-10 + torch.sum(dist_to_score * score, dim=(-2, -1)))
+
+    return score
+
+def get_loss_drmsd(predictions, references, L, bb_size, resi_sep, epsilon=1e-4):
+    """
+    dRMSD loss calculation in PyTorch.
+    """
+    # Transpose the predictions and references
+    #predictions = predictions.permute(2, 3, 1, 0)  # (1, L, 3, 3)
+
+    # Reshape
+    X = predictions.squeeze(2)
+    Y = references.squeeze(2)
+
+    # Create distance matrix mask
+    #dmat_mask = torch.ones([L * bb_size, L * bb_size]).to(predictions.get_device())
+    #dmat_mask = dmat_mask - (torch.tril(dmat_mask, diagonal=-resi_sep) + torch.triu(dmat_mask, diagonal=resi_sep))
+    dmat_mask = (torch.rand([L*bb_size, L*bb_size]) < 0.1).float().to(predictions.get_device())
+    #print(dmat_mask)
+
+    # Compute true distance matrix
+    dmat_true = Y[:, :, None, :] - Y[:, None, :, :]  # (L*bb_size, L*bb_size, 3)
+    dmat_true = torch.sqrt(1e-10 + torch.sum(torch.pow(dmat_true, 2), dim=-1))
+    #dmat_true = torch.tril(dmat_true, diagonal=resi_sep) + torch.triu(dmat_true, diagonal=resi_sep)
+
+    # Compute predicted distance matrix
+    dmat_predicted = X[:, :, None, :] - X[:, None, :, :]
+    dmat_predicted = torch.sqrt(1e-10 + torch.sum(torch.pow(dmat_predicted, 2), dim=-1))
+    #dmat_predicted = torch.tril(dmat_predicted, diagonal=resi_sep) + torch.triu(dmat_predicted, diagonal=resi_sep)
+
+    # Calculate dRMSD loss
+    #dmat_error = torch.relu(torch.abs(dmat_true - dmat_predicted) - 0.1 * dmat_true)*dmat_mask
+    dmat_error = (dmat_true - dmat_predicted).abs()*dmat_mask
+    dmat_loss = torch.sum(dmat_error) / (X.shape[0]*torch.sum(dmat_mask) + epsilon)
+
+    return dmat_loss
+
+def get_lddt_loss(logit_lddt, lddt_acc_res, bins=50):
+    """
+    Compute the lDDT loss in PyTorch.
+    """
+
+    # Stop gradient for lddt_acc_res
+    lddt_acc_res = lddt_acc_res.detach()  # (L,)
+
+    # Calculate bin index
+    bin_index = (lddt_acc_res * bins).long()
+    bin_index = torch.clamp(bin_index, max=bins - 1)
+
+    # Create one-hot encoding for bin index
+    bin_index_one_hot = F.one_hot(bin_index, num_classes=bins)  # (L, 50)
+
+    # Compute softmax cross-entropy loss
+    lddt_loss = F.cross_entropy(logit_lddt, bin_index, reduction='mean')
+
+    return lddt_loss
+
+def create_mask(coords, angpix, D=64):
+    mask = torch.zeros([D, D, D]).to(coords.get_device())
+    label_indices = torch.clamp((coords.squeeze()/angpix).round(), min=0, max=D-2).long()
+    label_indices = label_indices.view(-1, 3)
+    x = label_indices[:, 0]
+    y = label_indices[:, 1]
+    z = label_indices[:, 2]
+    length = 3
+    for i in range(-length, length+1):
+        for j in range(-length, length+1):
+            for k in range(-length, length+1):
+                xtmp = torch.clamp(x + i, min=0, max=D-1)
+                ytmp = torch.clamp(y + j, min=0, max=D-1)
+                ztmp = torch.clamp(z + k, min=0, max=D-1)
+                mask[ztmp, ytmp, xtmp] = 1.
+    return mask
+
+def create_map(coords, angpix, D=64):
+    #mask = torch.zeros([D, D, D]).to(coords.get_device())
+    mask = torch.zeros(D*D*D).to(coords.get_device())
+    label_indices = torch.clamp((coords.squeeze()/angpix).round(), min=0, max=D-1).long()
+    label_indices = label_indices.view(-1, 3)
+    x = label_indices[:, 0]
+    y = label_indices[:, 1]
+    z = label_indices[:, 2]
+    length = 1
+    for i in range(-length, length+1):
+        for j in range(-length, length+1):
+            for k in range(-length, length+1):
+                xtmp = torch.clamp(x + i, min=0, max=D-1)
+                ytmp = torch.clamp(y + j, min=0, max=D-1)
+                ztmp = torch.clamp(z + k, min=0, max=D-1)
+                indices = xtmp + ytmp*D + ztmp*D*D
+                values = torch.ones(label_indices.shape[0]).to(coords.get_device())*np.exp(-(i**2 + j**2 + k**2)*1.)
+                assert torch.all(indices < D*D*D)
+                mask.scatter_add_(0, indices, values)
+                #mask[ztmp, ytmp, xtmp] += np.exp(-(i**2 + j**2 + k**2)*1.)
+    mask = torch.clamp(mask, min=0., max=1.)
+    return mask.view(D, D, D)
+
+def get_dice_loss(image, coords, angpix, mask=None, alpha=1.0, beta=0.5):
+    image = image.squeeze()
+    #image = F.softmax(image, dim=0)
+    D = image.shape[-1]
+    #alpha = 1. - beta
+    #print(target.shape, label_indices.shape)
+    #assert torch.all(label_indices >= 0) and torch.all(label_indices < D)
+    target_map = create_target_map(coords, angpix, D)
+    #target = target_map
+    target = F.one_hot(target_map, num_classes=2)
+    target = torch.permute(target, [3, 0, 1, 2,])
+    #print(image.shape, target.shape)
+    g0 = target
+    g1 = 1. - g0
+    p0 = image
+    p1 = 1. - p0
+    num = (p0*g0)
+    den = num + alpha*(g1*p0) + beta*(g0*p1)
+    if mask is not None:
+        num = num*mask
+        den = den*mask
+        #intersect = (image * target * mask).sum(dim=0)
+        #deno = ((image + target)*mask).sum(dim=0) - intersect
+    iou = num.sum(dim=(1,2,3))/den.sum(dim=(1,2,3))
+    return (1. - iou).sum(), target_map
+
+def create_target_map(target, coords, angpix, D, label=1):
+    label_indices = torch.clamp((coords.squeeze()/angpix).round(), min=0, max=D-1).long()
+    label_indices = label_indices.view(-1, 3)
+    #target = torch.zeros([D, D, D]).long().to(coords.get_device())
+    target[label_indices[:, 2], label_indices[:, 1], label_indices[:, 0]] = label #N
+    #target[label_indices[:,0, 2], label_indices[:,0, 1], label_indices[:,0, 0]] = 1 #N
+    #target[label_indices[:,1, 2], label_indices[:,1, 1], label_indices[:,1, 0]] = 1 #CA
+    #target[label_indices[:,2, 2], label_indices[:,2, 1], label_indices[:,2, 0]] = 1 #C
+    #target[label_indices[:,3, 2], label_indices[:,3, 1], label_indices[:,3, 0]] = 1 #O
+    return target
+
+def get_cross_entropy(image, coords, sidechains, angpix, mask=None,):
+    #image = image.squeeze()
+    #image = F.softmax(image, dim=0)
+    D = image.shape[-1]
+    mask_sum = mask.sum()
+    #print(coords.shape) #(1, L, 4, 3)
+    pt = ((coords.shape[1]*4)/mask_sum)
+    #ptside = sidechains.shape[1]/mask_sum
+    pn = 1. - pt
+
+    target = torch.zeros([D, D, D]).long().to(coords.get_device())
+    target_map = create_target_map(target, coords, angpix, D, label=1)
+    target_map = create_target_map(target_map, sidechains, angpix, D, label=2)
+    #target = target_map
+    target = F.one_hot(target_map, num_classes=3)
+    target = torch.permute(target, [3, 0, 1, 2,])
+    #ce = (target * (image.log())).sum(dim=0)
+    #print(target.shape, image.shape)
+    ce = (target[0,...] * (image[:, 0, ...].log())) * pt + (target[1:,...] * (image[:, 1:, ...].log())).sum(dim=0)*pn
+    #ignore background
+    #ce = (target*image.log())[1:,...].sum(dim=0)
+    if mask is not None:
+        return -(ce*mask).sum()/(mask_sum*image.shape[0]), target_map
+    else:
+        return -ce.mean(), target_map
+
+def get_l2_loss(image, target, sidechains, coords, target_map, mask=None, beta=0.5):
+    #image = image.squeeze()
+    #image = F.softmax(image, dim=0)
+    D = image.shape[-1]
+    mask_sum = mask.sum()
+    #print(coords.shape) #(1, L, 4, 3)
+    pt = ((coords.shape[1]*4)/mask_sum)
+    pn = 1. - pt
+
+    #ce = (target * (image.log())).sum(dim=0)
+    #print(target.shape, image.shape)
+    ce = ((target - image[:, 1, ...]).pow(2) + (sidechains - image[:, 2, ...]).pow(2))* (pt * (target_map == 0)
+                                                    + pn * (target_map != 0))
+    return -(ce*mask).sum()/(mask_sum*image.shape[0])
+
+def get_cubic_center(coords, angpix, D=8, eps=1e-5):
+    #map coords to cubic index
+    total = D ** 3
+    coords = coords.squeeze() #(L, 4, 3)
+    centers = torch.zeros((total, 1, 3)).to(coords.get_device())
+    counts = torch.zeros(total).to(coords.get_device())
+    trans = coords[:, 1, :]
+    cubic_indices = torch.clamp((trans/(angpix*D)).floor(), min=0, max=D-1).long()
+    #print(cubic_indices)
+
+    #remove cubic centers from the coordinates
+    coords -= ((cubic_indices.float().unsqueeze(1) + 0.5)*(angpix*D))
+
+    #map cubic indices to 1D
+    cubic_1d = cubic_indices[:,0] + cubic_indices[:,1]*D + cubic_indices[:,2]*D*D
+    cubic_count = torch.ones_like(cubic_1d).float()
+
+    #reduce centers and counts
+    cubic_1d_repeat = cubic_1d.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, 3)
+    centers.scatter_add_(0, cubic_1d_repeat, coords[:, 1:2, :])
+    counts.scatter_add_(0, cubic_1d, cubic_count)
+    #centers_sum = centers.sum(dim=1)
+    centers /= (counts + eps).unsqueeze(-1).unsqueeze(-1)
+    centers_sum = centers.mean(dim=1)
+
+    ref_ind = torch.arange(total).long()
+    sel_ind = ref_ind[counts > 0]
+    #print(counts[sel_ind])
+    #print(centers_sum[sel_ind]/((D-1)*angpix)*2.)
+
+    return centers_sum, sel_ind

@@ -8,21 +8,26 @@ from . import lie_tools
 log = utils.log
 
 class FourierFeatures:
-    def __init__(self, stop, spacing):
+    def __init__(self, stop, dim=256):
         self.start = 0
         self.stop = stop
         self.step = 1
         x_idx = torch.arange(self.start, self.stop, self.step) - self.stop //2
         freqs = torch.meshgrid(x_idx, x_idx, x_idx, indexing='ij')
-        self.freqs = torch.stack(freqs, dim=0)*np.pi/stop
-        self.spacing = spacing
-        w = 2.**(torch.arange(self.spacing))*np.pi
-        bfactor = (-(torch.arange(self.spacing)/self.stop)**2 * np.pi ** 2 * 0.5).exp()
-        print("bfactor: ", bfactor)
-        bfactor = bfactor.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-        C, D, H, W = self.freqs.shape
-        self.freqs = (self.freqs.unsqueeze(1)*w.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1))#.view(-1, D, H, W)
-        self.freqs = torch.cat([self.freqs.sin()*bfactor, self.freqs.cos()*bfactor], dim=1).view(-1, D, H, W)
+        self.freqs = torch.stack(freqs, dim=-1)*np.pi/stop
+        #self.spacing = spacing
+        #w = 2.**(torch.arange(self.spacing))*np.pi
+        #bfactor = (-(torch.arange(self.spacing)/self.stop)**2 * np.pi ** 2 * 0.5).exp()
+        #print("bfactor: ", bfactor)
+        #bfactor = bfactor.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        fourier_dim = dim//6
+        temperature = 10000
+        omega = torch.arange(fourier_dim,) / (fourier_dim - 1)
+        omega = 1. / (temperature ** omega)
+        D, H, W, C = self.freqs.shape
+        self.freqs = (self.freqs.unsqueeze(-1)*omega.unsqueeze(0).unsqueeze(0).unsqueeze(0).unsqueeze(0))#.view(-1, D, H, W)
+        self.freqs = torch.cat([self.freqs.sin(), self.freqs.cos()], dim=-1).view(D, H, W, -1)
+        self.freqs = F.pad(self.freqs, (0, dim - fourier_dim*6))
         log("fourierfeatures: {}".format(self.freqs.shape))
 
     def get_embedding(self, inputs):
@@ -142,7 +147,7 @@ def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=Non
     w = w.unsqueeze(-1)
     bfactor = bfactor.unsqueeze(-1)
     scale = scale.unsqueeze(-1)
-    #print(scale)
+    #print(volt, cs, w, Apix)
     dfv = dfu
     dfang = torch.zeros_like(dfu)
     ctfs = compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift, bfactor/(4*np.pi**2), scale, Apix=Apix, rweight=False)
@@ -150,7 +155,11 @@ def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=Non
 
     # the transpose of tilt rotation
     # xtilt = R xori
+    #NOTE: use this if the tilt angle in ctf stars are flipped!
     Rtilts = lie_tools.rot_2d(-tilts.squeeze(-1).float()).unsqueeze(-3)
+    # test other tilt direction
+    #NOTE: use this if the tilt angle is the same as given
+    #Rtilts = lie_tools.rot_2d(tilts.squeeze(-1).float()).unsqueeze(-3)
     grid_rotated = centered_freqs @ Rtilts #(D, W, 2) x (N, T, 1, 2, 2)
     # grid_rotated now is (N, T, D, W, 2)
     #print(Rtilts.shape, tilts[0,], grid_rotated.shape)
@@ -177,7 +186,6 @@ def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=Non
 
     # rotate the grid
 
-    # previous centered_freqs #(-z//2+1, z//2), map it to -1, 1 by (+ z//2 - 1)/(Y-1)
     #centered_freqs #(-z//2, z//2-1), map it to -1, 1 by (+ z//2 )/(Y-1)
     # also need to map (0, z//2) to -1, 1 by
     centered_freqs_Z = grid_rotated[..., 1]

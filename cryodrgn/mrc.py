@@ -94,15 +94,46 @@ class MRCHeader:
         fh.write(self.extended_header)
 
     def get_apix(self):
-        return self.fields['xlen']/self.fields['nx']
+        return self.fields['xlen']/self.fields['mx']
 
     def update_apix(self, Apix):
-        self.fields['xlen'] = self.fields['nx']*Apix
-        self.fields['ylen'] = self.fields['ny']*Apix
-        self.fields['zlen'] = self.fields['nz']*Apix
+        self.fields['xlen'] = self.fields['mx']*Apix
+        self.fields['ylen'] = self.fields['my']*Apix
+        self.fields['zlen'] = self.fields['mz']*Apix
+
+    def get_order(self):
+        return self.fields['mapc']-1, self.fields['mapr']-1, self.fields['maps']-1
+
+    def get_correct_order(self):
+        dims = [self.fields['mx'], self.fields['my'], self.fields['mz']]
+        order = [0, 1, 2]
+        correct_origin = []
+        for i in range(len(dims)):
+            if dims[i] == self.fields['nx']:
+                correct_origin.append(order[i])
+                dims.pop(i)
+                order.pop(i)
+                break
+        for i in range(len(dims)):
+            if dims[i] == self.fields['ny']:
+                correct_origin.append(order[i])
+                dims.pop(i)
+                order.pop(i)
+                break
+        assert dims[0] == self.fields['nz']
+        correct_origin.append(order[0])
+        return correct_origin
 
     def get_origin(self):
-        return self.fields['xorg'], self.fields['yorg'], self.fields['zorg']
+        #return self.fields['xorg'], self.fields['yorg'], self.fields['zorg']
+        #origin = [self.fields['nxstart'], self.fields['nystart'], self.fields['nzstart']]
+        origin = [self.fields['nxstart'] + self.fields['xorg'], self.fields['nystart'] + self.fields['yorg'], self.fields['nzstart'] + self.fields['zorg']]
+        order = self.get_order()
+        origin = [origin[order[0]], origin[order[1]], origin[order[2]]]
+        return origin
+
+    def get_dims(self):
+        return self.fields['mx'], self.fields['my'], self.fields['mz']
 
     def update_origin(self, xorg, yorg, zorg):
         self.fields['xorg'] = xorg
@@ -112,11 +143,14 @@ class MRCHeader:
 class LazyImage:
     '''On-the-fly image loading'''
 
-    def __init__(self, fname, shape, dtype, offset):
+    def __init__(self, fname, shape, dtype, offset, Apix=1., origin=None, order=None):
         self.fname = fname
         self.shape = shape
         self.dtype = dtype
         self.offset = offset
+        self.Apix = Apix
+        self.origin = np.array(origin)
+        self.order = order
     def get(self):
         with open(self.fname) as f:
             f.seek(self.offset)
@@ -152,7 +186,7 @@ def parse_tomo(fname,):
     nz, ny, nx = header.fields['nz'], header.fields['ny'], header.fields['nx']
 
     # load 3d volume as LazyImages
-    array = LazyImage(fname, (nz, ny, nx), dtype, start)
+    array = LazyImage(fname, (nz, ny, nx), dtype, start, Apix=header.get_apix(), origin=header.get_origin(), order=header.get_order())
     #print(header)
     return array, header
 

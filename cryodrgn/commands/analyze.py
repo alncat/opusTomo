@@ -156,7 +156,7 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
         pmax = max(xmax, ymax)
         pmin = min(xmin, ymin)
         plt.figure(3)
-        g = sns.jointplot(x=umap_emb[:,0], y=umap_emb[:,1], hue=groups, palette="inferno", s=1., alpha=.25, xlim=(xmin, xmax), ylim=(ymin, ymax))
+        g = sns.jointplot(x=umap_emb[:,0], y=umap_emb[:,1], hue=groups, palette="inferno", s=3., alpha=.3, xlim=(xmin, xmax), ylim=(ymin, ymax))
         g.ax_joint.set_aspect('equal')
         #cax = g.fig.add_axes([.98, .4, .01, .2])
         #plt.colorbar(g.ax_joint, cax=cax)
@@ -197,7 +197,7 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
 
         analysis.scatter_annotate(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True,
                                   xlim=(xmin, xmax), ylim=(ymin, ymax),
-                                  alpha=.1, s=.5)
+                                  alpha=.15, s=1.)
         plt.xlabel('UMAP1', fontsize=14, weight='bold')
         plt.ylabel('UMAP2', fontsize=14, weight='bold')
         plt.savefig(f'{outdir}/kmeans{K}/umap.png')
