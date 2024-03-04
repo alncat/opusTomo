@@ -1,7 +1,7 @@
 # Table of contents
-2. [Opus-DSD2](#opusdsd)
-    1. [Spliceosome](#splice)
-    2. [80S ribosome](#80s)
+2. [Opus-TOMO](#opusdsd)
+    1. [80S ribosome](#80S)
+    2. [FAS](#fas)
 4. [setup environment](#setup)
 5. [prepare data](#preparation)
 6. [training](#training)
@@ -14,9 +14,16 @@
 
 # Opus-DSD2 <div id="opusdsd">
 This repository contains the implementation of opus-deep structural disentanglement2 (DSD2), which is developed by the research group of
-Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-DSD2 is available at https://drive.google.com/drive/folders/1tEVu9PjCR-4pvkUK17fAHHpyw6y3rZcK?usp=sharing, while the publication of OPUS-DSD is available at https://www.nature.com/articles/s41592-023-02031-6.  An exemplar movie of the OPUS-DSD2 is shown below:
+Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-TOMO is available at https://drive.google.com/drive/folders/1tEVu9PjCR-4pvkUK17fAHHpyw6y3rZcK?usp=sharing, while the publication of OPUS-DSD is available at https://www.nature.com/articles/s41592-023-02031-6.  Exemplar movies of the OPUS-TOMO is shown below:
 
-https://github.com/alncat/opusDSD/assets/3967300/b1b4d3c0-dfed-494f-8b7c-1990b1107147
+
+https://github.com/alncat/opusTomo/assets/3967300/8f7657f4-3ef0-40b9-819f-77e7fc95bb6d
+
+
+
+https://github.com/alncat/opusTomo/assets/3967300/d4bffa34-c8bf-49c9-b58f-ef612860967c
+
+
 
 OPUS-DSD2 also greatly improves the quality of its reconstructions!
 <img width="1055" alt="image" src="https://github.com/alncat/opusDSD/assets/3967300/be04450d-a9b9-4982-96af-04bec5d7c6a9">
