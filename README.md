@@ -68,19 +68,19 @@ It can reconstruct high resolution structure for FAS using only 263 particles!
 # set up environment <a name="setup"></a>
 
 After cloning the repository, to run this program, you need to have an environment with pytorch and a machine with GPUs. The recommended configuration is a machine with 4 V100 GPUs.
-You can create the conda environment for DSD using one of the environment files in the folder by executing
+You can create the conda environment for OPUS-TOMO using one of the environment files in the folder by executing
 
 ```
 conda env create --name dsdtomo -f environmentcu11torch11.yml
 ```
 
-This environment primarily contains cuda 11.3 and pytorch 1.11.0. To create an environment with cuda 11.3 and pytorch 1.10.1, you can choose ```environmentcu11.yml```. Lastly, ```environment.yml``` contains cuda 10.2 and pytorch 1.11.0. On V100 GPU, OPUS-DSD with cuda 11.3 is 20% faster than OPUS-DSD with cuda 10.2. However, it's worth noting that OPUS-DSD **has not been tested on Pytorch version higher than 1.11.0**. We recommend using pytorch version 1.10.1 or 1.11.0. After the environment is sucessfully created, you can then activate it and execute our program within this environement.
+This environment primarily contains cuda 11.3 and pytorch 1.11.0. To create an environment with cuda 11.3 and pytorch 1.10.1, you can choose ```environmentcu11.yml```. Lastly, ```environment.yml``` contains cuda 10.2 and pytorch 1.11.0. On V100 GPU, OPUS-TOMO with cuda 11.3 is 20% faster than OPUS-TOMO with cuda 10.2. However, it's worth noting that OPUS-TOMO **has not been tested on Pytorch version higher than 1.11.0**. We recommend using pytorch version 1.10.1 or 1.11.0. After the environment is sucessfully created, you can then activate it and execute our program within this environement.
 
 ```
 conda activate dsdtomo
 ```
 
-You can then install OPUS-DSD by changing to the directory with cloned repository, and execute
+You can then install OPUS-TOMO by changing to the directory with cloned repository, and execute
 ```
 pip install -e .
 ```
@@ -101,7 +101,7 @@ The inference pipeline of our program can run on any GPU which supports cuda 10.
 
 **Usage Example:**
 
-In overall, the commands for training in OPUS-DSD can be invoked by calling
+In overall, the commands for training in OPUS-TOMO can be invoked by calling
 ```
 dsd commandx ...
 ```
@@ -120,7 +120,7 @@ or
 dsdsh commandx -h
 ```
 
-**Data Preparation for OPUS-DSD Using ```dsdsh prepare```:**
+**Data Preparation for OPUS-TOMO Using ```dsdsh prepare```:**
 
 There is a command ```dsdsh prepare``` for data preparation. Under the hood, ```dsdsh prepare``` points to the prepare.sh inside analysis_scripts. Suppose **the version of star file is 3.1**, the above process can be simplified as,
 ```
@@ -142,37 +142,11 @@ Next, you need to prepare a image stack. Suppose you have downloaded the spliceo
 
 Finally, you should **create a mask using the consensus model and RELION** through ```postprocess```. The detailed procedure for mask creation can be found in https://relion.readthedocs.io/en/release-3.1/SPA_tutorial/Mask.html. The spliceosome dataset on empiar comes with a ```global_mask.mrc``` file. Suppose the filename of mask is ```mask.mrc```, move it to the program directory for simplicity.
 
-**Data Preparation for OPUS-DSD2 with Composition and Dynamics Disentanglement**
-
-OPUS-DSD2 features a new capacity to reconstruct multi-body dynamics and resolving compositional heterogeniety. 
-Reconstructing multibody dynamics in OPUS-DSD2 is very similar to Relion's multibody refinement protocol though the underlying dynamics model is different (You can see the details 
-in the preprint). First of all, you shall create a set of masks following Relion's multibody refinement protocol. You can find examples about masks and input starfile for
-the multibody refinement of spliceosome in https://empiar.pdbj.org/entry/10180/.
-There is also a tutorial with detailed process for creating masks in https://www.cryst.bbk.ac.uk/embo2019/pracs/RELION%20practical%20EMBO%202019_post%20practice.pdf . 
-The segment map tool in ChimeraX is also perfect for creating segmentations.
-
-After the masks and the starfile for multibody refinement are created, you can prepare the pkls for multibody dynamics estimation by executing
-
-```
-dsdsh prepare_multi starfile D apix masks numb --volumes VOLUMES
-```
-The details about each argument can be checked using ```dsdsh prepare_multi -h```
-The prepare_multi commands will create a pkl file that contains the parameters of defined bodies, which will be ***stored in the same directory 
-as the starfile***. The translation of each body is defined using the rotation around its reference body. The magnitude of its translation then is the magnitude of rotation of the center of this body in relative to its reference body. OPUS-DSD2 will read the reference bodies from the starfile, which are specified in ```_rlnBodyRotateRelativeTo```.
-But you should note that the index of body starts from 1. The body that occurs most often as the reference body for others will be 
-selected as the translation-free center. The translation of center will always be set to zero. The direction of rotational axis for the translation of multi-bodies can be determined using
- the volume series found by PCA analysis for the OPUS-DSD's result (**You can specify the volume series by giving the directory of volume series using --volumes**), since they represents a possible mode of movement. Otherwise, the direction of rotational axis will be aligned to the displacement between the center of a body and the center of its center body.
-
-After executing these steps, you have all pkls and files required for running opus-DSD2.
-
-We provided a mask pkl file for spliceosome using the EMPIAR deposited definiton of multi-bodies in https://drive.google.com/file/d/19fKECY3BDNboXmRUp0fPo9YJf3QarR_u/view?usp=drive_link . In the folder from link https://drive.google.com/drive/folders/1tEVu9PjCR-4pvkUK17fAHHpyw6y3rZcK?usp=sharing, you can also find the pose and ctf pkl and the global mask, which are named as consensus_data_pose_euler.pkl, consensus_data_ctf.pkl and mask.mrc, respectively. We also deposited a trained weight and latent encoding file for visualzation in the same folder. The segmentation of spliceosome given by deposited result is shown below.
-
-<img width="288" alt="image16" src="https://github.com/alncat/opusDSD/assets/3967300/86875e9a-2457-4526-a54c-7a9914d55cfe">
 
 **Data preparation under the hood**
 
-OPUS-DSD follows cryoDRGN's input formats. The pose and ctf parameters for image stack are stored as the python pickle files, aka pkl. Suppose the refinement result is stored as `consensus_data.star` and **the format of the Relion STAR file is below version 3.0**,
-and the consensus_data.star is located at ```/work/``` directory, you can convert STAR to the pose pkl file **inside the opusDSD source folder** by executing the command below:
+The pose and ctf parameters for image stack are stored as the python pickle files, aka pkl. Suppose the refinement result is stored as `consensus_data.star` and **the format of the Relion STAR file is below version 3.0**,
+and the consensus_data.star is located at ```/work/``` directory, you can convert STAR to the pose pkl file **inside the opusTOMO source folder** by executing the command below:
 
 ```
 dsd parse_pose_star /work/consensus_data.star -D 320 --Apix 1.699 -o sp-pose-euler.pkl
@@ -200,13 +174,13 @@ For **the RELION STAR file with version hgiher than 3.0**, you should add --reli
 
 ## train_tomo for OPUS-TOMO <div id="train_tomo">
 
-When the inputs are available, you can train the vae for structural disentanglement proposed in OPUS-DSD's paper using
+When the inputs are available, you can train the vae for structural disentanglement proposed in OPUS-TOMO's paper using
 
 ```
 dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 8 --zdim 12 --lr 5.e-5 --num-gpus 4 --multigpu --beta-control 0.8 --beta cos -o /work/ribo -r ./mask.mrc --downfrac 0.65 --valfrac 0.1 --lamb 0.8 --split ribo-split.pkl --bfactor 4. --templateres 160 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/
 ```
 
-The argument following train_tomo specifies the image stack. In contrast to OPUS-DSD, we no longer need to specify ctf since they are read from the subtomogram starfile.
+The argument following train_tomo specifies the image stack. In contrast to OPUS-TOMO, we no longer need to specify ctf since they are read from the subtomogram starfile.
 Moreover, OPUS-TOMO needs to specify the angpix of the subtomogram, and also the prefix directory before the filename for subtomogram in starfile.
 
 The functionality of each argument is explained in the table:
@@ -224,13 +198,13 @@ The functionality of each argument is explained in the table:
 | -o | the directory name for storing results, such as model weights, latent encodings |
 | -r | ***the solvent mask created from consensus model***, our program will focus on fitting the contents inside the mask (more specifically, the 2D projection of a 3D mask). Since the majority part of image doesn't contain electron density, using the original image size is wasteful, by specifying a mask, our program will automatically determine a suitable crop rate to keep only the region with densities. |
 | --downfrac | the downsampling fraction of input image, the input to network will be downsampled to size of D\*downfrac, where D is the original size of image. You can set it according to resolution of consensus model and the ***templateres*** you set. |
-| --lamb | the restraint strength of structural disentanglement prior proposed in DSD, set it according to the SNR of your dataset, for dataset with high SNR such as ribosome, splicesome, you can set it to 1. or higher, for dataset with lower SNR, consider lowering it. Possible ranges are [0.1, 3.]. If you find **the UMAP of embeedings is exaggeratedly stretched into a ribbon**, then the lamb you used during training is too high! |
+| --lamb | the restraint strength of structural disentanglement prior proposed in OPUS-DSD, set it according to the SNR of your dataset, for dataset with high SNR such as ribosome, splicesome, you can set it to 1. or higher, for dataset with lower SNR, consider lowering it. Possible ranges are [0.1, 3.]. If you find **the UMAP of embeedings is exaggeratedly stretched into a ribbon**, then the lamb you used during training is too high! |
 | --split | the filename for storing the train-validation split of image stack |
 | --valfrac | the fraction of images in the validation set, default is 0.1 |
 | --bfactor | will apply exp(-bfactor/4 * s^2 * 4*pi^2) decaying to the FT of reconstruction, s is the magnitude of frequency, increase it leads to sharper reconstruction, but takes longer to reveal the part of model with weak density since it actually dampens learning rate, possible ranges are [3, 8]. Consider using higher values for more dynamic structures. We will decay the bfactor slightly in every epoch. This is equivalent to learning rate warming up. |
 | --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to 2D images. The default value is 192. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
 | --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the 2D reconstructions and experimental images after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_cv```|
-| --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-DSD will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
+| --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-TOMO will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
 | --angpix | the angstrom per pixel for the input subtomogram |
 | --datadir | the root directory before the filename of subtomogram in input starfile |
 
@@ -258,7 +232,7 @@ dsd train_cv /work/all.mrcs --ctf ./sp-ctf.pkl --poses ./sp-pose-euler.pkl --laz
 
 both are in the output directory
 
-During training, opus-DSD will output temporary volumes called ```tmp*.mrc``` (or the prefix you specified), you can check the intermediate results by viewing them in Chimera. By default, opus-DSD reads subotomograms from disk as needed during training.
+During training, opus-TOMO will output temporary volumes called ```tmp*.mrc``` (or the prefix you specified), you can check the intermediate results by viewing them in Chimera. By default, opus-TOMO reads subotomograms from disk as needed during training.
 
 # analyze result <a name="analysis"></a>
 You can use the analysis scripts in ```dsdsh``` to visualize the learned latent space! The analysis procedure is detailed as following.
