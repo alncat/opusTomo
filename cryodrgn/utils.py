@@ -1061,7 +1061,7 @@ def create_target_map(target, coords, angpix, D, label=1):
     #target[label_indices[:,3, 2], label_indices[:,3, 1], label_indices[:,3, 0]] = 1 #O
     return target
 
-def get_cross_entropy(image, coords, sidechains, angpix, mask=None,):
+def get_cross_entropy(image, coords, sidechains, angpix, mask=None, exponent=1.0):
     #image = image.squeeze()
     #image = F.softmax(image, dim=0)
     D = image.shape[-1]
@@ -1069,7 +1069,8 @@ def get_cross_entropy(image, coords, sidechains, angpix, mask=None,):
     #print(coords.shape) #(1, L, 4, 3)
     pt = ((coords.shape[1]*4)/mask_sum)
     #ptside = sidechains.shape[1]/mask_sum
-    pn = 1. - pt
+    pn = (1. - pt)**exponent
+    pt = pt**exponent
 
     target = torch.zeros([D, D, D]).long().to(coords.get_device())
     target_map = create_target_map(target, coords, angpix, D, label=1)
@@ -1087,19 +1088,60 @@ def get_cross_entropy(image, coords, sidechains, angpix, mask=None,):
     else:
         return -ce.mean(), target_map
 
-def get_l2_loss(image, target, sidechains, coords, target_map, mask=None, beta=0.5):
+def get_translation(image, target):
+    image1 = image.squeeze()
+    image2 = target.squeeze()
+    # Step 1: FFT of both images
+    F1 = fft.torch_rfft3_center(image1)
+    F2 = fft.torch_rfft3_center(image2)
+
+    # Step 2: Cross-power spectrum
+    cross_power_spectrum = (F1 * F2.conj()) # / torch.abs(F1 * F2.conj())
+
+    # Step 3: Inverse FFT to get the correlation field
+    correlation_field = fft.torch_irfft3_center(cross_power_spectrum)
+    correlation_field_real = correlation_field.real
+
+    # Step 4: Find the peak in the correlation field
+    #shift_y, shift_x = torch.where(correlation_field_real == torch.max(correlation_field_real))
+    result = torch.topk(correlation_field_real.view(-1), 1, dim=0)
+    shifts = result.indices
+    D = image1.shape[-1]
+    z = torch.div(shifts, D*D, rounding_mode='floor')
+    y = torch.div(shifts - z * D * D, D, rounding_mode='floor')
+    x = shifts % D
+
+    # For PyTorch versions before 1.8, you may need to convert to numpy to use np.where
+    # shift_y, shift_x = np.where(correlation_field_real.numpy() == torch.max(correlation_field_real).item())
+
+    #shift_y = shift_y.item()
+    #shift_x = shift_x.item()
+
+    # Assuming the images are centered, calculate the shifts considering the center
+    Z, Y, X = image1.shape
+    z -= (Z // 2)
+    y -= (Y // 2)
+    x -= (X // 2)
+    best_shift = torch.stack([x, y, z], dim=-1).detach()
+    #print(best_shift, result.values)
+    return best_shift
+
+def get_l2_loss(image, target, sidechains, coords, target_map, mask=None, exponent=1.):
     #image = image.squeeze()
     #image = F.softmax(image, dim=0)
     D = image.shape[-1]
     mask_sum = mask.sum()
     #print(coords.shape) #(1, L, 4, 3)
     pt = ((coords.shape[1]*4)/mask_sum)
-    pn = 1. - pt
+    pn = (1. - pt)**exponent
+    pt = pt**exponent
 
     #ce = (target * (image.log())).sum(dim=0)
     #print(target.shape, image.shape)
-    ce = ((target - image[:, 1, ...]).pow(2) + (sidechains - image[:, 2, ...]).pow(2))* (pt * (target_map == 0)
-                                                    + pn * (target_map != 0))
+    ce = ((target - image[:, 1, ...]).pow(2) + (sidechains - image[:, 2, ...]).pow(2)
+            )* ((pt) * ((target_map) == 0) + pn * ((target_map) != 0))
+    #((pt) * ((target + sidechains) < 0.7) + pn * ((target + sidechains) >= 0.7))
+    #((pt) * ((target_map) == 0) + pn * ((target_map) != 0))
     return -(ce*mask).sum()/(mask_sum*image.shape[0])
 
 def get_cubic_center(coords, angpix, D=8, eps=1e-5):

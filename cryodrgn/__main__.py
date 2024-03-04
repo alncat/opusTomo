@@ -15,6 +15,9 @@ def main():
     import cryodrgn.commands.backproject_voxel
     import cryodrgn.commands.train_nn
     import cryodrgn.commands.train_vae
+    import cryodrgn.commands.train_cv
+    import cryodrgn.commands.train_multi
+    import cryodrgn.commands.train_tomo
     import cryodrgn.commands.eval_vol
     import cryodrgn.commands.eval_images
     import cryodrgn.commands.analyze
@@ -22,17 +25,21 @@ def main():
     import cryodrgn.commands.graph_traversal
     import cryodrgn.commands.view_config
 
-    modules = [cryodrgn.commands.downsample,
-        cryodrgn.commands.preprocess,
-        cryodrgn.commands.parse_pose_csparc,
+    modules = [
+        #cryodrgn.commands.downsample,
+        #cryodrgn.commands.preprocess,
+        #cryodrgn.commands.parse_pose_csparc,
         cryodrgn.commands.parse_pose_star,
-        cryodrgn.commands.parse_ctf_csparc,
+        #cryodrgn.commands.parse_ctf_csparc,
         cryodrgn.commands.parse_ctf_star,
-        cryodrgn.commands.train_nn,
+        #cryodrgn.commands.train_nn,
         cryodrgn.commands.backproject_voxel,
-        cryodrgn.commands.train_vae,
+        #cryodrgn.commands.train_vae,
+        cryodrgn.commands.train_cv,
+        cryodrgn.commands.train_multi,
+        cryodrgn.commands.train_tomo,
         cryodrgn.commands.eval_vol,
-        cryodrgn.commands.eval_images,
+        #cryodrgn.commands.eval_images,
         cryodrgn.commands.analyze,
         cryodrgn.commands.pc_traversal,
         cryodrgn.commands.graph_traversal,
