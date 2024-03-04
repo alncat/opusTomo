@@ -25,19 +25,17 @@ https://github.com/alncat/opusTomo/assets/3967300/d4bffa34-c8bf-49c9-b58f-ef6128
 
 
 The functionality of OPUS-TOMO is reconstructing dynamics and compositonal changes from cryo-ET data end-to-end!
-OPUS-TOMO can not only disentangle 3D structural information by reconstructing different conformations, but also reconstruct physically meaningful dynamics for the macromolecules.
-This new function is very easy to use if you have already been familiar with Relion's multi-body refinement (https://elifesciences.org/articles/36861). OPUS-DSD2 takes the input files of Relion's multi-body refinement,
-then performs ***structural disentanglement and multi-body dynamics fitting*** simultaneously and end-to-end!
+OPUS-TOMO can not only disentangle 3D structural information by reconstructing different conformations, but also reconstruct continous dynamics for the macromolecules in cellular environment.
 
-
-This project seeks to unravel how a latent space, encoding 3D structural information, can be learned by utilizing only 2D image supervisions which are aligned against a consensus reference model.
+This project seeks to unravel how a latent space, encoding 3D structural information, can be learned by utilizing subtomograms which are aligned against a consensus reference model by subtomogram averaging.
 
 An informative latent space is pivotal as it simplifies data analysis by providing a structured and reduced-dimensional representation of the data.
 
 Our approach strategically **leverages the inevitable pose assignment errors introduced during consensus refinement, while concurrently mitigating their impact on the quality of 3D reconstructions**. Although it might seem paradoxical to exploit errors while minimizing their effects, our method has proven effective in achieving this delicate balance.
 
-The workflow of OPUS-DSD is demonstrated as follows:
-<img width="773" alt="image" src="https://github.com/alncat/opusDSD/assets/3967300/eabf176f-ac25-42d2-8e72-1651faa2d648">
+The workflow of OPUS-TOMO is demonstrated as follows:
+<img width="763" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/ac975578-97c9-45cb-b909-e3fc275ff815">
+
 
 Note that all input and output of this method are in real space! (Fourier space is good, but how about real space!)
 The architecture of encoder is (Encoder class in cryodrgn/models.py):
@@ -48,25 +46,23 @@ The architecture of composition decoder is (ConvTemplate class in cryodrgn/model
 
 ![Alt text](https://raw.githubusercontent.com/alncat/opusDSD/main/example/decoder.png?raw=true "Opus-DSD decoder")
 
-The architecture of dynamics decoder is:
+The architecture of pose corrector is:
 
-<img width="422" alt="image" src="https://github.com/alncat/opusDSD/assets/3967300/6e81f980-3eb1-4e0a-8230-036ea6ccdc26">
+<img width="378" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/bf2359fc-c340-467a-b66a-969b62bb7e69">
 
 
 ## 80S Ribosome <a name="80s"></a>
 
-OPUS-DSD2 has superior structural disentanglement ability to encode distinct compositional changes into different PCs in composition latent space.
+OPUS-TOMO has superior structural disentanglement ability to encode distinct compositional changes into different PCs in composition latent space.
 
-https://github.com/alncat/opusDSD/assets/3967300/9d64292a-a018-4949-b31c-4f04c03be829
+<img width="1105" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/eb51514c-c9d8-4764-9930-802b67db1a48">
+
 
 ## FAS <a name="fas"></a>
-The following results are from the legacy OPUS-DSD.
-An exmaple UMAP of latent space for 80S ribosome learned by the legacy OPUS-DSD:
 
-![Alt text](https://raw.githubusercontent.com/alncat/opusDSD/main/example/umap-bold.png?raw=true "80S ribosome UMAP")
+It can reconstruct high resolution structure for FAS using only 263 particles!
 
-Comparison between some states:
-![Alt text](https://raw.githubusercontent.com/alncat/opusDSD/main/example/riborna.png?raw=true "80S ribosome rna swing")
+<img width="976" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/50f944c1-ef21-4fe3-997c-41d8cb1f3e17">
 
 
 # set up environment <a name="setup"></a>
@@ -89,7 +85,7 @@ You can then install OPUS-DSD by changing to the directory with cloned repositor
 pip install -e .
 ```
 
-OPUS-DSD can be kept up to date by 
+OPUS-TOMO can be kept up to date by 
 ```
 git pull
 ```
@@ -99,7 +95,7 @@ The inference pipeline of our program can run on any GPU which supports cuda 10.
 # prepare data <a name="preparation"></a>
 
 **Data Preparation Guidelines:**
-1. **Cryo-EM Dataset:** Ensure that the cryo-EM dataset is stored in the MRCS stack file format. A good dataset for tutorial is the splicesome which is available at https://empiar.pdbj.org/entry/10180/ (It contains the consensus refinement result.)
+1. **Cryo-EM Dataset:** Ensure that the cryo-ET dataset is stored subtomogram by subtomogram in directory. A good dataset for tutorial is the splicesome which is available at https://empiar.pdbj.org/entry/10180/ (It contains the consensus refinement result.)
 
 2. **Consensus Refinement Result:** The program requires a consensus refinement result, which should not apply any symmetry and must be stored as a Relion STAR file. Other 3D reconstruction results such as 3D classification, as long as they determine the pose parameters of images, can also be supplied as input.
 
