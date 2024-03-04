@@ -11,8 +11,8 @@
    2. [reconstruct volumes](#reconstruct)
    3. [select particles](#select)
 
-# Opus-DSD2 <div id="opusdsd">
-This repository contains the implementation of opus-deep structural disentanglement2 (DSD2), which is developed by the research group of
+# Opus-TOMO <div id="opusdsd">
+This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by the research group of
 Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-TOMO is available at https://drive.google.com/drive/folders/1tEVu9PjCR-4pvkUK17fAHHpyw6y3rZcK?usp=sharing, while the publication of OPUS-DSD is available at https://www.nature.com/articles/s41592-023-02031-6.  Exemplar movies of the OPUS-TOMO is shown below:
 
 
