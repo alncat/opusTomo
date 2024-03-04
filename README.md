@@ -5,8 +5,7 @@
 4. [setup environment](#setup)
 5. [prepare data](#preparation)
 6. [training](#training)
-   1. [train_cv](#train_cv)
-   2. [train_multi](#train_multi)
+   1. [train_tomo](#train_tomo)
 8. [analyze result](#analysis)
    1. [sample latent spaces](#sample)
    2. [reconstruct volumes](#reconstruct)
@@ -25,8 +24,8 @@ https://github.com/alncat/opusTomo/assets/3967300/d4bffa34-c8bf-49c9-b58f-ef6128
 
 
 
-The major new functionality of OPUS-DSD2 is reconstructing multi-body dynamics from cryo-EM data end-to-end during structural disentanglement!
-OPUS-DSD2 can not only disentangle 3D structural information by reconstructing different conformations, but also reconstruct physically meaningful dynamics for the macromolecules.
+The functionality of OPUS-TOMO is reconstructing dynamics and compositonal changes from cryo-ET data end-to-end!
+OPUS-TOMO can not only disentangle 3D structural information by reconstructing different conformations, but also reconstruct physically meaningful dynamics for the macromolecules.
 This new function is very easy to use if you have already been familiar with Relion's multi-body refinement (https://elifesciences.org/articles/36861). OPUS-DSD2 takes the input files of Relion's multi-body refinement,
 then performs ***structural disentanglement and multi-body dynamics fitting*** simultaneously and end-to-end!
 
@@ -54,13 +53,13 @@ The architecture of dynamics decoder is:
 <img width="422" alt="image" src="https://github.com/alncat/opusDSD/assets/3967300/6e81f980-3eb1-4e0a-8230-036ea6ccdc26">
 
 
-## Spliceosome complex <a name="splice"></a>
+## 80S Ribosome <a name="80s"></a>
 
 OPUS-DSD2 has superior structural disentanglement ability to encode distinct compositional changes into different PCs in composition latent space.
 
 https://github.com/alncat/opusDSD/assets/3967300/9d64292a-a018-4949-b31c-4f04c03be829
 
-## 80S ribosome <a name="80s"></a>
+## FAS <a name="fas"></a>
 The following results are from the legacy OPUS-DSD.
 An exmaple UMAP of latent space for 80S ribosome learned by the legacy OPUS-DSD:
 
@@ -70,25 +69,19 @@ Comparison between some states:
 ![Alt text](https://raw.githubusercontent.com/alncat/opusDSD/main/example/riborna.png?raw=true "80S ribosome rna swing")
 
 
-A more colorful umap is shown above. The particles are colored according to their projection classes, note that the clusters often show certain dominant colors, which is due to structural variations in images are accounted in the consensus refinement by distorting the pose paramters of each particle, like **fitting a longer rod into a small gap by tilting the rod!**
-
-![Alt text](https://raw.githubusercontent.com/alncat/opusDSD/main/example/umapr.png?raw=true "80S ribosome color UMAP")
-
-Data source: [EMPIAR-10002](https://www.ebi.ac.uk/empiar/EMPIAR-10002/). The particles are colored according to their pose parameters in this image.
-
 # set up environment <a name="setup"></a>
 
 After cloning the repository, to run this program, you need to have an environment with pytorch and a machine with GPUs. The recommended configuration is a machine with 4 V100 GPUs.
 You can create the conda environment for DSD using one of the environment files in the folder by executing
 
 ```
-conda env create --name dsd -f environmentcu11torch11.yml
+conda env create --name dsdtomo -f environmentcu11torch11.yml
 ```
 
 This environment primarily contains cuda 11.3 and pytorch 1.11.0. To create an environment with cuda 11.3 and pytorch 1.10.1, you can choose ```environmentcu11.yml```. Lastly, ```environment.yml``` contains cuda 10.2 and pytorch 1.11.0. On V100 GPU, OPUS-DSD with cuda 11.3 is 20% faster than OPUS-DSD with cuda 10.2. However, it's worth noting that OPUS-DSD **has not been tested on Pytorch version higher than 1.11.0**. We recommend using pytorch version 1.10.1 or 1.11.0. After the environment is sucessfully created, you can then activate it and execute our program within this environement.
 
 ```
-conda activate dsd
+conda activate dsdtomo
 ```
 
 You can then install OPUS-DSD by changing to the directory with cloned repository, and execute
@@ -104,8 +97,6 @@ git pull
 The inference pipeline of our program can run on any GPU which supports cuda 10.2 or 11.3 and is fast to generate a 3D volume. However, the training of our program takes larger amount memory, we recommend using V100 GPUs at least.
 
 # prepare data <a name="preparation"></a>
-
-This program is developed based on cryoDRGN and adheres to a similar data preparation process.
 
 **Data Preparation Guidelines:**
 1. **Cryo-EM Dataset:** Ensure that the cryo-EM dataset is stored in the MRCS stack file format. A good dataset for tutorial is the splicesome which is available at https://empiar.pdbj.org/entry/10180/ (It contains the consensus refinement result.)
@@ -211,7 +202,7 @@ For **the RELION STAR file with version hgiher than 3.0**, you should add --reli
 
 # training <a name="training"></a>
 
-## train_tomo for OPUS-TOMO <div id="train_cv">
+## train_tomo for OPUS-TOMO <div id="train_tomo">
 
 When the inputs are available, you can train the vae for structural disentanglement proposed in OPUS-DSD's paper using
 
@@ -271,20 +262,7 @@ dsd train_cv /work/all.mrcs --ctf ./sp-ctf.pkl --poses ./sp-pose-euler.pkl --laz
 
 both are in the output directory
 
-During training, opus-DSD will output temporary volumes called ```tmp*.mrc``` (or the prefix you specified), you can check the intermediate results by viewing them in Chimera. Opus-DSD uses 3D volume as intermediate representation, so it requires larger amount of memory, v100 gpus will be sufficient for its training. Its training speed is slower, which requires 2 hours on 4 v100 gpus to finish one epoch on dataset with 20k images. By default, opus-DSD reads all images into memory before training, so it may require some more host memories **To disable this behavior, you can include ```--notinmem``` into the training command**.
-
-## train_multi for OPUS-DSD2 <div id="train_multi">
-
-To reconstruct the multi-body dynamics, you should use the command ```dsd train_multi```, using ```dsd train_multi -h``` to check more details. Tho enbale dynamics reconstruction, you shall specify ```--masks``` to load the mask pkl with the parameters for each body. An example command is as below:
-```
-dsd train_multi /work/all.mrcs --ctf /work/all_ctf.pkl --poses /work/all_pose_euler.pkl -n 20 -b 12 --zdim 12 --lr 1.e-4 --num-gpus 4 --multigpu --beta-control 2. -o ./ -r /work/MaskCreate/job001/mask.mrc --split /work/pkls/sa-split.pkl --lamb 1. --bfactor 3.75 --downfrac 0.75 --valfrac 0.25 --templateres 224 --masks /work/mask_params.pkl --zaffdim 6 --plot
-```
-| argument |  explanation |
-| --- | --- |
-| --zaffdim | controls the dimension of dynamics latent space |
-| --masks | the pkl file contains the parameters for bodies of the macromolecule|
-
-If you omit ```--masks``` in the train_multi command, OPUS-DSD2 will estimate a global pose correction instead (train_cv also does this).
+During training, opus-DSD will output temporary volumes called ```tmp*.mrc``` (or the prefix you specified), you can check the intermediate results by viewing them in Chimera. By default, opus-DSD reads subotomograms from disk as needed during training.
 
 # analyze result <a name="analysis"></a>
 You can use the analysis scripts in ```dsdsh``` to visualize the learned latent space! The analysis procedure is detailed as following.
