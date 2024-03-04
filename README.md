@@ -25,20 +25,10 @@ https://github.com/alncat/opusTomo/assets/3967300/d4bffa34-c8bf-49c9-b58f-ef6128
 
 
 
-OPUS-DSD2 also greatly improves the quality of its reconstructions!
-<img width="1055" alt="image" src="https://github.com/alncat/opusDSD/assets/3967300/be04450d-a9b9-4982-96af-04bec5d7c6a9">
-
-
 The major new functionality of OPUS-DSD2 is reconstructing multi-body dynamics from cryo-EM data end-to-end during structural disentanglement!
 OPUS-DSD2 can not only disentangle 3D structural information by reconstructing different conformations, but also reconstruct physically meaningful dynamics for the macromolecules.
 This new function is very easy to use if you have already been familiar with Relion's multi-body refinement (https://elifesciences.org/articles/36861). OPUS-DSD2 takes the input files of Relion's multi-body refinement,
 then performs ***structural disentanglement and multi-body dynamics fitting*** simultaneously and end-to-end!
-
-This program is built upon a set of great works:
-- [cryoDRGN](https://github.com/zhonge/cryodrgn)
-- [Neural Volumes](https://stephenlombardi.github.io/projects/neuralvolumes/)
-- [UMAP](https://umap-learn.readthedocs.io/en/latest/)
-- [Healpy](https://healpy.readthedocs.io/en/latest/)
 
 
 This project seeks to unravel how a latent space, encoding 3D structural information, can be learned by utilizing only 2D image supervisions which are aligned against a consensus reference model.
@@ -386,3 +376,9 @@ dsdsh parse_pose /work/consensus_data.star 320 1.699 /work/sp 16 16 --relion31
 - $7 indicates the version of starfile, only include this when the version of starfile is higher than 3.0
 
 change to directory ```/work/sp/analyze.16/kmeans16``` to checkout the starfile for images in each cluster.
+
+This program is built upon a set of great works:
+- [cryoDRGN](https://github.com/zhonge/cryodrgn)
+- [Neural Volumes](https://stephenlombardi.github.io/projects/neuralvolumes/)
+- [UMAP](https://umap-learn.readthedocs.io/en/latest/)
+- [Healpy](https://healpy.readthedocs.io/en/latest/)
