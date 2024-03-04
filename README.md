@@ -214,26 +214,25 @@ For **the RELION STAR file with version hgiher than 3.0**, you should add --reli
 
 # training <a name="training"></a>
 
-## train_cv for OPUS-DSD <div id="train_cv">
+## train_tomo for OPUS-TOMO <div id="train_cv">
 
 When the inputs are available, you can train the vae for structural disentanglement proposed in OPUS-DSD's paper using
 
 ```
-dsd train_cv /work/all.mrcs --ctf ./sp-ctf.pkl --poses ./sp-pose-euler.pkl --lazy-single --pe-type vanilla --encode-mode grad --template-type conv -n 20 -b 12 --zdim 12 --lr 1.e-4 --num-gpus 4 --multigpu --beta-control 2. --beta cos -o /work/sp -r ./mask.mrc --downfrac 0.75 --valfrac 0.25 --lamb 1. --split sp-split.pkl --bfactor 4. --templateres 224
+dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 8 --zdim 12 --lr 5.e-5 --num-gpus 4 --multigpu --beta-control 0.8 --beta cos -o /work/ribo -r ./mask.mrc --downfrac 0.65 --valfrac 0.1 --lamb 0.8 --split ribo-split.pkl --bfactor 4. --templateres 160 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/
 ```
 
-The argument following train_cv specifies the image stack.
-The three arguments ```--pe-type vanilla --encode-mode grad --template-type conv``` ensure OPUS-DSD is selected! Our program set the default values of those arguments to the values shown in above command.
+The argument following train_tomo specifies the image stack. In contrast to OPUS-DSD, we no longer need to specify ctf since they are read from the subtomogram starfile.
+Moreover, OPUS-TOMO needs to specify the angpix of the subtomogram, and also the prefix directory before the filename for subtomogram in starfile.
 
 The functionality of each argument is explained in the table:
 | argument |  explanation |
 | --- | --- |
-| --ctf   | ctf parameters of the image stack |
-| --poses | pose parameters of the image stack |
+| --poses | pose parameters of the subtomograms in starfile |
 | -n     | the number of training epoches, each training epoch loops through all images in the training set |
 | -b     | the number of images for each batch on each gpu, depends on the size of available gpu memory|
 | --zdim  | the dimension of latent encodings, increase the zdim will improve the fitting capacity of neural network, but may risk of overfitting |
-| --lr    | the initial learning rate for adam optimizer, 1.e-4 should work fine. |
+| --lr    | the initial learning rate for adam optimizer, 5.e-5 should work fine. |
 | --num-gpus | the number of gpus used for training, note that the total number of images in the total batch will be n*num-gpus |
 | --multigpu |toggle on the data parallel version |
 | --beta-control |the restraint strength of the beta-vae prior, the larger the argument, the stronger the restraint. The scale of beta-control should be propotional to the SNR of dataset. Suitable beta-control might help disentanglement by increasing the magnitude of latent encodings and the sparsity of latent encodings, for more details, check out [beta vae paper](https://openreview.net/forum?id=Sy2fzU9gl). In our implementation, we adjust the scale of beta-control automatically based on SNR estimation, possible ranges of this argument are [0.5-4.]. You can use larger beta-control for dataset with higher SNR|
@@ -248,7 +247,8 @@ The functionality of each argument is explained in the table:
 | --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to 2D images. The default value is 192. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
 | --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the 2D reconstructions and experimental images after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_cv```|
 | --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-DSD will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
-| --notinmem | include this arguement to let OPUS-DSD reading image stacks from hard disk during training, this is helpful when a huge dataset cannot fit in the memory |
+| --angpix | the angstrom per pixel for the input subtomogram |
+| --datadir | the root directory before the filename of subtomogram in input starfile |
 
 The plot mode will ouput the following images in the directory where you issued the training command:
 
