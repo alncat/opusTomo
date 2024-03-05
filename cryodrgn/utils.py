@@ -1064,7 +1064,8 @@ def create_target_map(target, coords, angpix, D, label=1):
 def get_cross_entropy(image, coords, sidechains, angpix, mask=None, exponent=1.0):
     #image = image.squeeze()
     #image = F.softmax(image, dim=0)
-    D = image.shape[-1]
+    B = image.shape[0]
+    D = image.shape[-1] #(B, 3, D, H, W)
     mask_sum = mask.sum()
     #print(coords.shape) #(1, L, 4, 3)
     pt = ((coords.shape[1]*4)/mask_sum)
@@ -1077,16 +1078,18 @@ def get_cross_entropy(image, coords, sidechains, angpix, mask=None, exponent=1.0
     target_map = create_target_map(target_map, sidechains, angpix, D, label=2)
     #target = target_map
     target = F.one_hot(target_map, num_classes=3)
-    target = torch.permute(target, [3, 0, 1, 2,])
-    #ce = (target * (image.log())).sum(dim=0)
+    #weights = torch.tensor([pt, pn, pn]).to(target.get_device())
+    #target = target*weights
+    target = torch.permute(target, [3, 0, 1, 2,]) #(3, 64, 64, 64)
     #print(target.shape, image.shape)
+    #ce = F.conv3d(image.log()*mask, target.unsqueeze(0), stride=1, padding=0)/mask_sum #*512./mask_sum #(B, 1, 3, 3, 3)
+    #print(ce)
+    #ce = torch.logsumexp(ce.view(B, -1), -1)/512.
+    #print(ce)
     ce = (target[0,...] * (image[:, 0, ...].log())) * pt + (target[1:,...] * (image[:, 1:, ...].log())).sum(dim=0)*pn
     #ignore background
     #ce = (target*image.log())[1:,...].sum(dim=0)
-    if mask is not None:
-        return -(ce*mask).sum()/(mask_sum*image.shape[0]), target_map
-    else:
-        return -ce.mean(), target_map
+    return -ce.sum()/(B*mask_sum), target_map
 
 def get_translation(image, target):
     image1 = image.squeeze()
@@ -1126,23 +1129,33 @@ def get_translation(image, target):
     #print(best_shift, result.values)
     return best_shift
 
-def get_l2_loss(image, target, sidechains, coords, target_map, mask=None, exponent=1.):
+def get_l2_loss(image, target, sidechains, coords, target_map, mask=None, exponent=0.7):
     #image = image.squeeze()
     #image = F.softmax(image, dim=0)
+    B = image.shape[0]
     D = image.shape[-1]
     mask_sum = mask.sum()
     #print(coords.shape) #(1, L, 4, 3)
     pt = ((coords.shape[1]*4)/mask_sum)
     pn = (1. - pt)**exponent
     pt = pt**exponent
+    #target_mask = (target_map == 0) * pt + pn * (target_map != 0)
+    #all_target = torch.stack([target*target_mask, sidechains*target_mask], dim = 0)
+    #img_norm = (image[:, 1:, ...].pow(2)*mask*target_mask).sum(dim=(1,2,3,4))
 
     #ce = (target * (image.log())).sum(dim=0)
     #print(target.shape, image.shape)
     ce = ((target - image[:, 1, ...]).pow(2) + (sidechains - image[:, 2, ...]).pow(2)
             )* ((pt) * ((target_map) == 0) + pn * ((target_map) != 0))
+
+    #ce = F.conv3d(image[:, 1:, ...]*mask, all_target.unsqueeze(0), stride=1, padding=1) #(B, 1, 3, 3, 3)
+    #ce = F.softmax(ce.view(B, -1)*1024./mask_sum, -1)/512.
+
     #((pt) * ((target + sidechains) < 0.7) + pn * ((target + sidechains) >= 0.7))
     #((pt) * ((target_map) == 0) + pn * ((target_map) != 0))
-    return -(ce*mask).sum()/(mask_sum*image.shape[0])
+    #return -(ce*mask).sum()/(mask_sum*image.shape[0])
+    return (ce*mask).sum()/(mask_sum*B)
+    #return -ce.sum()/(B*mask_sum)
 
 def get_cubic_center(coords, angpix, D=8, eps=1e-5):
     #map coords to cubic index
