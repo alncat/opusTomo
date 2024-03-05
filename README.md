@@ -128,20 +128,18 @@ dsdsh prepare /work/consensus_data.star 320 1.699 --relion31
                 $1                      $2    $3    $4
 ```
  - $1 specifies the path of the starfile,
- - $2 specifies the dimension of image
- - $3 specifies the angstrom per pixel of image
+ - $2 specifies the dimension of subtomogram
+ - $3 specifies the angstrom per pixel of subtomogram
  - $4 indicates the version of starfile, only include --relion31 if the file version is higher than 3.0
 
 **The pose pkl can be found in the same directory of the starfile, in this case, the pose pkl is /work/consensus_data_pose_euler.pkl.**
-
-***Sometimes after running some protocols in Relion using all.star, Relion might sort the order of images in the corresponding output starfile. You should make sure that the output starfile and the input all.star have the same order of images, thus the output starfile have the correct parameters for the images in all.mrcs!***
 
 Finally, you should **create a mask using the consensus model and RELION** through ```postprocess```. The detailed procedure for mask creation can be found in https://relion.readthedocs.io/en/release-3.1/SPA_tutorial/Mask.html. The spliceosome dataset on empiar comes with a ```global_mask.mrc``` file. Suppose the filename of mask is ```mask.mrc```, move it to the program directory for simplicity.
 
 
 **Data preparation under the hood**
 
-The pose parameters for image stack are stored as the python pickle files, aka pkl. Suppose the refinement result is stored as `consensus_data.star` and **the format of the Relion STAR file is below version 3.0**,
+The pose parameters for subtomograms are stored as the python pickle files, aka pkl. Suppose the refinement result is stored as `consensus_data.star` and **the format of the Relion STAR file is below version 3.0**,
 and the consensus_data.star is located at ```/work/``` directory, you can convert STAR to the pose pkl file by executing the command below:
 
 ```
@@ -151,7 +149,7 @@ dsd parse_pose_star /work/consensus_data.star -D 320 --Apix 1.699 -o sp-pose-eul
 
 | argument | explanation|
 | --- | --- |
-| -D | the dimension of the particle image in your dataset|
+| -D | the dimension of the particle subtomogram in your dataset|
 | --Apix | is the angstrom per pixel of you dataset|
 | -o | followed by the filename of pose parameter used by our program|
 | --relion31 | include this argument if you are using star file from relion with version higher than 3.0|
@@ -174,34 +172,35 @@ The functionality of each argument is explained in the table:
 | argument |  explanation |
 | --- | --- |
 | --poses | pose parameters of the subtomograms in starfile |
-| -n     | the number of training epoches, each training epoch loops through all images in the training set |
-| -b     | the number of images for each batch on each gpu, depends on the size of available gpu memory|
+| -n     | the number of training epoches, each training epoch loops through all subtomograms in the training set |
+| -b     | the number of subtomograms for each batch on each gpu, depends on the size of available gpu memory|
 | --zdim  | the dimension of latent encodings, increase the zdim will improve the fitting capacity of neural network, but may risk of overfitting |
 | --lr    | the initial learning rate for adam optimizer, 5.e-5 should work fine. |
-| --num-gpus | the number of gpus used for training, note that the total number of images in the total batch will be n*num-gpus |
+| --num-gpus | the number of gpus used for training, note that the total number of subtomograms in the total batch will be n*num-gpus |
 | --multigpu |toggle on the data parallel version |
 | --beta-control |the restraint strength of the beta-vae prior, the larger the argument, the stronger the restraint. The scale of beta-control should be propotional to the SNR of dataset. Suitable beta-control might help disentanglement by increasing the magnitude of latent encodings and the sparsity of latent encodings, for more details, check out [beta vae paper](https://openreview.net/forum?id=Sy2fzU9gl). In our implementation, we adjust the scale of beta-control automatically based on SNR estimation, possible ranges of this argument are [0.5-4.]. You can use larger beta-control for dataset with higher SNR|
 | --beta |the schedule for restraint stengths, ```cos``` implements the [cyclic annealing schedule](https://www.microsoft.com/en-us/research/blog/less-pain-more-gain-a-simple-method-for-vae-training-with-less-of-that-kl-vanishing-agony/) and is the default option|
 | -o | the directory name for storing results, such as model weights, latent encodings |
-| -r | ***the solvent mask created from consensus model***, our program will focus on fitting the contents inside the mask (more specifically, the 2D projection of a 3D mask). Since the majority part of image doesn't contain electron density, using the original image size is wasteful, by specifying a mask, our program will automatically determine a suitable crop rate to keep only the region with densities. |
-| --downfrac | the downsampling fraction of input image, the input to network will be downsampled to size of D\*downfrac, where D is the original size of image. You can set it according to resolution of consensus model and the ***templateres*** you set. |
+| -r | ***the solvent mask created from consensus model***, our program will focus on fitting the contents inside the mask. Since the majority part of subtomogram doesn't contain electron density, using the original subtomogram size is wasteful, by specifying a mask, our program will automatically determine a suitable crop rate to keep only the region with densities. |
+| --downfrac | the downsampling fraction of input subtomogram, the input to network will be downsampled to size of D\*downfrac, where D is the original size of subtomogram. You can set it according to resolution of consensus model and the ***templateres*** you set. |
 | --lamb | the restraint strength of structural disentanglement prior proposed in OPUS-DSD, set it according to the SNR of your dataset, for dataset with high SNR such as ribosome, splicesome, you can set it to 1. or higher, for dataset with lower SNR, consider lowering it. Possible ranges are [0.1, 3.]. If you find **the UMAP of embeedings is exaggeratedly stretched into a ribbon**, then the lamb you used during training is too high! |
-| --split | the filename for storing the train-validation split of image stack |
-| --valfrac | the fraction of images in the validation set, default is 0.1 |
+| --split | the filename for storing the train-validation split of subtomograms |
+| --valfrac | the fraction of subtomograms in the validation set, default is 0.1 |
 | --bfactor | will apply exp(-bfactor/4 * s^2 * 4*pi^2) decaying to the FT of reconstruction, s is the magnitude of frequency, increase it leads to sharper reconstruction, but takes longer to reveal the part of model with weak density since it actually dampens learning rate, possible ranges are [3, 5]. Consider using higher values for more dynamic structures. We will decay the bfactor slightly in every epoch. This is equivalent to learning rate warming up. |
 | --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to subtomograms. The default value is 192. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
-| --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the Z-projection of subtomograms and experimental subtomograms after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_cv```|
+| --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the Z-projection of subtomograms and experimental subtomograms after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_tomo```|
 | --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-TOMO will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
 | --angpix | the angstrom per pixel for the input subtomogram |
 | --datadir | the root directory before the filename of subtomogram in input starfile |
 
 The plot mode will ouput the following images in the directory where you issued the training command:
 
-![image](https://github.com/alncat/opusDSD/assets/3967300/924554b6-9576-4727-bd69-e853b6918f19)
+![ref](https://github.com/alncat/opusTomo/assets/3967300/9bd5ce75-c57f-4685-9c34-da55e38fedfe)
+
 
 
 Each row shows a selected image and its reconstruction from a batch.
-In the first row, the first image is the experimental image supplemented to encoder, the second image is a 2D reconstruction blurred by the corresponding CTF, the third image is the correpsonding experimental image after 2D masking.
+In the first row, the first image is the projection of experimental subtomogram supplemented to encoder, the second image is a 2D projection from subtomogram reconstruction blurred by the corresponding CTF, the third image is the projection of correpsonding experimental subtomogram after 3D masking.
 
 
 You can use ```nohup``` to let the above command execute in background and use redirections like ```1>log 2>err``` to redirect ouput and error messages to the corresponding files.
@@ -210,7 +209,7 @@ Happy Training! **Open an issue when running into any troubles.**
 To restart execution from a checkpoint, you can use
 
 ```
-dsd train_cv /work/all.mrcs --ctf ./sp-ctf.pkl --poses ./sp-pose-euler.pkl --lazy-single -n 20 --pe-type vanilla --encode-mode grad --template-type conv -b 12 --zdim 12 --lr 1.e-4  --num-gpus 4 --multigpu --beta-control 2. --beta cos -o /work/sp -r ./mask.mrc --downfrac 0.75 --lamb 1. --valfrac 0.25 --load /work/sp/weights.0.pkl --latents /work/sp/z.0.pkl --split sp-split.pkl --bfactor 4. --templateres 224
+dsd train_tomo /work/all.mrcs --ctf ./sp-ctf.pkl --poses ./sp-pose-euler.pkl --lazy-single -n 20 --pe-type vanilla --encode-mode grad --template-type conv -b 12 --zdim 12 --lr 1.e-4  --num-gpus 4 --multigpu --beta-control 2. --beta cos -o /work/sp -r ./mask.mrc --downfrac 0.75 --lamb 1. --valfrac 0.25 --load /work/sp/weights.0.pkl --latents /work/sp/z.0.pkl --split sp-split.pkl --bfactor 4. --templateres 224
 ```
 | argument |  explanation |
 | --- | --- |
@@ -280,22 +279,22 @@ to generate volumes along pc1. You can check volumes in ```/work/sp/analyze.16/p
 **PCs are great for visualizing the main motions and compositional changes of marcomolecules, while KMeans reveals representative conformations in higher qualities.**
 
 ## select particles <div id="select">
-Finally, you can also retrieve the star files for images in each kmeans cluster using
+Finally, you can also retrieve the star files for subtomograms in each kmeans cluster using
 
 ```
 dsdsh parse_pose /work/consensus_data.star 320 1.699 /work/sp 16 16 --relion31
                                 $1           $2  $3    $4     $5 $6  $7
 ```
 
-- $1 is the star file of all images
-- $2 is the dimension of image
-- $3 is apix value of image
+- $1 is the star file of all subtomograms
+- $2 is the dimension of subtomogram
+- $3 is apix value of subtomogram
 - $4 is the output directory used in training
 - $5 is the epoch number you just analyzed
 - $6 is the number of kmeans clusters you used in analysis
 - $7 indicates the version of starfile, only include this when the version of starfile is higher than 3.0
 
-change to directory ```/work/sp/analyze.16/kmeans16``` to checkout the starfile for images in each cluster.
+change to directory ```/work/sp/analyze.16/kmeans16``` to checkout the starfile for subtomograms in each cluster.
 
 This program is built upon a set of great works:
 - [cryoDRGN](https://github.com/zhonge/cryodrgn)
