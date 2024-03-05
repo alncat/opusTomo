@@ -1,5 +1,5 @@
 # Table of contents
-2. [Opus-TOMO](#opusdsd)
+2. [Opus-TOMO](#opustomo)
     1. [80S ribosome](#80S)
     2. [FAS](#fas)
 4. [setup environment](#setup)
@@ -11,7 +11,7 @@
    2. [reconstruct volumes](#reconstruct)
    3. [select particles](#select)
 
-# Opus-TOMO <div id="opusdsd">
+# Opus-TOMO <div id="opustomo">
 This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by the research group of
 Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-TOMO is available at https://drive.google.com/drive/folders/1tEVu9PjCR-4pvkUK17fAHHpyw6y3rZcK?usp=sharing, while the publication of OPUS-DSD is available at https://www.nature.com/articles/s41592-023-02031-6.  Exemplar movies of the OPUS-TOMO is shown below:
 
@@ -165,8 +165,8 @@ When the inputs are available, you can train the vae for structural disentanglem
 dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 8 --zdim 12 --lr 5.e-5 --num-gpus 4 --multigpu --beta-control 0.8 --beta cos -o /work/ribo -r ./mask.mrc --downfrac 0.65 --valfrac 0.1 --lamb 0.8 --split ribo-split.pkl --bfactor 4. --templateres 160 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/
 ```
 
-The argument following train_tomo specifies the image stack. In contrast to OPUS-TOMO, we no longer need to specify ctf since they are read from the subtomogram starfile.
-Moreover, OPUS-TOMO needs to specify the angpix of the subtomogram, and also the prefix directory before the filename for subtomogram in starfile.
+The argument following train_tomo specifies the starfile for subtomograms. In contrast to OPUS-DSD, we no longer need to specify ctf since they are read from the subtomogram starfile.
+Moreover, OPUS-TOMO needs to specify the angpix of the subtomogram by --angpix, and also the prefix directory before the filename for subtomogram in starfile by --datadir /work/ .
 
 The functionality of each argument is explained in the table:
 | argument |  explanation |
@@ -199,7 +199,7 @@ The plot mode will ouput the following images in the directory where you issued 
 
 
 
-Each row shows a selected image and its reconstruction from a batch.
+Each row shows a selected subtomogram and its reconstruction from a batch.
 In the first row, the first image is the projection of experimental subtomogram supplemented to encoder, the second image is a 2D projection from subtomogram reconstruction blurred by the corresponding CTF, the third image is the projection of correpsonding experimental subtomogram after 3D masking.
 
 
@@ -209,7 +209,7 @@ Happy Training! **Open an issue when running into any troubles.**
 To restart execution from a checkpoint, you can use
 
 ```
-dsd train_tomo /work/all.mrcs --ctf ./sp-ctf.pkl --poses ./sp-pose-euler.pkl --lazy-single -n 20 --pe-type vanilla --encode-mode grad --template-type conv -b 12 --zdim 12 --lr 1.e-4  --num-gpus 4 --multigpu --beta-control 2. --beta cos -o /work/sp -r ./mask.mrc --downfrac 0.75 --lamb 1. --valfrac 0.25 --load /work/sp/weights.0.pkl --latents /work/sp/z.0.pkl --split sp-split.pkl --bfactor 4. --templateres 224
+dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl --lazy-single -n 20 --pe-type vanilla --encode-mode grad --template-type conv -b 12 --zdim 12 --lr 1.e-4  --num-gpus 4 --multigpu --beta-control 2. --beta cos -o /work/ribo -r ./mask.mrc --downfrac 0.75 --lamb 1. --valfrac 0.25 --load /work/ribo/weights.0.pkl --latents /work/sp/z.0.pkl --split ribo-split.pkl --bfactor 4. --templateres 160
 ```
 | argument |  explanation |
 | --- | --- |
