@@ -71,13 +71,13 @@ After cloning the repository, to run this program, you need to have an environme
 You can create the conda environment for OPUS-TOMO using one of the environment files in the folder by executing
 
 ```
-conda env create --name dsdtomo -f environmentcu11torch11.yml
+conda env create --name opustomo -f environmentcu11torch11.yml
 ```
 
 This environment primarily contains cuda 11.3 and pytorch 1.11.0. To create an environment with cuda 11.3 and pytorch 1.10.1, you can choose ```environmentcu11.yml```. Lastly, ```environment.yml``` contains cuda 10.2 and pytorch 1.11.0. On V100 GPU, OPUS-TOMO with cuda 11.3 is 20% faster than OPUS-TOMO with cuda 10.2. However, it's worth noting that OPUS-TOMO **has not been tested on Pytorch version higher than 1.11.0**. We recommend using pytorch version 1.10.1 or 1.11.0. After the environment is sucessfully created, you can then activate it and execute our program within this environement.
 
 ```
-conda activate dsdtomo
+conda activate opustomo
 ```
 
 You can then install OPUS-TOMO by changing to the directory with cloned repository, and execute
@@ -95,9 +95,9 @@ The inference pipeline of our program can run on any GPU which supports cuda 10.
 # prepare data <a name="preparation"></a>
 
 **Data Preparation Guidelines:**
-1. **Cryo-EM Dataset:** Ensure that the cryo-ET dataset is stored subtomogram by subtomogram in directory. A good dataset for tutorial is the splicesome which is available at https://empiar.pdbj.org/entry/10180/ (It contains the consensus refinement result.)
+1. **Cryo-ET Dataset:** OPUS-TOMO takes inputs from subtomogram averaging, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored subtomogram by subtomogram in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.)
 
-2. **Consensus Refinement Result:** The program requires a consensus refinement result, which should not apply any symmetry and must be stored as a Relion STAR file. Other 3D reconstruction results such as 3D classification, as long as they determine the pose parameters of images, can also be supplied as input.
+2. **Subtomogram averaging Result:** The program requires a subtomogram averaging result, which should not apply any symmetry and must be stored as a Relion STAR file.
 
 **Usage Example:**
 
@@ -132,11 +132,7 @@ dsdsh prepare /work/consensus_data.star 320 1.699 --relion31
  - $3 specifies the angstrom per pixel of image
  - $4 indicates the version of starfile, only include --relion31 if the file version is higher than 3.0
 
-**The pose and ctf pkls can be found in the same directory of the starfile, in this case, the pose pkl is /work/consensus_data_pose_euler.pkl, and the ctf pkl is /work/consensus_data_ctf.pkl**
-
-Next, you need to prepare a image stack. Suppose you have downloaded the spliceosome dataset. You can prepare a particle stack named ```all.mrcs``` using
-
-```relion_stack_create --i consensus_data.star --o all --one_by_one```
+**The pose pkl can be found in the same directory of the starfile, in this case, the pose pkl is /work/consensus_data_pose_euler.pkl.**
 
 ***Sometimes after running some protocols in Relion using all.star, Relion might sort the order of images in the corresponding output starfile. You should make sure that the output starfile and the input all.star have the same order of images, thus the output starfile have the correct parameters for the images in all.mrcs!***
 
@@ -145,8 +141,8 @@ Finally, you should **create a mask using the consensus model and RELION** throu
 
 **Data preparation under the hood**
 
-The pose and ctf parameters for image stack are stored as the python pickle files, aka pkl. Suppose the refinement result is stored as `consensus_data.star` and **the format of the Relion STAR file is below version 3.0**,
-and the consensus_data.star is located at ```/work/``` directory, you can convert STAR to the pose pkl file **inside the opusTOMO source folder** by executing the command below:
+The pose parameters for image stack are stored as the python pickle files, aka pkl. Suppose the refinement result is stored as `consensus_data.star` and **the format of the Relion STAR file is below version 3.0**,
+and the consensus_data.star is located at ```/work/``` directory, you can convert STAR to the pose pkl file by executing the command below:
 
 ```
 dsd parse_pose_star /work/consensus_data.star -D 320 --Apix 1.699 -o sp-pose-euler.pkl
@@ -159,15 +155,6 @@ dsd parse_pose_star /work/consensus_data.star -D 320 --Apix 1.699 -o sp-pose-eul
 | --Apix | is the angstrom per pixel of you dataset|
 | -o | followed by the filename of pose parameter used by our program|
 | --relion31 | include this argument if you are using star file from relion with version higher than 3.0|
-
-Next, you can convert STAR to the ctf pkl file by executing:
-
-```
-dsd parse_ctf_star /work/consensus_data.star -D 320 --Apix 1.699 -o sp-ctf.pkl
-```
-
-For **the RELION STAR file with version hgiher than 3.0**, you should add --relion31 to the command!
-
 
 
 # training <a name="training"></a>
@@ -201,9 +188,9 @@ The functionality of each argument is explained in the table:
 | --lamb | the restraint strength of structural disentanglement prior proposed in OPUS-DSD, set it according to the SNR of your dataset, for dataset with high SNR such as ribosome, splicesome, you can set it to 1. or higher, for dataset with lower SNR, consider lowering it. Possible ranges are [0.1, 3.]. If you find **the UMAP of embeedings is exaggeratedly stretched into a ribbon**, then the lamb you used during training is too high! |
 | --split | the filename for storing the train-validation split of image stack |
 | --valfrac | the fraction of images in the validation set, default is 0.1 |
-| --bfactor | will apply exp(-bfactor/4 * s^2 * 4*pi^2) decaying to the FT of reconstruction, s is the magnitude of frequency, increase it leads to sharper reconstruction, but takes longer to reveal the part of model with weak density since it actually dampens learning rate, possible ranges are [3, 8]. Consider using higher values for more dynamic structures. We will decay the bfactor slightly in every epoch. This is equivalent to learning rate warming up. |
-| --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to 2D images. The default value is 192. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
-| --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the 2D reconstructions and experimental images after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_cv```|
+| --bfactor | will apply exp(-bfactor/4 * s^2 * 4*pi^2) decaying to the FT of reconstruction, s is the magnitude of frequency, increase it leads to sharper reconstruction, but takes longer to reveal the part of model with weak density since it actually dampens learning rate, possible ranges are [3, 5]. Consider using higher values for more dynamic structures. We will decay the bfactor slightly in every epoch. This is equivalent to learning rate warming up. |
+| --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to subtomograms. The default value is 192. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
+| --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the Z-projection of subtomograms and experimental subtomograms after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_cv```|
 | --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-TOMO will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
 | --angpix | the angstrom per pixel for the input subtomogram |
 | --datadir | the root directory before the filename of subtomogram in input starfile |
@@ -235,7 +222,7 @@ both are in the output directory
 During training, opus-TOMO will output temporary volumes called ```tmp*.mrc``` (or the prefix you specified), you can check the intermediate results by viewing them in Chimera. By default, opus-TOMO reads subotomograms from disk as needed during training.
 
 # analyze result <a name="analysis"></a>
-You can use the analysis scripts in ```dsdsh``` to visualize the learned latent space! The analysis procedure is detailed as following.
+You can use the analysis scripts in ```dsdsh``` to visualize the learned latent space! The analysis procedure is detailed as following and the same as OPUS-DSD!
 
 The analysis scripts can be invoked by calling command like
 ```
@@ -258,26 +245,11 @@ dsdsh analyze /work/sp 16 4 16
 - $3 is the number of PCs you would like to sample for traversal
 - $4 is the number of clusters for kmeans clustering.
 
-The analysis result will be stored in /work/sp/analyze.16, i.e., the output directory plus the epoch number you analyzed, using the above command. You can find the UMAP with the labeled kmeans centers in /work/sp/analyze.16/kmeans16/umap.png and the umap with particles colored by their projection parameter in /work/sp/analyze.16/umap.png .
+The analysis result will be stored in /work/ribo/analyze.16, i.e., the output directory plus the epoch number you analyzed, using the above command. You can find the UMAP with the labeled kmeans centers in /work/ribo/analyze.16/kmeans16/umap.png and the umap with particles colored by their projection parameter in /work/ribo/analyze.16/umap.png .
 
 ## reconstruct volumes <div id="reconstruct">
 After executing the above command once, you may skip the lengthy umap embedding laterly by appending ```--skip-umap``` to the command in analyze.sh. Our analysis script will read the pickled umap embeddings directly.
 The eval_vol command has following options,
-
-If the model is trained by fitting multi-body dynamics, we have a mode, eval_vol, to reconstruct the 
-multi-body dynamics, using the command
-```
-dsdsh eval_vol resdir N dpc num apix --masks MASKS --kmeans KMEANS --dfk DFK
-```
-This command selects the DFK class from the kmeans{KMEANS} folder as the template volume, which will be deformed according to the dynamics defined by the PC{dpc} of the dynamics latent space. The generated volumes show the dynamics on the selected class along the selected PC, and can be found in defanalyze.{N}/pc{dpc}. Details about each argument can be checked using ```dsdsh eval_vol -h```. As an example, if you execute:
-
-```
-dsdsh eval_vol . 19 dpc 2 2.2 --masks ../mask_test.pkl --kmeans 20 --dfk 4
-```
-
-This will generate volumes along pc 2 in dynamics latent space using the 4th cluster in kmeans20 as template volume.
-
-
 
 You can either generate the volume which corresponds to KMeans cluster centroid or traverses the principal component using,
 (you can check the content of script first, there are two commands, one is used to evaluate volume at kmeans center, another one is for PC traversal, just choose one according to your use case)
