@@ -42,7 +42,7 @@ The architecture of encoder is (Encoder class in cryodrgn/models.py):
 ![Alt text](https://raw.githubusercontent.com/alncat/opusDSD/main/example/encoder.png?raw=true "Opus-DSD encoder")
 
 
-The architecture of composition decoder is (ConvTemplate class in cryodrgn/models.py. In this version, the default size of output volume is set to 192^3, I downsampled the intermediate activations to save some gpu memories. You can tune it as you wish, happy training!):
+The architecture of decoder is (ConvTemplate class in cryodrgn/models.py. In this version, the default size of output volume is set to 192^3, I downsampled the intermediate activations to save some gpu memories. You can tune it as you wish, happy training!):
 
 ![Alt text](https://raw.githubusercontent.com/alncat/opusDSD/main/example/decoder.png?raw=true "Opus-DSD decoder")
 
@@ -95,7 +95,7 @@ The inference pipeline of our program can run on any GPU which supports cuda 10.
 # prepare data <a name="preparation"></a>
 
 **Data Preparation Guidelines:**
-1. **Cryo-ET Dataset:** OPUS-TOMO takes inputs from subtomogram averaging, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored subtomogram by subtomogram in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.)
+1. **Cryo-ET Dataset:** OPUS-TOMO takes inputs for performing subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.)
 
 2. **Subtomogram averaging Result:** The program requires a subtomogram averaging result, which should not apply any symmetry and must be stored as a Relion STAR file.
 
@@ -124,7 +124,7 @@ dsdsh commandx -h
 
 There is a command ```dsdsh prepare``` for data preparation. Under the hood, ```dsdsh prepare``` points to the prepare.sh inside analysis_scripts. Suppose **the version of star file is 3.1**, the above process can be simplified as,
 ```
-dsdsh prepare /work/consensus_data.star 320 1.699 --relion31
+dsdsh prepare /work/consensus_data.star 236 2.1 --relion31
                 $1                      $2    $3    $4
 ```
  - $1 specifies the path of the starfile,
@@ -134,8 +134,7 @@ dsdsh prepare /work/consensus_data.star 320 1.699 --relion31
 
 **The pose pkl can be found in the same directory of the starfile, in this case, the pose pkl is /work/consensus_data_pose_euler.pkl.**
 
-Finally, you should **create a mask using the consensus model and RELION** through ```postprocess```. The detailed procedure for mask creation can be found in https://relion.readthedocs.io/en/release-3.1/SPA_tutorial/Mask.html. The spliceosome dataset on empiar comes with a ```global_mask.mrc``` file. Suppose the filename of mask is ```mask.mrc```, move it to the program directory for simplicity.
-
+Finally, you should **create a mask using the consensus model and RELION** through ```postprocess```. The detailed procedure for mask creation can be found in https://relion.readthedocs.io/en/release-3.1/SPA_tutorial/Mask.html. 
 
 **Data preparation under the hood**
 
@@ -143,7 +142,7 @@ The pose parameters for subtomograms are stored as the python pickle files, aka 
 and the consensus_data.star is located at ```/work/``` directory, you can convert STAR to the pose pkl file by executing the command below:
 
 ```
-dsd parse_pose_star /work/consensus_data.star -D 320 --Apix 1.699 -o sp-pose-euler.pkl
+dsd parse_pose_star /work/consensus_data.star -D 236 --Apix 2.1 -o ribo-pose-euler.pkl
 ```
  where
 
@@ -192,6 +191,7 @@ The functionality of each argument is explained in the table:
 | --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-TOMO will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
 | --angpix | the angstrom per pixel for the input subtomogram |
 | --datadir | the root directory before the filename of subtomogram in input starfile |
+| --estpose | estimate a pose correction for each subtomogram during training |
 
 The plot mode will ouput the following images in the directory where you issued the training command:
 
