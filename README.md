@@ -37,7 +37,7 @@ The workflow of OPUS-TOMO is demonstrated as follows:
 <img width="763" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/ac975578-97c9-45cb-b909-e3fc275ff815">
 
 
-Note that all input and output of this method are in real space! (Fourier space is good, but how about real space!)
+Note that all input and output of this method are in real space! 
 The architecture of encoder is (Encoder class in cryodrgn/models.py):
 ![Alt text](https://raw.githubusercontent.com/alncat/opusDSD/main/example/encoder.png?raw=true "Opus-DSD encoder")
 
