@@ -49,7 +49,8 @@ The architecture of decoder is (ConvTemplate class in cryodrgn/models.py. In thi
 
 The architecture of pose corrector is:
 
-<img width="378" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/bf2359fc-c340-467a-b66a-969b62bb7e69">
+<img width="409" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/7f0eac9a-ecc2-47b8-ad43-81674b62c326">
+
 
 
 ## 80S Ribosome <a name="80s"></a>
