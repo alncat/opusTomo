@@ -39,7 +39,8 @@ The workflow of OPUS-TOMO is demonstrated as follows:
 
 Note that all input and output of this method are in real space! 
 The architecture of encoder is (Encoder class in cryodrgn/models.py):
-![Alt text](https://raw.githubusercontent.com/alncat/opusDSD/main/example/encoder.png?raw=true "Opus-DSD encoder")
+<img width="999" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/1d09533d-7265-4913-b140-d9c9c2e5b25b">
+
 
 
 The architecture of decoder is (ConvTemplate class in cryodrgn/models.py. In this version, the default size of output volume is set to 192^3, I downsampled the intermediate activations to save some gpu memories. You can tune it as you wish, happy training!):
