@@ -12,8 +12,8 @@
    3. [select particles](#select)
 
 # Opus-TOMO <div id="opustomo">
-This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by the research group of
-Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-TOMO is available at https://drive.google.com/drive/folders/1tEVu9PjCR-4pvkUK17fAHHpyw6y3rZcK?usp=sharing, while the publication of OPUS-DSD is available at https://www.nature.com/articles/s41592-023-02031-6.  Exemplar movies of the OPUS-TOMO is shown below:
+This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei Luo at the group of
+Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-TOMO is available at https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
 
 
 https://github.com/alncat/opusTomo/assets/3967300/8f7657f4-3ef0-40b9-819f-77e7fc95bb6d
@@ -299,6 +299,7 @@ dsdsh parse_pose /work/consensus_data.star 320 1.699 /work/sp 16 16 --relion31
 change to directory ```/work/sp/analyze.16/kmeans16``` to checkout the starfile for subtomograms in each cluster.
 
 This program is built upon a set of great works:
+- [opusDSD](https://github.com/alncat/opusDSD)
 - [cryoDRGN](https://github.com/zhonge/cryodrgn)
 - [Neural Volumes](https://stephenlombardi.github.io/projects/neuralvolumes/)
 - [UMAP](https://umap-learn.readthedocs.io/en/latest/)
