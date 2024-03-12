@@ -97,7 +97,7 @@ The inference pipeline of our program can run on any GPU which supports cuda 10.
 # prepare data <a name="preparation"></a>
 
 **Data Preparation Guidelines:**
-1. **Cryo-ET Dataset:** OPUS-TOMO takes inputs for performing subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.) We also have a script adapted from Relion for preparing the subtomograms and ctf starfiles. It is named as relion_prepare.py.
+1. **Cryo-ET Dataset:** OPUS-TOMO takes inputs for performing subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.) We also have a script adapted from Relion for preparing the subtomograms and ctf starfiles. It is named as relion_prepare.py in analysis_scripts folder. You can follow the detailed data preparation process in this paper: https://www.nature.com/articles/nprot.2016.124 .
 
 2. **Subtomogram averaging Result:** The program requires a subtomogram averaging result, which should not apply any symmetry and must be stored as a Relion STAR file.
 
@@ -279,6 +279,7 @@ dsdsh eval_vol /work/sp 16 pc 1 2.2
 
 to generate volumes along pc1. You can check volumes in ```/work/sp/analyze.16/pc1```. You can make a movie using chimerax's ```vseries``` feature. An example script for visualizing movie is in ```analysis_scripts/movie.py```. You can show the movie of the volumes by ```ChimeraX --script "./analysis_scripts/movie.py reference 0.985```.
 **PCs are great for visualizing the main motions and compositional changes of marcomolecules, while KMeans reveals representative conformations in higher qualities.**
+To invert the handness of the reconstrution, you can include ```--flip``` to the above commands.
 
 ## select particles <div id="select">
 Finally, you can also retrieve the star files for subtomograms in each kmeans cluster using
