@@ -155,7 +155,7 @@ def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=Non
 
     # the transpose of tilt rotation
     # xtilt = R xori
-    #NOTE: use this if the tilt angle in ctf stars are flipped!
+    #NOTE: use this if the tilt angle in ctf stars are flipped! (by my script)
     Rtilts = lie_tools.rot_2d(-tilts.squeeze(-1).float()).unsqueeze(-3)
     # test other tilt direction
     #NOTE: use this if the tilt angle is the same as given

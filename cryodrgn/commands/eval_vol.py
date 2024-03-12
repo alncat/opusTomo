@@ -27,7 +27,7 @@ def add_args(parser):
     parser.add_argument('--load', metavar='WEIGHTS.PKL', help='Initialize training from a checkpoint')
     parser.add_argument('-c', '--config', metavar='PKL', required=True, help='CryoDRGN config.pkl file')
     parser.add_argument('-o', type=os.path.abspath, required=True, help='Output .mrc or directory')
-    parser.add_argument('--prefix', default='vol_', help='Prefix when writing out multiple .mrc files (default: %(default)s)')
+    parser.add_argument('--prefix', default='reference', help='Prefix when writing out multiple .mrc files (default: %(default)s)')
     parser.add_argument('-v','--verbose',action='store_true',help='Increaes verbosity')
 
     group = parser.add_argument_group('Specify z values')
@@ -38,6 +38,7 @@ def add_args(parser):
     group.add_argument('--zfile', help='Text file with z-values to evaluate')
     group.add_argument('--deform', action='store_true', help='deforming the structure')
     group.add_argument('--template-z', help='path for template encoding')
+    group.add_argument('--template-z-ind', type=int, help='the index of the selected template encoding')
     group.add_argument('--masks', help='path for the masks')
     group.add_argument('--num-bodies', type=int, default=0, help='number of rigid bodies')
 
@@ -52,12 +53,12 @@ def add_args(parser):
     group.add_argument('--enc-layers', dest='qlayers', type=int, help='Number of hidden layers')
     group.add_argument('--enc-dim', dest='qdim', type=int, help='Number of nodes in hidden layers')
     group.add_argument('--zdim', type=int,  help='Dimension of latent variable')
-    group.add_argument('--encode-mode', choices=('conv','resid','mlp','tilt', 'grad'), help='Type of encoder network')
+    group.add_argument('--encode-mode', default='grad', choices=('conv','resid','mlp','tilt', 'grad'), help='Type of encoder network')
     group.add_argument('--dec-layers', dest='players', type=int, help='Number of hidden layers')
     group.add_argument('--dec-dim', dest='pdim', type=int, help='Number of nodes in hidden layers')
     group.add_argument('--enc-mask', type=int, help='Circular mask radius for image encoder')
-    group.add_argument('--pe-type', choices=('geom_ft','geom_full','geom_lowf','geom_nohighf','linear_lowf','none', 'vanilla'), help='Type of positional encoding')
-    group.add_argument('--template-type', choices=('conv'), help='Type of template decoding method (default: %(default)s)')
+    group.add_argument('--pe-type', default='vanilla', choices=('geom_ft','geom_full','geom_lowf','geom_nohighf','linear_lowf','none', 'vanilla'), help='Type of positional encoding')
+    group.add_argument('--template-type', default='conv', choices=('conv'), help='Type of template decoding method (default: %(default)s)')
     group.add_argument('--warp-type', choices=('blurmix', 'diffeo', 'deform'), help='Type of warp decoding method (default: %(default)s)')
     group.add_argument('--symm', help='Type of symmetry of the 3D volume (default: %(default)s)')
     group.add_argument('--num-struct', type=int, default=1, help='Num of structures (default: %(default)s)')
@@ -96,6 +97,10 @@ def main(args):
     enc_mask = -1
     D = cfg['lattice_args']['D'] # image size + 1
     zdim = cfg['model_args']['zdim']
+    if "z_affine_dim" in cfg['model_args']:
+        z_affine_dim = cfg['model_args']['z_affine_dim']
+    else:
+        z_affine_dim = 4
     norm = cfg['dataset_args']['norm']
     lattice = Lattice(D, extent=0.5)
     downfrac = cfg['dataset_args']['downfrac']
@@ -132,11 +137,10 @@ def main(args):
                 device=device, symm=args.symm, ctf_grid=None,
                 deform_emb_size=args.deform_size, downfrac=downfrac,
                 templateres=templateres, window_r=window_r, masks_params=masks_params,
-                num_bodies=args.num_bodies)
+                num_bodies=args.num_bodies, z_affine_dim=z_affine_dim)
 
     vanilla = args.pe_type == "vanilla"
 
-    model = model.to(device)
     if args.load:
         log('Loading checkpoint from {}'.format(args.load))
         checkpoint = torch.load(args.load)
@@ -162,14 +166,25 @@ def main(args):
             #model.encoder.load_state_dict(model_dict)
 
             pretrained_dict = checkpoint['decoder_state_dict']
+            #overwrite ref_mask
+            if "ref_mask" in pretrained_dict:
+                model.decoder.ref_mask =  pretrained_dict["ref_mask"]
             model_dict = model.decoder.state_dict()
             # 1. filter out unnecessary keys
-            pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and "grid" not in k and "mask" not in k}
+            #pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and "grid" not in k and "mask" not in k}
+            for k in list(pretrained_dict.keys()):
+                #if "affine_head" in k or "second_order_head" in k:
+                if k not in model_dict or pretrained_dict[k].shape != model_dict[k].shape:
+                    if k in model_dict:
+                        print(k, pretrained_dict[k].shape, model_dict[k].shape)
+                    #if k != "ref_mask":
+                    del pretrained_dict[k]
             # 2. overwrite entries in the existing state dict
             model_dict.update(pretrained_dict)
             # 3. load the new state dict
             model.decoder.load_state_dict(model_dict)
 
+    model = model.to(device)
 
     model.eval()
 
@@ -191,9 +206,10 @@ def main(args):
                 else:
                     template_z = np.loadtxt(args.template_z).reshape(-1, zdim)
                     len_template = template_z.shape[0]
-                    template_z = torch.tensor(template_z[len_template//2, :]).float().to(device)
+                    assert args.template_z_ind < len_template, f"template-z-ind {args.template_z_ind} must be smaller than {len_template}"
+                    template_z = torch.tensor(template_z[args.template_z_ind, :]).float().to(device)
                     log(template_z)
-                    z = np.loadtxt(args.zfile).reshape(-1, 4)
+                    z = np.loadtxt(args.zfile).reshape(-1, z_affine_dim)
                 z = torch.tensor(z).float().to(device)
             else:
                 z = np.loadtxt(args.zfile).reshape(-1, zdim)
@@ -201,14 +217,14 @@ def main(args):
         if not os.path.exists(args.o):
             os.makedirs(args.o)
 
-        log(f'Generating {len(z)} volumes')
+        log(f'Generating {len(z)} volumes in {args.o}')
         for i,zz in enumerate(z):
             log(zz)
             if args.deform:
                 #null_z = torch.zeros(zdim).to(device)
                 zz = torch.cat([template_z, zz], dim=-1)
             if vanilla:
-                model.save_mrc(f'{args.o}/reference'+str(i), enc=zz, Apix=args.Apix)
+                model.save_mrc(f'{args.o}/{args.prefix}'+str(i), enc=zz, Apix=args.Apix, flip=args.flip)
             else:
                 if args.downsample:
                     extent = lattice.extent * (args.downsample/(D-1))
@@ -227,7 +243,7 @@ def main(args):
         z = torch.randn(1, args.zdim).to(device)
         log(z)
         if vanilla:
-            model.save_mrc('reference', enc=z)
+            model.save_mrc(args.prefix, enc=z)
             return
         if args.downsample:
             extent = lattice.extent * (args.downsample/(D-1))

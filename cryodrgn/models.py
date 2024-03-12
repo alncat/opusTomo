@@ -49,7 +49,8 @@ class HetOnlyVAE(nn.Module):
             tmp_prefix="ref",
             window_r=0.85,
             masks_params=None,
-            num_bodies=0):
+            num_bodies=0,
+            z_affine_dim=4,):
         super(HetOnlyVAE, self).__init__()
         self.lattice = lattice
         self.zdim = zdim
@@ -61,6 +62,7 @@ class HetOnlyVAE(nn.Module):
         self.device = device
         self.render_size = (int((lattice.D - 1)*downfrac)//2)*2
         self.num_bodies = num_bodies
+        self.z_affine_dim = z_affine_dim
         if ref_vol is not None:
             in_vol_nonzeros = torch.nonzero(ref_vol)
             in_vol_mins, _ = in_vol_nonzeros.min(dim=0)
@@ -290,10 +292,10 @@ class HetOnlyVAE(nn.Module):
         else:
             return self.decode(*args, **kwargs)
 
-    def save_mrc(self, filename, enc=None, Apix=1.):
+    def save_mrc(self, filename, enc=None, Apix=1., flip=False):
         if self.vanilla_dec:
             if enc is not None:
-                self.decoder.save(filename, z=enc, Apix=Apix)
+                self.decoder.save(filename, z=enc, Apix=Apix, flip=flip)
 
     def get_images(self, rots, trans):
         assert self.vanilla_dec
@@ -1847,6 +1849,7 @@ class VanillaDecoder(nn.Module):
     def save(self, filename, z=None, encoding=None, flip=False, Apix=1.):
         if self.template_type == "conv":
             template, affine = self.template(z)
+            print(template.shape)
             if affine is not None:
                 body_quat_i = affine[0][0, ...]
                 one = torch.ones_like(affine[1][0, :, :1])*8.
@@ -1873,6 +1876,9 @@ class VanillaDecoder(nn.Module):
             elif self.transformer.templateres != self.templateres:
                 #resample
                 template = self.transformer.sample(template)
+                if self.ref_mask is not None:
+                    mask = self.transformer.sample(self.ref_mask)
+                    template *= mask # apply mask
             template = template.squeeze(0).squeeze(0)
         else:
             template = self.template

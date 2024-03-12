@@ -884,14 +884,16 @@ def dgram_from_positions(positions, num_bins=15, min_bin=3.25, max_bin=20.75):
     dgram = (torch.gt(dist2, lower_breaks) & torch.lt(dist2, upper_breaks)).float()
     return dist2.squeeze(-1), dgram
 
-def gather_from_3dmap(img, indices):
+def convert_3dind_1d(indices, D):
+    indices_1d = torch.unique((indices[:, 0] + indices[:, 1]*D + indices[:, 2]*D*D).long())
+    return indices_1d
+
+def gather_from_3dmap(img, indices_1d):
     #convert xyz indices to 1d index
-    Z, Y, X, D = img.shape
-    indices_1d = indices[:, 0] + indices[:, 1]*X + indices[:, 2]*Y*X
-    device = img.get_device()
-    print(img.shape)
-    img = img.view(-1, D)
-    return torch.index_select(img, 0, indices_1d.long().to(device))
+    D, Z, Y, X = img.shape
+    #indices_1d = torch.unique((indices[:, 0] + indices[:, 1]*X + indices[:, 2]*Y*X).long())
+    img = img.view(D, -1,)
+    return torch.gather(img, 1, indices_1d.unsqueeze(0).repeat(D, 1))
 
 def get_accuracy_lddt(predictions, references, L, bb_size, cutoff=15., per_residue=False):
     """
@@ -1004,7 +1006,7 @@ def create_mask(coords, angpix, D=64):
 def create_map(coords, angpix, D=64):
     #mask = torch.zeros([D, D, D]).to(coords.get_device())
     mask = torch.zeros(D*D*D).to(coords.get_device())
-    label_indices = torch.clamp((coords.squeeze()/angpix).round(), min=0, max=D-1).long()
+    label_indices = torch.clamp((coords.squeeze()/angpix), min=0, max=D-1)#.round(), min=0, max=D-1).long()
     label_indices = label_indices.view(-1, 3)
     x = label_indices[:, 0]
     y = label_indices[:, 1]
@@ -1013,15 +1015,16 @@ def create_map(coords, angpix, D=64):
     for i in range(-length, length+1):
         for j in range(-length, length+1):
             for k in range(-length, length+1):
-                xtmp = torch.clamp(x + i, min=0, max=D-1)
-                ytmp = torch.clamp(y + j, min=0, max=D-1)
-                ztmp = torch.clamp(z + k, min=0, max=D-1)
-                indices = xtmp + ytmp*D + ztmp*D*D
-                values = torch.ones(label_indices.shape[0]).to(coords.get_device())*np.exp(-(i**2 + j**2 + k**2)*1.)
+                xtmp = torch.clamp(x.round() + i, min=0, max=D-1)
+                ytmp = torch.clamp(y.round() + j, min=0, max=D-1)
+                ztmp = torch.clamp(z.round() + k, min=0, max=D-1)
+                indices = (xtmp + ytmp*D + ztmp*D*D).long()
+                #values = torch.ones(label_indices.shape[0]).to(coords.get_device())*np.exp(-(i**2 + j**2 + k**2)*1.)
+                values = torch.exp(-((xtmp - x)**2 + (ytmp - y)**2 + (ztmp - z)**2))
                 assert torch.all(indices < D*D*D)
                 mask.scatter_add_(0, indices, values)
                 #mask[ztmp, ytmp, xtmp] += np.exp(-(i**2 + j**2 + k**2)*1.)
-    mask = torch.clamp(mask, min=0., max=1.)
+    #mask = torch.clamp(mask, min=0., max=1.)
     return mask.view(D, D, D)
 
 def get_dice_loss(image, coords, angpix, mask=None, alpha=1.0, beta=0.5):
@@ -1061,6 +1064,33 @@ def create_target_map(target, coords, angpix, D, label=1):
     #target[label_indices[:,3, 2], label_indices[:,3, 1], label_indices[:,3, 0]] = 1 #O
     return target
 
+def create_target_indices(coords, angpix, D, label=1):
+    label_indices = torch.clamp((coords.squeeze()/angpix).round(), min=0, max=D-1).long()
+    label_indices = label_indices.view(-1, 3)
+    #covert to 1d
+    #label_indices = label_indices[:, 2]*D**2 + label_indices[:,1]*D + label_indices[:,0]
+    return label_indices
+
+def create_map_indices(coords, angpix, D=64):
+    label_indices = torch.clamp((coords.squeeze()/angpix).round(), min=0, max=D-1).long()
+    label_indices = label_indices.view(-1, 3)
+    x = label_indices[:, 0]
+    y = label_indices[:, 1]
+    z = label_indices[:, 2]
+    length = 1
+    indices_1d = []
+    for i in range(-length, length+1):
+        for j in range(-length, length+1):
+            for k in range(-length, length+1):
+                xtmp = torch.clamp(x + i, min=0, max=D-1)
+                ytmp = torch.clamp(y + j, min=0, max=D-1)
+                ztmp = torch.clamp(z + k, min=0, max=D-1)
+                indices = xtmp + ytmp*D + ztmp*D*D
+                assert torch.all(indices < D*D*D)
+                indices_1d.append(indices.long())
+    indices_1d = torch.unique(torch.cat(indices_1d, dim=0))
+    return indices_1d
+
 def get_cross_entropy(image, coords, sidechains, angpix, mask=None, exponent=1.0):
     #image = image.squeeze()
     #image = F.softmax(image, dim=0)
@@ -1068,28 +1098,89 @@ def get_cross_entropy(image, coords, sidechains, angpix, mask=None, exponent=1.0
     D = image.shape[-1] #(B, 3, D, H, W)
     mask_sum = mask.sum()
     #print(coords.shape) #(1, L, 4, 3)
-    pt = ((coords.shape[1]*4)/mask_sum)
+    pt = ((coords.shape[1]*coords.shape[2])/mask_sum)
     #ptside = sidechains.shape[1]/mask_sum
     pn = (1. - pt)**exponent
     pt = pt**exponent
 
+    N = coords[:, :, 0:1, :]
+    CA = coords[:, :, 1:2, :]
+    C = coords[:, :, 2:3, :]
+    O = coords[:, :, 3:4, :]
+    N_ind = create_target_indices(N, angpix, D)
+    CA_ind = create_target_indices(CA, angpix, D)
+    C_ind = create_target_indices(C, angpix, D)
+    O_ind = create_target_indices(O, angpix, D)
+    N_ind = convert_3dind_1d(N_ind, D)
+    CA_ind = convert_3dind_1d(CA_ind, D)
+    C_ind = convert_3dind_1d(C_ind, D)
+    O_ind = convert_3dind_1d(O_ind, D)
+
     target = torch.zeros([D, D, D]).long().to(coords.get_device())
-    target_map = create_target_map(target, coords, angpix, D, label=1)
-    target_map = create_target_map(target_map, sidechains, angpix, D, label=2)
-    #target = target_map
-    target = F.one_hot(target_map, num_classes=3)
+    target_map = create_target_map(target, sidechains, angpix, D, label=1)
+    #target_map = create_target_map(target_map, coords, angpix, D, label=2)
+    target_map = create_target_map(target_map, N, angpix, D, label=2)
+    target_map = create_target_map(target_map, CA, angpix, D, label=3)
+    target_map = create_target_map(target_map, C, angpix, D, label=4)
+    target_map = create_target_map(target_map, O, angpix, D, label=5)
+
+    #target = F.one_hot(target_map, num_classes=3)
+    #target = torch.permute(target, [3, 0, 1, 2,]) #(3, 64, 64, 64)
     #weights = torch.tensor([pt, pn, pn]).to(target.get_device())
     #target = target*weights
-    target = torch.permute(target, [3, 0, 1, 2,]) #(3, 64, 64, 64)
+    ##create indices for gather
+    mainchain_ind = create_target_indices(coords, angpix, D)
+    sidechain_ind = create_target_indices(sidechains, angpix, D)
+    mainchain_ind = convert_3dind_1d(mainchain_ind, D)
+    sidechain_ind = convert_3dind_1d(sidechain_ind, D)
+    #mainchain_vec = torch.zeros(3, mainchain_ind.shape[0],).to(image.get_device())
+    #mainchain_vec[1, :] = 1
+    #sidechain_vec = torch.zeros(3, sidechain_ind.shape[0],).to(image.get_device())
+    #sidechain_vec[2, :] = 1
+
+    mask_ind = torch.nonzero(mask)
+    mask_ind = convert_3dind_1d(mask_ind, D)
+    # mask_ind that not in mainchain and sidechain
+    atom_ind = torch.unique(torch.cat([mainchain_ind, sidechain_ind], dim=0))
+    notin = ~torch.isin(mask_ind, atom_ind)
+    mask_ind = mask_ind[notin]
+    indices = torch.randperm(mask_ind.shape[0])[:mainchain_ind.shape[0]//4]
+    mask_ind = mask_ind[indices]
+    #mask_vec = torch.zeros(3, mask_ind.shape[0],).to(image.get_device())
+    #mask_vec[0, :] = 1
+    ##print(torch.isin(mask_ind, mainchain_ind).sum(), torch.isin(mask_ind, sidechain_ind).sum())
+
+    # for test purpose
+    #mainchain_vec = gather_from_3dmap(target, mainchain_ind)
+    #print(mainchain_vec.shape, mainchain_ind.shape)
+    #assert mainchain_vec.sum(dim=1)[1] == mainchain_ind.shape[0]
+
+    image_N = gather_from_3dmap(image.squeeze(), N_ind)
+    image_CA = gather_from_3dmap(image.squeeze(), CA_ind)
+    image_C = gather_from_3dmap(image.squeeze(), C_ind)
+    image_O = gather_from_3dmap(image.squeeze(), O_ind)
+
+    #image_mainchain = gather_from_3dmap(image.squeeze(), mainchain_ind) #(3, L)
+    image_sidechain = gather_from_3dmap(image.squeeze(), sidechain_ind)
+    image_mask = gather_from_3dmap(image.squeeze(), mask_ind)
+    #ce = (mainchain_vec*image_mainchain.log()).sum() + (sidechain_vec*image_sidechain.log()).sum() + (mask_vec*image_mask.log()).sum()
+    #print(image_mask.shape, image_N.shape)
+
+    ce = image_mask.log()[0].sum() + image_sidechain.log()[1].sum() + image_N.log()[2].sum() + image_CA.log()[3].sum() + image_C.log()[4].sum() \
+        + image_O.log()[5].sum()
+
+    ##print(mainchain_ind.shape, sidechain_ind.shape, mask_ind.shape)
+    #total_len = mainchain_ind.shape[0] + sidechain_ind.shape[0] + mask_ind.shape[0]
+    return -ce/(B*mask_sum), target_map
     #print(target.shape, image.shape)
     #ce = F.conv3d(image.log()*mask, target.unsqueeze(0), stride=1, padding=0)/mask_sum #*512./mask_sum #(B, 1, 3, 3, 3)
     #print(ce)
     #ce = torch.logsumexp(ce.view(B, -1), -1)/512.
     #print(ce)
-    ce = (target[0,...] * (image[:, 0, ...].log())) * pt + (target[1:,...] * (image[:, 1:, ...].log())).sum(dim=0)*pn
     #ignore background
     #ce = (target*image.log())[1:,...].sum(dim=0)
-    return -ce.sum()/(B*mask_sum), target_map
+    #ce = (target[0,...] * (image[:, 0, ...].log())) * pt + (target[1:,...] * (image[:, 1:, ...].log())).sum(dim=0)*pn
+    #return -ce.sum()/(B*mask_sum), target_map
 
 def get_translation(image, target):
     image1 = image.squeeze()
@@ -1129,7 +1220,7 @@ def get_translation(image, target):
     #print(best_shift, result.values)
     return best_shift
 
-def get_l2_loss(image, target, sidechains, coords, target_map, mask=None, exponent=0.7):
+def get_l2_loss(image, all_maps, target, sidechains, coords, label_sidechain, target_map, mask=None, angpix=1.125, exponent=0.5):
     #image = image.squeeze()
     #image = F.softmax(image, dim=0)
     B = image.shape[0]
@@ -1142,11 +1233,31 @@ def get_l2_loss(image, target, sidechains, coords, target_map, mask=None, expone
     #target_mask = (target_map == 0) * pt + pn * (target_map != 0)
     #all_target = torch.stack([target*target_mask, sidechains*target_mask], dim = 0)
     #img_norm = (image[:, 1:, ...].pow(2)*mask*target_mask).sum(dim=(1,2,3,4))
+    mainchain_ind = create_map_indices(coords, angpix, D)
+    sidechain_ind = create_map_indices(label_sidechain, angpix, D)
+    mask_ind = torch.nonzero(mask)
+    mask_ind = convert_3dind_1d(mask_ind, D)
+    # mask_ind that not in mainchain and sidechain
+    atom_ind = torch.unique(torch.cat([mainchain_ind, sidechain_ind], dim=0))
+    notin = ~torch.isin(mask_ind, atom_ind)
+    mask_ind = mask_ind[notin]
+    indices = torch.randperm(mask_ind.shape[0])[:coords.shape[1]//4]
+    mask_ind = mask_ind[indices]
+
+    image_atom = gather_from_3dmap(image.squeeze(), atom_ind)
+    #image_sidechain = gather_from_3dmap(image.squeeze(), sidechain_ind)
+    image_mask = gather_from_3dmap(image.squeeze(), mask_ind)
+    target_atom = gather_from_3dmap(all_maps.squeeze(), atom_ind)
+    #target_sidechain = gather_from_3dmap(all_maps.squeeze(), sidechain_ind)
+    target_mask = gather_from_3dmap(all_maps.squeeze(), mask_ind)
+    ce = (image_atom - target_atom).pow(2).sum() + (image_mask - target_mask).pow(2).sum()
+    scale = mainchain_ind.shape[0]/(coords.shape[1]*4)
+    return ce/(B*mask_sum*9)
 
     #ce = (target * (image.log())).sum(dim=0)
     #print(target.shape, image.shape)
-    ce = ((target - image[:, 1, ...]).pow(2) + (sidechains - image[:, 2, ...]).pow(2)
-            )* ((pt) * ((target_map) == 0) + pn * ((target_map) != 0))
+    #ce = ((target - image[:, 1, ...]).pow(2) + (sidechains - image[:, 2, ...]).pow(2)
+    #        ) * ((pt) * ((target_map) == 0) + pn * ((target_map) != 0))
 
     #ce = F.conv3d(image[:, 1:, ...]*mask, all_target.unsqueeze(0), stride=1, padding=1) #(B, 1, 3, 3, 3)
     #ce = F.softmax(ce.view(B, -1)*1024./mask_sum, -1)/512.
@@ -1154,7 +1265,8 @@ def get_l2_loss(image, target, sidechains, coords, target_map, mask=None, expone
     #((pt) * ((target + sidechains) < 0.7) + pn * ((target + sidechains) >= 0.7))
     #((pt) * ((target_map) == 0) + pn * ((target_map) != 0))
     #return -(ce*mask).sum()/(mask_sum*image.shape[0])
-    return (ce*mask).sum()/(mask_sum*B)
+    #return (ce*mask).sum()/(mask_sum*B)
+    #wrong
     #return -ce.sum()/(B*mask_sum)
 
 def get_cubic_center(coords, angpix, D=8, eps=1e-5):

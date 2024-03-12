@@ -1,2 +1,6 @@
-python -m cryodrgn.commands.parse_pose_star $1/$2.star -D $3 --Apix $4 -o $1/$2_pose_euler.pkl #--relion31
-#python -m cryodrgn.commands.parse_ctf_star $1/$2.star -D $3 --Apix $4 -o $1/$2_ctf.pkl -o-g $1/$2_grp.pkl --ps 0 #--relion31 --kv 300 --cs 2.7 -w 0.1
+starname=$(basename $1)
+dirn=$(dirname $1)
+echo $dirn $starname
+filename=$(basename $starname .star)
+dsd parse_pose_star $1 -D $2 --Apix $3 -o $dirn/$filename\_pose_euler.pkl $4
+#dsd parse_ctf_star $1 -D $2 --Apix $3 -o $dirn/$filename\_ctf.pkl $4

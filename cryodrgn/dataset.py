@@ -31,11 +31,17 @@ def load_structs(mrcs_txt_star, datadir):
         filenames = []
         print(star)
         for i in range(len(star)):
-            particles.append(np.load(datadir+'/main4/'+star[i].astype('U')+'.main4.npy'))
-            sidechains.append(np.load(datadir+'/main4/'+star[i].astype('U')+'.side9.npy'))
-            sidechain_lens.append(np.load(datadir+'/main4/'+star[i].astype('U')+'.side9l.npy'))
-            #map_i = (datadir + '/EMD_' + star[i].astype('U')[0] + '/' + star[i].astype('U') + '/' + 'emd_normalized_map.mrc')
-            map_i = (datadir + '/' + star[i].astype('U') + '/' + 'deposited.mrc')
+            filename = star[i].astype('U')
+            if not filename.isdigit():
+                particles.append(np.load(datadir+'/struct/main4/'+star[i].astype('U')+'.main4.npy'))
+                sidechains.append(np.load(datadir+'/struct/main4/'+star[i].astype('U')+'.side9.npy'))
+                sidechain_lens.append(np.load(datadir+'/struct/main4/'+star[i].astype('U')+'.side9l.npy'))
+                map_i = (datadir + '/struct/' + star[i].astype('U') + '/' + 'deposited.mrc')
+            else:
+                particles.append(np.load(datadir+'/cryostru/main4/'+star[i].astype('U')+'.main4.npy'))
+                sidechains.append(np.load(datadir+'/cryostru/main4/'+star[i].astype('U')+'.side9.npy'))
+                sidechain_lens.append(np.load(datadir+'/cryostru/main4/'+star[i].astype('U')+'.side9l.npy'))
+                map_i = (datadir + '/cryostru/EMD_' + star[i].astype('U')[0] + '/' + star[i].astype('U') + '/' + 'emd_normalized_map.mrc')
             vol_i, header_i = mrc.parse_tomo(map_i)
             #correct_order = header_i.get_order()
             #particles[-1] = np.stack([particles[-1][:, correct_order[0]], particles[-1][:, correct_order[1]], particles[-1][:, correct_order[2]]], axis=-1)
@@ -185,41 +191,45 @@ class LazyStructMRCData(data.Dataset):
         stru = stru.reshape(L, 4, 3)
 
         #start = [np.random.randint(max(min_coords[j]-4, 0), max(max_coords[j]-crop_size, min_coords[j])) for j in range(3)]
-        start_idx = np.random.randint(L)
-        start = (stru[start_idx, 1, :]/ori_apix).astype(np.int32)
-        #the start must fill a cubic of size crop_size
-        start = np.minimum(np.array(img.shape) - crop_size, start - crop_size//2)
-        start = np.maximum(start, 0)
-        #start = np.array(start)
-        end = np.array([crop_size]*3) + start
-        #print("sampled: ", start, end, img.shape)
-        sidechains = sidechains[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
-        sidechain_lens = sidechain_lens[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
-        stru = stru[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
+        while True:
+            start_idx = np.random.randint(L)
+            start = (stru[start_idx, 1, :]/ori_apix).astype(np.int32)
+            #the start must fill a cubic of size crop_size
+            start = np.minimum(np.array(img.shape) - crop_size, start - crop_size//2)
+            start = np.maximum(start, 0)
+            #start = np.array(start)
+            end = np.array([crop_size]*3) + start
+            #print("sampled: ", start, end, img.shape)
+            sidechains = sidechains[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
+            sidechain_lens = sidechain_lens[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
+            stru = stru[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
 
-        #crop struct to 512 long
-        max_len = 512
-        if stru.shape[0] > max_len:
-            crop_idx = np.random.randint(0, stru.shape[0]-max_len)
-            stru = stru[crop_idx:crop_idx+max_len]
-            sidechains = sidechains[crop_idx:crop_idx+max_len]
-            sidechain_lens = sidechain_lens[crop_idx:crop_idx+max_len]
-        assert stru.shape[0] > 0, f"{self.filenames[i]}, {stru.shape}"
+            #crop struct to 512 long
+            max_len = 512
+            if stru.shape[0] > max_len:
+                crop_idx = np.random.randint(0, stru.shape[0]-max_len)
+                stru = stru[crop_idx:crop_idx+max_len]
+                sidechains = sidechains[crop_idx:crop_idx+max_len]
+                sidechain_lens = sidechain_lens[crop_idx:crop_idx+max_len]
+            assert stru.shape[0] > 0, f"{self.filenames[i]}, {stru.shape}"
 
-        #NOTE: remember the x y z cooresponds to 2, 1, 0 in index
-        img = img[start[2]:end[2],
-                  start[1]:end[1],
-                  start[0]:end[0]]
-        output_size = int(img.shape[-1]*scale)
-        #print(output_size, self.particles[i].Apix, self.apix)
-        #cropping fourier
-        img = torch.from_numpy(img)
-        #img = F.interpolate(img.unsqueeze(0).unsqueeze(0), size=[self.training_cubic_size]*3, mode='trilinear', align_corners=utils.ALIGN_CORNERS)
-        #sample R
-        #print(img.shape, grid_R.shape)
-        img = F.grid_sample(img.unsqueeze(0).unsqueeze(0), grid_R, mode='bilinear', align_corners=utils.ALIGN_CORNERS)
-        img = (img - img.mean())/(img.std() + 1e-5)
-        img = img.squeeze()
+            #NOTE: remember the x y z cooresponds to 2, 1, 0 in index
+            img = img[start[2]:end[2],
+                      start[1]:end[1],
+                      start[0]:end[0]]
+
+            output_size = int(img.shape[-1]*scale)
+            #print(output_size, self.particles[i].Apix, self.apix)
+            #cropping fourier
+            img = torch.from_numpy(img)
+            #img = F.interpolate(img.unsqueeze(0).unsqueeze(0), size=[self.training_cubic_size]*3, mode='trilinear', align_corners=utils.ALIGN_CORNERS)
+            #sample R
+            #print(img.shape, grid_R.shape)
+            img = F.grid_sample(img.unsqueeze(0).unsqueeze(0), grid_R, mode='bilinear', align_corners=utils.ALIGN_CORNERS)
+            img = (img - img.mean())/(img.std() + 1e-5)
+            img = img.squeeze()
+            if img.std() > 0.5:
+                break
         #select structure that is inside the box
         #stru = stru[np.logical_and(np.all(stru[:, 1, :] < (end)*ori_apix, axis=-1), np.all(stru[:, 1, :] >= (start)*ori_apix, axis=-1))]
         #center stru
