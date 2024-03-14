@@ -62,7 +62,7 @@ OPUS-TOMO has superior structural disentanglement ability to encode distinct com
 
 ## FAS <a name="fas"></a>
 
-It can reconstruct high resolution structure for FAS using only 263 particles!
+It can reconstruct high resolution structure for FAS using only 221 particles!
 
 <img width="976" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/50f944c1-ef21-4fe3-997c-41d8cb1f3e17">
 
