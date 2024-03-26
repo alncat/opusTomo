@@ -101,6 +101,50 @@ The inference pipeline of our program can run on any GPU which supports cuda 10.
 
 2. **Subtomogram averaging Result:** The program requires a subtomogram averaging result, which should not apply any symmetry and must be stored as a Relion STAR file.
 
+   In more details, the data preparation process commonly consists of **subtomogram extraction, ctf reconstruction, and subtomogram averaging**.
+In the subtomogram extraction phase, you should have the picked coordinates, and tomograms. The subtomograms can be extracted by RELION 3.0.8 using the command
+```
+relion_preprocess --coord_suffix .coords --coord_dir ./ --part_dir Extract/extract_tomo/ --extract --bg_radius 44 --norm --extract_size 128 --i all_tomograms.star
+```
+where coord_suffix specifies the suffix of coordinate files, part_dir specifies the output directory for subtomograms, bg_radius specifies the radius for circle mask, extract_size specifies the size of subtomogram, and i specifies the starfile with the path of tomograms, which has the following contents:
+```
+data_
+loop_
+_rlnMicrographName
+tilt1_are_Imod/tilt1.mrc
+tilt2_are_Imod/tilt2.mrc
+tilt3_are_Imod/tilt3.mrc
+tilt4_are_Imod/tilt4.mrc
+tilt5_are_Imod/tilt5.mrc
+tilt6_are_Imod/tilt6.mrc
+tilt7_are_Imod/tilt7.mrc
+tilt8_are_Imod/tilt8.mrc
+tilt9_are_Imod/tilt9.mrc
+tilt10_are_Imod/tilt10.mrc
+tilt11_are_Imod/tilt11.mrc
+tilt12_are_Imod/tilt12.mrc
+```
+
+In the ctf reconstruction phase, you should have the picked coordinates, the tilt angle for each tilt in the micrograph with suffix '.tlt', the exposure for each tilt image with suffix '.order', and the defocus for each tilt image estiamted by ctfplotter with name 'ctfplotter.defocus'. The ctfplotter.defocus file is in the micrograph folder. When all these inputs are ready and the parameters are properly set in ```relion_ctf_prepare.py``` , you can generate the per-particle corrected CTF using 
+```
+python2 relion_ctf_prepare.py
+```
+This script will output the starfiles for the CTFs of subtomograms, and also the starfile with paths of all subtomograms, which is specified by '''subtomostarname''' in the script. 
+
+To perform subtomogram averaging using RELION 3.0.8, you should also reconstruct the CTF volume. The python script relion_ctf_prepare.py will output a script name ```do_all_reconstruct_ctfs.sh```, you can reconstruct ctfs using
+
+```
+sh do_all_reconstruct_ctfs.sh 128
+```
+where 128 represents the size of subtomogram. To speed up calculation, you can split the script into multiple files, and execute them independently.
+
+Finally, you can perform subtomogram averaging using RELION and the following command:
+
+```
+mpirun -n 7  --oversubscribe  --bind-to none --mca btl '^openib' relion_refine_mpi --o Refine3D/jobdeep/run --auto_refine --split_random_halves --i all_subtomo.star --ref Refine3D/job002/run_class001.mrc --ini_high 40 --dont_combine_weights_via_disc --pool 3 --pad 2  --ctf --particle_diameter 337 --flatten_solvent --zero_mask --oversampling 1 --healpix_order 2 --auto_local_healpix_order 4 --offset_range 6 --offset_step 2 --sym C1 --low_resol_join_halves 40 --norm --scale  --j 4 --free_gpu_memory 256 --gpu 0,1,2,3
+```
+Now, you should have all necessary files for structural heterogeneity analysis in OPUS-TOMO! Congratulations!
+
 **Usage Example:**
 
 In overall, the commands for training in OPUS-TOMO can be invoked by calling
