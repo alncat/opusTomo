@@ -124,7 +124,7 @@ In the subtomogram extraction phase, you should have the picked coordinates, and
 ```
 relion_preprocess --coord_suffix .coords --coord_dir ./ --part_dir Extract/extract_tomo/ --extract --bg_radius 44 --norm --extract_size 128 --i all_tomograms.star
 ```
-where coord_suffix specifies the suffix of coordinate files, part_dir specifies the output directory for subtomograms, bg_radius specifies the radius for circle mask, extract_size specifies the size of subtomogram, and i specifies the starfile with the path of tomograms, which has the following contents:
+where coord_suffix specifies the suffix of coordinate files, coord_idr ./ tells relion_preprocess that the coords files are in the same folder as the tomogram, part_dir specifies the output directory for subtomograms, bg_radius specifies the radius for circle mask, extract_size specifies the size of subtomogram, and i specifies the starfile with the path of tomograms, which has the following contents:
 ```
 data_
 loop_
