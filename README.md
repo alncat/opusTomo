@@ -21,8 +21,6 @@ https://github.com/alncat/opusTomo/assets/3967300/df356945-c886-424c-824e-0052e7
 
 https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b7ae343
 
-https://github.com/alncat/opusTomo/assets/3967300/46e7be7b-b17f-420f-8f6c-012037d83f18
-
 
 The functionality of OPUS-TOMO is reconstructing dynamics and compositonal changes from cryo-ET data end-to-end!
 OPUS-TOMO can not only disentangle 3D structural information by reconstructing different conformations, but also reconstruct continous dynamics for the macromolecules in cellular environment.
