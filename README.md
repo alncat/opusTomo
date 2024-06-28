@@ -15,13 +15,13 @@
 This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei Luo at the group of
 Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-TOMO is available at https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
 
+https://github.com/alncat/opusTomo/assets/3967300/5b23ab70-b5b0-4412-906b-476729732d2b
 
-https://github.com/alncat/opusTomo/assets/3967300/8f7657f4-3ef0-40b9-819f-77e7fc95bb6d
+https://github.com/alncat/opusTomo/assets/3967300/df356945-c886-424c-824e-0052e72c7ae0
 
+https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b7ae343
 
-
-https://github.com/alncat/opusTomo/assets/3967300/d4bffa34-c8bf-49c9-b58f-ef612860967c
-
+https://github.com/alncat/opusTomo/assets/3967300/46e7be7b-b17f-420f-8f6c-012037d83f18
 
 
 The functionality of OPUS-TOMO is reconstructing dynamics and compositonal changes from cryo-ET data end-to-end!
@@ -64,7 +64,8 @@ OPUS-TOMO has superior structural disentanglement ability to encode distinct com
 
 It can reconstruct high resolution structure for FAS using only 221 particles!
 
-<img width="976" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/50f944c1-ef21-4fe3-997c-41d8cb1f3e17">
+<img width="740" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/9ad2da65-36cb-474a-be65-943b398f0294">
+
 
 
 # set up environment <a name="setup"></a>
