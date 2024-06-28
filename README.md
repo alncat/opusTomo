@@ -53,11 +53,12 @@ The architecture of pose corrector is:
 
 
 
-## 80S Ribosome <a name="80s"></a>
+## S.pombe 80S Ribosome <a name="80s"></a>
 
 OPUS-TOMO has superior structural disentanglement ability to encode distinct compositional changes into different PCs in composition latent space.
 
-<img width="1105" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/eb51514c-c9d8-4764-9930-802b67db1a48">
+<img width="770" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/a5cbb63f-8410-47f1-aa75-cf7b5f59e4cd">
+
 
 
 ## FAS <a name="fas"></a>
