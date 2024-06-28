@@ -57,13 +57,13 @@ The architecture of pose corrector is:
 
 OPUS-TOMO has superior structural disentanglement ability to encode distinct compositional changes into different PCs in composition latent space.
 
-<img width="770" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/a5cbb63f-8410-47f1-aa75-cf7b5f59e4cd">
+<img width="781" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/b2211c66-28f3-4562-a1f5-de77444aff04">
 
 
 
 ## FAS <a name="fas"></a>
 
-It can reconstruct high resolution structure for FAS using only 221 particles!
+It can reconstruct high resolution structure for FAS by clustering 221 particles from 4800 noisy subtomograms picked by template matching!
 
 <img width="740" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/9ad2da65-36cb-474a-be65-943b398f0294">
 
