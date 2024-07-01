@@ -14,12 +14,11 @@
 # Opus-TOMO <div id="opustomo">
 This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei Luo at the group of
 Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-TOMO is available at https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
-The translation elongation cycle resolved by traversing PC8
+A part of translation elongation cycle resolved by traversing PC8, which shows the translocation of A/T- and P- site tRNAs to A/P- and P-E site tRNAs.
 
-https://github.com/alncat/opusTomo/assets/3967300/5b23ab70-b5b0-4412-906b-476729732d2b
+https://github.com/alncat/opusTomo/assets/3967300/4fb1a46c-97bf-45ba-868d-b108cc2862f8
 
 The binding and disassociation of different cofactors resolved by traversing PC8
-
 
 https://github.com/alncat/opusTomo/assets/3967300/96d3bd65-26d0-4299-81a2-f1a72d88b1c2
 
