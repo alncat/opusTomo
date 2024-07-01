@@ -18,9 +18,11 @@ The translation elongation cycle resolved by traversing PC8
 
 https://github.com/alncat/opusTomo/assets/3967300/5b23ab70-b5b0-4412-906b-476729732d2b
 
-The binding and disassociation of cofactors resolved by traversing PC8
+The binding and disassociation of different cofactors resolved by traversing PC8
 
-https://github.com/alncat/opusTomo/assets/3967300/df356945-c886-424c-824e-0052e72c7ae0
+
+https://github.com/alncat/opusTomo/assets/3967300/96d3bd65-26d0-4299-81a2-f1a72d88b1c2
+
 
 The movement of L1 stalk resolved by traversing PC12
 
