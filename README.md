@@ -104,7 +104,7 @@ The inference pipeline of our program can run on any GPU which supports cuda 10.
 # prepare data <a name="preparation"></a>
 
 **Data Preparation Guidelines:**
-1. **Cryo-ET Dataset:** OPUS-TOMO takes inputs for performing subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.) We also have a script adapted from Relion for preparing the subtomograms and ctf starfiles. It is named as relion_prepare.py in analysis_scripts folder. You can follow the detailed data preparation process in this paper: https://www.nature.com/articles/nprot.2016.124 .
+1. **Cryo-ET Dataset:** OPUS-TOMO takes inputs for performing subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.) We also have a script adapted from Relion for preparing the subtomograms and ctf starfiles. It is named as relion_ctf_prepare.py in the root folder of this repository. You can follow the detailed data preparation process in this paper: https://www.nature.com/articles/nprot.2016.124 .
 
 2. **Subtomogram averaging Result:** The program requires a subtomogram averaging result, which should not apply any symmetry and must be stored as a Relion STAR file.
 
@@ -169,6 +169,8 @@ Finally, you can perform subtomogram averaging using RELION and the following co
 mpirun -n 7  --oversubscribe  --bind-to none --mca btl '^openib' relion_refine_mpi --o Refine3D/jobdeep/run --auto_refine --split_random_halves --i all_subtomo.star --ref Refine3D/job002/run_class001.mrc --ini_high 40 --dont_combine_weights_via_disc --pool 3 --pad 2  --ctf --particle_diameter 337 --flatten_solvent --zero_mask --oversampling 1 --healpix_order 2 --auto_local_healpix_order 4 --offset_range 6 --offset_step 2 --sym C1 --low_resol_join_halves 40 --norm --scale  --j 4 --free_gpu_memory 256 --gpu 0,1,2,3
 ```
 Now, you should have all necessary files for structural heterogeneity analysis in OPUS-TOMO! Congratulations!
+
+Besides, you may also try prepare all necessary files using the Warp from http://www.warpem.com/warp/! (Sadly, I don't have a windows machine to test this :-()
 
 **Usage Example:**
 
