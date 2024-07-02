@@ -12,7 +12,7 @@
    3. [select particles](#select)
 
 # Opus-TOMO <div id="opustomo">
-This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei Luo at the group of
+This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei (Benedict) Luo at the group of
 Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-TOMO is available at https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
 A part of translation elongation cycle resolved by traversing PC8, which shows the translocation of A/T- and P- site tRNAs to A/P- and P-E site tRNAs.
 
@@ -29,7 +29,7 @@ https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b
 
 
 The main functionality of OPUS-TOMO is reconstructing conformational and compositonal changes from cryo-ET data end-to-end!
-OPUS-TOMO can not only disentangle 3D structural information by reconstructing different conformations, but also reconstruct continous conformational dynamics for the macromolecules in cellular environment. The capacity of OPUS-TOMO is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/). OPUS-TOMO also enables the structural heterogeneity anlaysis using the simplest statistic methods, PCA and KMeans clustering. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules.
+OPUS-TOMO can not only disentangle 3D structural information by reconstructing different conformations, but also reconstruct continous conformational dynamics for the macromolecules in cellular environment. The capacity of OPUS-TOMO is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/). OPUS-TOMO also enables the structural heterogeneity anlaysis using **the simplest statistic methods, PCA and KMeans clustering**. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules.
 
 This project seeks to unravel how a latent space, encoding 3D structural information, can be learned by utilizing subtomograms which are aligned against a consensus reference model by subtomogram averaging.
 
