@@ -28,8 +28,8 @@ The movement of L1 stalk resolved by traversing PC12
 https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b7ae343
 
 
-The functionality of OPUS-TOMO is reconstructing dynamics and compositonal changes from cryo-ET data end-to-end!
-OPUS-TOMO can not only disentangle 3D structural information by reconstructing different conformations, but also reconstruct continous dynamics for the macromolecules in cellular environment.
+The main functionality of OPUS-TOMO is reconstructing conformational and compositonal changes from cryo-ET data end-to-end!
+OPUS-TOMO can not only disentangle 3D structural information by reconstructing different conformations, but also reconstruct continous conformational dynamics for the macromolecules in cellular environment. The capacity of OPUS-TOMO is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/). OPUS-TOMO also enables the structural heterogeneity anlaysis using the simplest statistic methods, PCA and KMeans clustering. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules.
 
 This project seeks to unravel how a latent space, encoding 3D structural information, can be learned by utilizing subtomograms which are aligned against a consensus reference model by subtomogram averaging.
 
@@ -68,8 +68,11 @@ structurally heterogeneous subpopulations.
 
 ## FAS <a name="fas"></a>
 
-It can even reconstruct high resolution structure for FAS in EMPIAR-10988 by clustering 221 particles from 4800 noisy subtomograms picked by template matching!
+It can even reconstruct higher resolution structure for FAS in EMPIAR-10988 by clustering 221 particles from 4800 noisy subtomograms picked by template matching!
 
+<img width="1107" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/3ae62232-b3d3-4c00-91a1-1b1a1714a59d">
+
+Class 19 as a distinct cluster in UMAP projection shows the densities below:
 <img width="740" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/9ad2da65-36cb-474a-be65-943b398f0294">
 
 
