@@ -12,7 +12,7 @@
    3. [select particles](#select)
 
 # Opus-TOMO <div id="opustomo">
-This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei (Benedict) Luo at the group of
+This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei (Benedict，本笃) Luo at the group of
 Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-TOMO is available at https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
 A part of translation elongation cycle resolved by traversing PC8, which shows the translocation of A/T- and P- site tRNAs to A/P- and P-E site tRNAs.
 
