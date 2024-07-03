@@ -61,7 +61,7 @@ The architecture of pose corrector is:
 ## S.pombe 80S Ribosome <a name="80s"></a>
 The S.pombe dataset is publicly available at EMPIAR-10988 (https://www.ebi.ac.uk/empiar/EMPIAR-10988/).
 In this dataset, OPUS-TOMO has shown superior structural disentanglement ability to capture continous structral changes into PCs of the composition latent space, and characterizes 
-structurally heterogeneous subpopulations.
+structurally heterogeneous subpopulations. The results are deposited in https://zenodo.org/records/12631920.
 
 <img width="781" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/b2211c66-28f3-4562-a1f5-de77444aff04">
 
@@ -108,7 +108,7 @@ The inference pipeline of our program can run on any GPU which supports cuda 10.
 # prepare data <a name="preparation"></a>
 
 **Data Preparation Guidelines:**
-1. **Cryo-ET Dataset:** OPUS-TOMO takes inputs for performing subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.) We also have a script adapted from Relion for preparing the subtomograms and ctf starfiles. It is named as relion_ctf_prepare.py in the root folder of this repository. You can follow the detailed data preparation process in this paper: https://www.nature.com/articles/nprot.2016.124 .
+1. **Cryo-ET Dataset:** The form of inputs of OPUS-TOMO is similar to the inputs required for subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.) We also have a script adapted from Relion for preparing the subtomograms and ctf starfiles. It is named as *relion_ctf_prepare.py* in the root folder of this repository. You can follow the detailed data preparation process in this paper: https://www.nature.com/articles/nprot.2016.124 .
 
 2. **Subtomogram averaging Result:** The program requires a subtomogram averaging result, which should not apply any symmetry and must be stored as a Relion STAR file.
 
@@ -160,7 +160,7 @@ python2 relion_ctf_prepare.py
 ```
 This script will output the starfiles for the CTFs of subtomograms, and also the starfile with paths of all subtomograms, which is specified by ```subtomostarname``` in the script. 
 
-To perform subtomogram averaging using RELION 3.0.8, you should also reconstruct the CTF volume. The python script relion_ctf_prepare.py will output a script name ```do_all_reconstruct_ctfs.sh```, you can reconstruct ctfs using
+To perform subtomogram averaging using RELION 3.0.8, you should also reconstruct the CTF volume (though this is not required for training opusTOMO). OpusTOMO reads the starfile for the CTF of subtomogram and reconstruct a 3DCTF ad hoc. Hence, you can also use the per-particle CTF estimated by other programs as long as it is stored as a per-particle STAR file. The python script relion_ctf_prepare.py will output a script name ```do_all_reconstruct_ctfs.sh```, you can reconstruct ctfs using
 
 ```
 sh do_all_reconstruct_ctfs.sh 128
