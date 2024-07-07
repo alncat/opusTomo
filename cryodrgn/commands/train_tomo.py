@@ -388,7 +388,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
                     #y_recon_fft *= group_scales.unsqueeze(-1).unsqueeze(-1)
             if plot:
                 utils.plot_image(axes, y_recon[0,0,...].detach().cpu().numpy(), 0, 1, log=True, log_msg="y_recon0")
-                utils.plot_image(axes, decout["y_recon_ori"][d_i,0,...].detach().cpu().numpy(), d_j, 1)
+                utils.plot_image(axes, decout["y_recon"][d_i,0,...].detach().cpu().numpy(), d_j, 1)
                 #utils.plot_image(axes, y_ref[d_i,d_k,...].detach().cpu().numpy(), d_j, 2)
                 utils.plot_image(axes, y_ref[0,0,...].detach().cpu().numpy(), 0, 2, log=True, log_msg="y_ref0")
                 utils.plot_image(axes, y_ref[d_i,d_k,...].detach().cpu().numpy(), d_j, 2)
