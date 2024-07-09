@@ -154,11 +154,11 @@ tilt11_are_Imod/tilt11.mrc
 tilt12_are_Imod/tilt12.mrc
 ```
 
-In the ctf reconstruction phase, you should have the picked coordinates, the tilt angle for each tilt in the micrograph with suffix '.tlt', the exposure for each tilt image with suffix '.order', and the defocus for each tilt image estiamted by ctfplotter with name 'ctfplotter.defocus'. The ctfplotter.defocus file is in the micrograph folder. You can then look into the ```relion_ctf_prepare.py``` and set the parameters according to your experimental settings. When all these inputs are ready and the parameters are properly set in ```relion_ctf_prepare.py``` , you can generate the per-particle corrected CTF using 
+In the ctf reconstruction phase, you should have the picked coordinates, the tilt angle for each tilt in the micrograph with suffix '.tlt', the exposure for each tilt image with suffix '.order', and the defocus for each tilt image estiamted by ctfplotter with name 'ctfplotter.defocus'. The ctfplotter.defocus file is in the micrograph folder. We provided an example configuration file for **ctfplotter** which is named as ctfplotter.com in https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing. You can then have a look at the ```relion_ctf_prepare.py``` and set the parameters according to your experimental settings. When all these inputs are ready and the parameters are properly set in ```relion_ctf_prepare.py``` , you can generate the per-particle corrected CTF using 
 ```
 python2 relion_ctf_prepare.py
 ```
-This script will output the starfiles for the CTFs of subtomograms, and also the starfile with paths of all subtomograms, which is specified by ```subtomostarname``` in the script. 
+This script will output the starfiles for the CTFs of subtomograms, and also the starfile with paths of all subtomograms, which is specified by ```subtomostarname``` in the script (however, this feature is dummy right now). 
 
 To perform subtomogram averaging using RELION 3.0.8, you should also reconstruct the CTF volume (though this is not required for training opusTOMO). OpusTOMO reads the starfile for the CTF of subtomogram and reconstruct a 3DCTF ad hoc. Hence, you can also use the per-particle CTF estimated by other programs as long as it is stored as a per-particle STAR file. The python script relion_ctf_prepare.py will output a script name ```do_all_reconstruct_ctfs.sh```, you can reconstruct ctfs using
 
