@@ -170,6 +170,10 @@ It is worthing noting that the tilt angle for CTF is inverted in this script to 
 The 3DCTF reconstruction is performed by compute_3dctf in ```ctf.py```. You can check the rot_2d in ```lie_tools.py``` to learn the notation of rotation in opus-TOMO. 
 Lastly, the correctness of 3DCTF can be checked by saving the 3DCTF reconstruction, and compare its missing wedge w.r.t the missing wedge of extracted subtomograms (Using fourier transform in ChimeraX). Make sure they look similar! Uncomment these two lines https://github.com/alncat/opusTomo/blob/77c91475ade5e828b07646ae8fdcdee151572314/cryodrgn/models.py#L1816 to write out CTF reconstructions.
 
+<img width="450" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/70c7703b-6676-44fc-9b6c-5ccdac7736f5">
+
+This is the fourier transform of a subtomogram and the corresponding 3DCTF for TS_041 in S.pombe dataset. You can see that the missing wedges of these two match. 
+
 To perform subtomogram averaging using RELION 3.0.8, you should also reconstruct the CTF volume (though this is not required for training opusTOMO). The python script relion_ctf_prepare.py will output a script name ```do_all_reconstruct_ctfs.sh```, you can reconstruct ctfs using
 
 ```
