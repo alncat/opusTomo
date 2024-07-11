@@ -257,7 +257,7 @@ dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 8 --zdim 1
 ```
 
 The argument following train_tomo specifies the starfile for subtomograms. In contrast to OPUS-DSD, we no longer need to specify ctf since they are read from the subtomogram starfile.
-Moreover, OPUS-TOMO needs to specify the angpix of the subtomogram by --angpix, and also the prefix directory before the filename for subtomogram in starfile by --datadir /work/ .
+Moreover, OPUS-TOMO needs to specify the angpix of the subtomogram by ```--angpix```, and also the prefix directory before the filename for subtomogram in starfile by ```--datadir```.
 
 The functionality of each argument is explained in the table:
 | argument |  explanation |
