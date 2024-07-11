@@ -704,6 +704,10 @@ class Encoder(nn.Module):
             # downsample volume if render_size < vol_size
             if self.render_size <= self.vol_size:
                 x_fft = fft.torch_rfft3_center(x_i, center=True)
+                # Uncomment if you want to check the FT of subtomogram
+                #if i == 0:
+                #    ref_fft_to_write = x_fft.abs()
+                #    mrc.write("fft" + str(x_fft.get_device()) + ".mrc", ref_fft_to_write.squeeze().detach().cpu().numpy(), Apix=1., is_vol=True)
                 x_fft = utils.crop_fft3d(x_fft, self.render_size)*(self.render_size/self.vol_size)**3
                 x_fft = self.translate_ft3d(x_fft, -trans[i:i+1]*self.render_size/self.vol_size)
                 # x_i_ori is the original image after shifting
@@ -1812,6 +1816,7 @@ class VanillaDecoder(nn.Module):
             # compute ctf here
             freqs = ctf_grid.freqs2d.unsqueeze(0)/self.Apix
             c = ctf.compute_3dctf(images_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False)
+            # Uncomment if you want to check the 3DCTF 
             #c_to_write = torch.fft.fftshift(c[:1,...], dim=(-3, -2,))
             #mrc.write("ctf" + str(c.get_device()) + ".mrc", c_to_write.squeeze().detach().cpu().numpy(), Apix=1., is_vol=True)
             images_fft = images_fft*c.unsqueeze(1)
