@@ -705,8 +705,9 @@ for mic in micnames:
       # Calculating the height difference of the particle from the tilt axis
       #ximg = (xtomo*(math.cos(tilt_radians))) + (ztomo*(math.sin(tilt_radians)))
       #deltaD = ximg*math.sin(tilt_radians)
-      deltaD = (xtomo*(math.sin(tilt_radians))) - (ztomo*(math.cos(tilt_radians)))
-      ptcldefocus = avgdefocus + deltaD
+      #this is the tilt angle for IMOD, so we just use the conventional rotation form
+      deltaD = (xtomo*(math.sin(tilt_radians))) + (ztomo*(math.cos(tilt_radians)))
+      ptcldefocus = avgdefocus - deltaD
       # the coordinate at each tilt will be
       xp = (xtomo*(math.cos(tilt_radians))) + (ztomo*(math.sin(tilt_radians)))
       zp = (-xtomo*(math.sin(tilt_radians))) + (ztomo*(math.cos(tilt_radians)))
