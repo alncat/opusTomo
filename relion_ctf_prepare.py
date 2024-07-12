@@ -707,7 +707,8 @@ for mic in micnames:
       #deltaD = ximg*math.sin(tilt_radians)
       #this is the tilt angle for IMOD, so we just use the conventional rotation form
       deltaD = (xtomo*(math.sin(tilt_radians))) + (ztomo*(math.cos(tilt_radians)))
-      ptcldefocus = avgdefocus - deltaD
+      #NOTE: + or - depends on the direction of defocus gradient!
+      ptcldefocus = avgdefocus + deltaD
       # the coordinate at each tilt will be
       xp = (xtomo*(math.cos(tilt_radians))) + (ztomo*(math.sin(tilt_radians)))
       zp = (-xtomo*(math.sin(tilt_radians))) + (ztomo*(math.cos(tilt_radians)))
