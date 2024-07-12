@@ -1818,7 +1818,7 @@ class VanillaDecoder(nn.Module):
             c = ctf.compute_3dctf(images_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False)
             # Uncomment if you want to check the 3DCTF 
             #c_to_write = torch.fft.fftshift(c[:1,...], dim=(-3, -2,))
-            #mrc.write("ctf" + str(c.get_device()) + ".mrc", c_to_write.squeeze().detach().cpu().numpy(), Apix=1., is_vol=True)
+            #mrc.write("ctf" + str(c.get_device()) + ".mrc", c_to_write.squeeze().detach().cpu().numpy(), Apix=self.Apix/self.apix_ori, is_vol=True)
             images_fft = images_fft*c.unsqueeze(1)
             images_fft = fft.torch_irfft3_center(images_fft)
             images = utils.crop_vol(images, self.crop_vol_size)
