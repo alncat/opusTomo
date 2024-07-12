@@ -165,14 +165,20 @@ python2 relion_ctf_prepare.py
 This script will output the starfiles for the CTFs of subtomograms, and also the starfile with paths of all subtomograms, which is specified by ```subtomostarname``` in the script (however, this feature is dummy right now). 
 
 **Correctness check**:
+
 Opus-TOMO mainly assumes the tomogram is reconstructed by Aretomo.
-It is worthing noting that the tilt angle for CTF is inverted in this script to accommodate Aretomo's convention with opus-TOMO's or Relion's convention (I checked their source code https://github.com/czimaginginstitute/AreTomo2/blob/e9f89413352511f6cac0974a93fd6ff21b9c4129/Recon/GBackProj.cu#L31). 
-The 3DCTF reconstruction is performed by compute_3dctf in ```ctf.py```. You can check the rot_2d in ```lie_tools.py``` to learn the notation of rotation in opus-TOMO. 
-Lastly, the correctness of 3DCTF can be checked by saving the 3DCTF reconstruction, and compare its missing wedge w.r.t the missing wedge of extracted subtomograms. Make sure they look similar! Uncomment these lines https://github.com/alncat/opusTomo/blob/3a6b4efb51d57aa8e8108a729c87f8a2e0555526/cryodrgn/models.py#L707 https://github.com/alncat/opusTomo/blob/77c91475ade5e828b07646ae8fdcdee151572314/cryodrgn/models.py#L1816 to write out fourier transform of subtomogram and CTF reconstructions.
+It is worthing noting that the tilt angle for CTF is inverted in this script to accommodate Aretomo's backprojection convention with opus-TOMO's convention (I checked their source code here: https://github.com/czimaginginstitute/AreTomo2/blob/e9f89413352511f6cac0974a93fd6ff21b9c4129/Recon/GBackProj.cu#L31). 
+Aretomo reconstruct tomogram in real space. Moreover, it flipped z axis after backprojection to make the tomogram match with IMOD's convention. Check
+https://github.com/czimaginginstitute/AreTomo2/blob/e9f89413352511f6cac0974a93fd6ff21b9c4129/Recon/CDoWbpRecon.cpp#L130
+
+The 3DCTF reconstruction is performed by compute_3dctf in ```ctf.py``` in opus-TOMO. You can check the rot_2d in ```lie_tools.py``` to learn the notation of rotation in opus-TOMO. 
+OPUS-TOMO make right half of the x axis rotate to negative z axis with minus tilt angle. Lastly, the correctness of 3DCTF can be checked by saving the 3DCTF reconstruction, and compare its missing wedge w.r.t the missing wedge of extracted subtomograms. Make sure they look similar! Uncomment these lines https://github.com/alncat/opusTomo/blob/3a6b4efb51d57aa8e8108a729c87f8a2e0555526/cryodrgn/models.py#L707 https://github.com/alncat/opusTomo/blob/77c91475ade5e828b07646ae8fdcdee151572314/cryodrgn/models.py#L1816 to write out fourier transform of subtomogram and CTF reconstructions.
 
 <img width="450" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/70c7703b-6676-44fc-9b6c-5ccdac7736f5">
 
 This is the fourier transform of a subtomogram and the corresponding 3DCTF for TS_041 in S.pombe dataset. You can see that the missing wedges of these two match. 
+
+The per-particle 3DCTF correction implemented in relion_ctf_prepare.py is very rudimentary. I am preparing a more accurate per-particle 3DCTF correction now.
 
 To perform subtomogram averaging using RELION 3.0.8, you should also reconstruct the CTF volume (though this is not required for training opusTOMO). The python script relion_ctf_prepare.py will output a script name ```do_all_reconstruct_ctfs.sh```, you can reconstruct ctfs using
 
