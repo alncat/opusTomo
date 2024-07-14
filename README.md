@@ -131,7 +131,7 @@ TS_026_st.tlt
 TS_026_st.xf
 TS_026_st.xtilt
 ```
-TS_026_st.mrc is the tomogram, TS_026_st.mrcs is the tilt series stack, TS_026_st.ali is the aligned tilt series stack, 
+TS_026_st.mrc is the tomogram, which can be reconstrcuted using AreTOMO with the script ```recon.sh``` I am sharing in https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing, TS_026_st.mrcs is the tilt series stack, TS_026_st.ali is the aligned tilt series stack, 
 which can be created by newstack command in IMOD with a 'newst.com' configuration file,
 TS_026_st.xf is the alignment parameter for newstack in IMOD, TS_026_st.tlt records the tilt angles for each tilt in tilt series stack, 
 TS_026_st.order records the tilt angle and its corresponding exposure dose, TS_026_st.coords records the coordinate of subtomograms.
