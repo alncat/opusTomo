@@ -123,7 +123,8 @@ def compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift=0, bfactor=None
     if bfactor is not None:
         ctf *= torch.exp(-bfactor/4*s2 * 4*np.pi**2)
         if rweight:
-            ctf *= torch.sqrt(s2)*Apix
+            # the cosine blurring filter in aretomo
+            ctf *= 0.55 + 0.45*torch.cos(s2.sqrt()*2.*np.pi)
     if scale is not None:
         #print(ctf.shape, scale.shape)
         ctf *= scale
