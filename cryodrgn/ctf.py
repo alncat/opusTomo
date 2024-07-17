@@ -151,7 +151,7 @@ def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=Non
     #print(volt, cs, w, Apix)
     dfv = dfu
     dfang = torch.zeros_like(dfu)
-    ctfs = compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift, bfactor/(4*np.pi**2), scale, Apix=Apix, rweight=False)
+    ctfs = compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift, bfactor/(4*np.pi**2), scale, Apix=Apix, rweight=True)
     #print(bfactor[0].squeeze()/(4*np.pi**2))
 
     # the transpose of tilt rotation
