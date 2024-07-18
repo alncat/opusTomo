@@ -298,8 +298,7 @@ The functionality of each argument is explained in the table:
 
 The plot mode will ouput the following images in the directory where you issued the training command:
 
-![ref](https://github.com/alncat/opusTomo/assets/3967300/9bd5ce75-c57f-4685-9c34-da55e38fedfe)
-
+![image](https://github.com/user-attachments/assets/f6038ee4-66ce-4a4d-b7da-88b16f1cc171)
 
 
 Each row shows a selected subtomogram and its reconstruction from a batch.
