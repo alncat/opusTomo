@@ -28,6 +28,7 @@ The movement of L1 stalk resolved by traversing PC12
 
 https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b7ae343
 
+The workflow of OPUS-TOMO involves the tomogram reconstruction using the automated **AreTOMO**, the particle localization using **DeePiCt** or **PyTOM**, the ctf estimation using **ctfplotter from IMOD**, the subtomogram averaing using **Relion 3.0.8**, and the heterogeneity analysis using **OPUS-TOMO**. The whole workflow works on Linux environment! 
 
 The main functionality of OPUS-TOMO is reconstructing conformational and compositonal changes from cryo-ET data end-to-end!
 OPUS-TOMO can not only disentangle 3D structural information by reconstructing different compositions, but also reconstruct continous conformational dynamics for the macromolecules in cellular environment. OPUS-TOMO takes the **3D subtomograms cropped from tomograms** as input directly! The capacity of OPUS-TOMO is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/). OPUS-TOMO also enables the structural heterogeneity anlaysis using **the simplest statistic methods, PCA and KMeans clustering**. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules. Specifically, **PCA** in learned latent space allows decomposing structural variations of macromolecules in cryo-ET dataset into dinstinct modes that greatly facilitate reserchers' understandings. This is in a similar spirit to the Normal Mode Analysis (NMA) for macromolecules which investigates their movement modes.
@@ -397,7 +398,11 @@ dsdsh parse_pose /work/consensus_data.star 320 1.699 /work/sp 16 16 --relion31
 - $6 is the number of kmeans clusters you used in analysis
 - $7 indicates the version of starfile, only include this when the version of starfile is higher than 3.0
 
-change to directory ```/work/sp/analyze.16/kmeans16``` to checkout the starfile for subtomograms in each cluster.
+change to directory ```/work/sp/analyze.16/kmeans16``` to checkout the starfile for subtomograms in each cluster. With those starfiles, you can easily obtain
+the unfiltered reconstruction using relion via the command
+```
+relion_reconstruct --i pre1.star --3d_rot
+```
 
 This program is built upon a set of great works:
 - [opusDSD](https://github.com/alncat/opusDSD)
