@@ -47,7 +47,7 @@ def main(args):
             s.write_subset(out_file, labels==i)
 
     # parse translations
-    trans = np.empty((N,3))
+    trans = np.zeros((N,3))
     if '_rlnOriginX' in s.headers and '_rlnOriginY' in s.headers:
         trans[:,0] = s.df['_rlnOriginX']
         trans[:,1] = s.df['_rlnOriginY']
