@@ -36,9 +36,10 @@ The vitrified samples then preserves lots of different conformations and composi
 
 The main functionality of OPUS-TOMO is reconstructing conformational and compositonal changes at all kinds of stages from cryo-ET data end-to-end! OPUS-TOMO can be applied to data analysis at any stage, even when you are just picking particles. Using the template matching result with determined pose from pyTOM, 
 OPUS-TOMO can be used to filter picked particles! At later stage, OPUS-TOMO can not only disentangle 3D structural information by reconstructing different compositions, but also reconstruct continous conformational dynamics for the macromolecules in cellular environment. 
+
 OPUS-TOMO takes the **3D subtomograms cropped from tomograms** as input directly! The capacity of OPUS-TOMO is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/, this implementation is GPU-accelerated with a user-friendly GUI!). OPUS-TOMO also enables the structural heterogeneity anlaysis using **the simplest statistic methods, PCA and KMeans clustering**. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules. Specifically, **PCA** in learned latent space allows decomposing structural variations of macromolecules in cryo-ET dataset into dinstinct modes that greatly facilitate reserchers' understandings. This is in a similar spirit to the Normal Mode Analysis (NMA) for macromolecules which investigates their movement modes.
 
-This project seeks to unravel how a latent space, encoding 3D structural information, can be learned by utilizing subtomograms which are aligned against a consensus reference model by subtomogram averaging.
+This project seeks to unravel how a latent space, encoding 3D structural information, can be learned by utilizing subtomograms which are aligned against a consensus reference model by subtomogram averaging or template matching.
 
 An informative latent space is pivotal as it simplifies data analysis by providing a structured and reduced-dimensional representation of the data.
 
