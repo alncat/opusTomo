@@ -84,7 +84,9 @@ It can even reconstruct higher resolution structure for FAS in EMPIAR-10988 by c
 Class 19 as a distinct cluster in UMAP projection shows the densities below:
 <img width="740" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/9ad2da65-36cb-474a-be65-943b398f0294">
 
+We can also reconstruct the dynamics for FAS, using only 221 particles!
 
+https://github.com/user-attachments/assets/806c518c-427d-41c9-905d-17b18fba8922
 
 # set up environment <a name="setup"></a>
 
