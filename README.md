@@ -28,6 +28,17 @@ The movement of L1 stalk resolved by traversing PC12
 
 https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b7ae343
 
+Clustering the template matching result directly!
+
+<img width="970" alt="image" src="https://github.com/user-attachments/assets/b6c7119e-9705-4e13-a833-377305d360a9">
+
+The histograms at the right panel shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
+TM Overlapping With DeePiCt refers to the number of subtomograms from Template Mathching that overlap with DeePiCt's result, and OPUS-TOMO
+refers to the number of subtomograms in classes 11-17 that overlaps with DeePiCt's result. TM Overlapping Ratio refers to the ratio of subtomograms that overlaps with 
+DeePiCt's result in each tilt series, and OPUS-TOMO refers to the ratio of subtomograms in classes 11-17 that overlaps with DeePiCt's result in each tilt series. It is 
+easy to observe that OPUS-TOMO improves the overlapping ratio by a large margin. It is worth noting that OPUS-TOMO is trained by using the subtomograms with their 
+orientation determined by template matching in pyTOM directly without any other processing.
+
 The workflow of OPUS-TOMO involves the tomogram reconstruction using the automated **AreTOMO**, the particle localization using **DeePiCt** or **PyTOM**, the ctf estimation using **ctfplotter from IMOD**, the subtomogram averaing using **Relion 3.0.8**, and the heterogeneity analysis using **OPUS-TOMO**. The whole workflow works on Linux environment! 
 
 Structural heterogeneity is a central problem for cryo-ET which occurs at many stage of tomography processing. Specifically, at the very first stage, after reconstructing a tomogram, you then encounter the problem to pick subtomograms corresponding to macromolecule of interest from the tomogram. Given the abundance of different molecules inside the
