@@ -37,7 +37,7 @@ TM Overlapping With DeePiCt refers to the number of subtomograms from Template M
 refers to the number of subtomograms in classes 11-17 that overlaps with DeePiCt's result. TM Overlapping Ratio refers to the ratio of subtomograms that overlaps with 
 DeePiCt's result in each tilt series, and OPUS-TOMO refers to the ratio of subtomograms in classes 11-17 that overlaps with DeePiCt's result in each tilt series. It is 
 easy to observe that OPUS-TOMO improves the overlapping ratio by a large margin. It is worth noting that OPUS-TOMO is trained by using the subtomograms with their 
-orientation determined by template matching in pyTOM directly without any other processing.
+orientation determined by template matching in pyTOM directly without any other processing. The template matching results for this case are in the folder https://drive.google.com/drive/folders/1xR_zD_nF9Hvw9S3nsjxxPR2DQmod3Fmu?usp=drive_link .
 
 The workflow of OPUS-TOMO involves the tomogram reconstruction using the automated **AreTOMO**, the particle localization using **DeePiCt** or **PyTOM**, the ctf estimation using **ctfplotter from IMOD**, the subtomogram averaing using **Relion 3.0.8**, and the heterogeneity analysis using **OPUS-TOMO**. The whole workflow works on Linux environment! 
 
@@ -89,6 +89,7 @@ structurally heterogeneous subpopulations. The results are deposited in https://
 ## FAS <a name="fas"></a>
 
 It can even reconstruct higher resolution structure for FAS in EMPIAR-10988 by clustering 221 particles from 4800 noisy subtomograms picked by template matching!
+The template matching and subtomogram averaging results are in the folder https://drive.google.com/drive/folders/1OijHVrCu3M-OgqvNu_YZ4jW8OWn6OwaV?usp=drive_link, fasp_expanded.star stores the subtomogram averaging results after D3 symmetry expansion.
 
 <img width="1107" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/3ae62232-b3d3-4c00-91a1-1b1a1714a59d">
 
