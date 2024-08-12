@@ -207,7 +207,8 @@ _rlnAnglePsi #10
 ```
 
 You also need to convert the starfile to **coords** file using the scrip "star2csv.py" in the shared google drive folder (Pay attention to the bin size of tomogram where subtomograms are extracted, make sure the
- the scale of final coordinate match with the size of tomogram using ```factor``` variable in the script).
+ the scale of final coordinate match with the size of tomogram using ```factor``` variable in the script). 
+You can then move the **coords** files to the respective tilt series micrograph folders.
 Finally, you need to combine the starfile for each tilt series into a single starfile.
 
 In the subtomogram extraction phase, you should have the picked coordinates (from PyTOM or DeePiCt), and tomograms. Put the coordinate files into the same directory as the tomogram. The subtomograms can be extracted by RELION 3.0.8 using the command
