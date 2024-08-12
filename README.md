@@ -30,7 +30,7 @@ https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b
 
 Clustering the template matching result directly!
 
-<img width="970" alt="image" src="https://github.com/user-attachments/assets/b6c7119e-9705-4e13-a833-377305d360a9">
+<img width="1140" alt="image" src="https://github.com/user-attachments/assets/4f7731b4-3a9a-458d-8f25-16026d71ec15">
 
 The histograms at the right panel shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
 TM Overlapping With DeePiCt refers to the number of subtomograms from Template Mathching that overlap with DeePiCt's result, and OPUS-TOMO
