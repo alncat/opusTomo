@@ -28,7 +28,7 @@ The movement of L1 stalk resolved by traversing PC12
 
 https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b7ae343
 
-Clustering the template matching result directly!
+Clustering the template matching result directly! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
 
 <img width="1140" alt="image" src="https://github.com/user-attachments/assets/4f7731b4-3a9a-458d-8f25-16026d71ec15">
 
