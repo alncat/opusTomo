@@ -447,7 +447,7 @@ class ConvTemplate(nn.Module):
         if self.use_affine and encoding.shape[-1] > self.zdim:
             #affine = self.affine_out(template1).view(-1, self.num_bodies, 6)
             affine = self.affine_out(encoding[..., self.zdim:]).view(-1, (self.num_bodies+1), 6)
-            one = torch.ones_like(affine[..., :1])*10.
+            one = torch.ones_like(affine[..., :1])*12.
             quat = torch.cat([one, affine[..., :3]], dim=-1)
             #quat = lie_tools.exp_quaternion(affine[..., :3])
             trans = affine[..., 3:]
@@ -1626,7 +1626,7 @@ class VanillaDecoder(nn.Module):
                             body_quat_i = affine[0][i, ...]
                             rot_resi_i = lie_tools.quaternions_to_SO3_wiki(body_quat_i)
                             # rotation corrected by mlp
-                            #rot_i = rot_i @ rot_resi_i[self.num_bodies:, ...].unsqueeze(1).unsqueeze(1)
+                            rot_i = rot_i @ rot_resi_i[self.num_bodies:, ...].unsqueeze(1).unsqueeze(1)
                             # translation
                             global_trans_i = affine[1][i, self.num_bodies:, ...]
                             # transform the estimate global translation to experimental reference system
