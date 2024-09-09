@@ -447,7 +447,7 @@ class ConvTemplate(nn.Module):
         if self.use_affine and encoding.shape[-1] > self.zdim:
             #affine = self.affine_out(template1).view(-1, self.num_bodies, 6)
             affine = self.affine_out(encoding[..., self.zdim:]).view(-1, (self.num_bodies+1), 6)
-            one = torch.ones_like(affine[..., :1])*12.
+            one = torch.ones_like(affine[..., :1])*30.
             quat = torch.cat([one, affine[..., :3]], dim=-1)
             #quat = lie_tools.exp_quaternion(affine[..., :3])
             trans = affine[..., 3:]
