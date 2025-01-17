@@ -1822,13 +1822,17 @@ class VanillaDecoder(nn.Module):
             images_fft = images_fft*c.unsqueeze(1)
             images_fft = fft.torch_irfft3_center(images_fft)
             images = utils.crop_vol(images, self.crop_vol_size)
+            # compute reconstruction loss locally
+            losses["y_recon2"] = (images_fft**2).sum(dim=(-1,-2,-3)).view(B, -1)
+            losses["ycorr"] = (-2.*images_fft*refs).sum(dim=(-1,-2,-3)).view(B, -1)
+            losses["y2"] = (refs**2).sum(dim=(-1,-2,-3)).view(B,-1)
 
         if save_mrc:
             if self.use_fourier:
                 self.save_mrc(template_FT[0:1, ...], self.tmp_prefix, flip=False)
             else:
                 self.save_mrc(template[0:1, ...], self.tmp_prefix, flip=False)
-        return {"y_recon_ori": images, "y_recon": images_fft,"losses": losses, "y_ref": refs, "mask_sum": mask_sums,
+        return {"y_recon_ori": None, "y_recon": images_fft,"losses": losses, "y_ref": refs, "mask_sum": mask_sums,
                 "affine": body_poses_pred,}
 
     def save_mrc(self, template, filename, flip=False):
