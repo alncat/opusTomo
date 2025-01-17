@@ -417,11 +417,13 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
     mask_sum = torch.maximum(mask_sum, torch.ones_like(mask_sum)*W**3*np.pi*0.05)
     top_euler = None
     if C > 1:
-        y_recon2 = (y_recon**2).sum(dim=(-1,-2,-3)).view(B, -1)
-        l2_diff = (-2.*y_recon*y).sum(dim=(-1,-2,-3)).view(B, -1)
-        #l2_diff_std = l2_diff.std().detach()
-        #print(l2_diff_std/2., W*0.125)
-        l2_diff = l2_diff + y_recon2
+        #y_recon2 = (y_recon**2).sum(dim=(-1,-2,-3)).view(B, -1)
+        #l2_diff = (-2.*y_recon*y).sum(dim=(-1,-2,-3)).view(B, -1)
+        ##l2_diff_std = l2_diff.std().detach()
+        ##print(l2_diff_std/2., W*0.125)
+        #l2_diff = l2_diff + y_recon2
+        y_recon2 = losses["y_recon2"]
+        l2_diff = losses["ycorr"] + y_recon2
         #print(l2_diff)
         #print(y_recon.shape, y.shape, mask_sum.shape, l2_diff)
         probs = F.softmax(-l2_diff.detach()/(W*0.125), dim=-1).detach()
@@ -447,7 +449,8 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         em_l2_loss = ((l2_diff*probs/mask_sum.unsqueeze(1)).sum(-1))#.mean()
         #calculate snr
         #print(y.shape, em_l2_loss.shape, mask_sum.shape, y.pow(2).sum(dim=(-1,-2)))
-        y2  = y.pow(2).sum(dim=(-1,-2,-3)).squeeze()/mask_sum.squeeze()
+        #y2  = y.pow(2).sum(dim=(-1,-2,-3)).squeeze()/mask_sum.squeeze()
+        y2 = losses["y2"].squeeze()/mask_sum.squeeze()
         mse = em_l2_loss.detach() + y2
         snr = (y_recon2*probs).sum(-1).squeeze()/mask_sum.squeeze()/mse
         snr = snr.mean()
