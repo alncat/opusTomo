@@ -925,8 +925,8 @@ def main(args):
     train_sampler = dataset.ClassSplitBatchSampler(args.batch_size, posetracker.poses_ind, train_split)
     val_sampler = dataset.ClassSplitBatchSampler(args.batch_size, posetracker.poses_ind, val_split)
     print("Nimg_train: ", Nimg_train, len(train_split))
-    data_generator = DataLoader(data, batch_sampler=train_sampler)
-    val_data_generator = DataLoader(data, batch_sampler=val_sampler)
+    data_generator = DataLoader(data, batch_sampler=train_sampler, pin_memory=True, num_workers=16)
+    val_data_generator = DataLoader(data, batch_sampler=val_sampler, pin_memory=True, num_workers=16)
 
     #assert args.downfrac*(D-1) >= 128
     log(f'image will be downsampled to {args.downfrac} of original size {D-1}')
