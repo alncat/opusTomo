@@ -369,7 +369,7 @@ class FixedEncoder(nn.Module):
         return self.encoding1
 
 class ConvTemplate(nn.Module):
-    def __init__(self, in_dim=256, outchannels=1, templateres=128, affine=False, num_bodies=0):
+    def __init__(self, in_dim=256, outchannels=1, templateres=128, affine=False, num_bodies=0, affine_dim=4):
 
         super(ConvTemplate, self).__init__()
 
@@ -386,7 +386,7 @@ class ConvTemplate(nn.Module):
             self.affine_hidden = 512
             self.num_bodies = num_bodies
             #self.affine_out = nn.Sequential(nn.Linear(2048, self.affine_hidden), nn.LeakyReLU(0.2), nn.Linear(self.affine_hidden, num_bodies*6))
-            self.z_affine_dim = 4
+            self.z_affine_dim = affine_dim
             self.affine_out = nn.Sequential(nn.Linear(self.z_affine_dim, self.affine_hidden), nn.LeakyReLU(0.2), nn.Linear(self.affine_hidden, (num_bodies+1)*6))
             torch.nn.init.zeros_(self.affine_out[2].weight)
             torch.nn.init.zeros_(self.affine_out[2].bias)
@@ -900,7 +900,7 @@ class SpatialTransformer(nn.Module):
         body_grid = (mask_weights*(roted + (coms*self.scale).unsqueeze(1).unsqueeze(1).unsqueeze(1))).sum(dim=0, keepdim=True)
         return body_grid, tbody_img
 
-    def multi_body_grid(self, rot_ori, rot_resi, coms, trans, tbody, radius=None, encode=False, save=None, Apix=1.):
+    def multi_body_grid(self, rot_ori, rot_resi, coms, trans, tbody, radius=None, axes=None, encode=False, save=None, Apix=1.):
         # tbody should be added to grid
         zero = torch.zeros_like(tbody)[..., :1]
         #tbody = tbody*self.scale
@@ -932,7 +932,11 @@ class SpatialTransformer(nn.Module):
         radius = radius.unsqueeze(1).unsqueeze(1).unsqueeze(1) * self.scale
         #mask_weights = roted - (coms*self.scale).unsqueeze(1).unsqueeze(1).unsqueeze(1)
         #mask_weights = torch.exp(-(roted.detach().pow(2).sum(dim=-1, keepdim=True))*0.5/radius**2) + 1e-5
-        mask_weights = torch.exp(-1.*(roted.detach().pow(2)/radius**2).sum(dim=-1, keepdim=True)) + 1e-5
+        if axes is not None:
+            rroted = roted.detach() @ axes.unsqueeze(1).unsqueeze(1)
+            mask_weights = torch.exp(-0.2*(rroted.pow(2)/radius**2).sum(dim=-1, keepdim=True)) + 1e-5
+        else:
+            mask_weights = torch.exp(-0.2*(roted.detach().pow(2)/radius**2).sum(dim=-1, keepdim=True)) + 1e-5
         mask_weights /= mask_weights.sum(dim=0, keepdim=True)
         assert mask_weights.shape == torch.Size([coms.shape[0], grid_size, grid_size, grid_size, 1])
         #sample_grid = self.grid_coarse @ rot_ori
@@ -1069,7 +1073,7 @@ class SpatialTransformer(nn.Module):
 class VanillaDecoder(nn.Module):
     def __init__(self, D, in_vol=None, Apix=1., template_type=None, templateres=256, warp_type=None, symm_group=None,
                  ctf_grid=None, fixed_deform=False, deform_emb_size=2, zdim=8, render_size=140,
-                 use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0):
+                 use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4):
         super(VanillaDecoder, self).__init__()
         self.D = D
         self.vol_size = (D - 1)
@@ -1115,15 +1119,15 @@ class VanillaDecoder(nn.Module):
                     self.register_buffer("rotate_directions", masks_params["rotate_directions"]/self.vol_size)
                     self.register_buffer("com_bodies", masks_params["com_bodies"])
                     self.register_buffer("orient_bodies", masks_params["orient_bodies"])
-                    self.register_buffer("orient_bodiesT", torch.transpose(masks_params["orient_bodies"], 1, 2))
-                    #self.register_buffer("principal_axes", masks_params["principal_axes"])
-                    #self.register_buffer("principal_axesT", torch.transpose(masks_params["principal_axes"], 1, 2))
+                    self.register_buffer("orient_bodiesT", torch.transpose(masks_params["orient_bodies"], 1, 2).contiguous())
+                    self.register_buffer("principal_axes", masks_params["principal_axes"])
+                    self.register_buffer("principal_axesT", torch.transpose(masks_params["principal_axes"], 1, 2).contiguous())
                     self.register_buffer("A_rot90", lie_tools.yrot(torch.tensor(-90)))
                     #scale change the original scale in render_size to the volume size after cropping
                     self.register_buffer("radius", masks_params["radii_bodies"]/self.vol_size)
                     log(f"decoder: com of bodies are {self.com_bodies}, rg of bodies are {self.radius*self.scale}, scale is {self.scale}")
                     log(f"decoder: rotate_directions are {self.rotate_directions}, orient_bodies are {self.orient_bodies}")
-                self.template = ConvTemplate(in_dim=self.zdim, templateres=self.templateres, affine=True, num_bodies=self.num_bodies)
+                self.template = ConvTemplate(in_dim=self.zdim, templateres=self.templateres, affine=True, num_bodies=self.num_bodies, affine_dim=affine_dim)
         else:
             self.template = nn.Parameter(in_vol)
 
@@ -1590,8 +1594,9 @@ class VanillaDecoder(nn.Module):
                             rot_resi_i = lie_tools.quaternions_to_SO3_wiki(body_quat_i)
 
                             # multiply rot_i by an estimated global rot
-                            # rot_i = rot_i @ rot_resi_i[self.num_bodies:, ...].unsqueeze(1).unsqueeze(1)
+                            rot_i = rot_i @ rot_resi_i[self.num_bodies:, ...].unsqueeze(1).unsqueeze(1)
                             global_trans_i = affine[1][i, self.num_bodies:, ...]
+                            rot_i_correction = lie_tools.so3_to_hopf(rot_resi_i[self.num_bodies, ...])
                             #print(rot_resi_i, body_trans_i)
 
                             rot_resi_i = self.orient_bodiesT @ rot_resi_i[:self.num_bodies, ...] @ self.orient_bodies
@@ -1600,7 +1605,8 @@ class VanillaDecoder(nn.Module):
                             body_trans_i = self.orient_bodiesT @ body_trans_i[:self.num_bodies, ...] @ self.orient_bodies
                             body_trans_i = (body_trans_i @ self.rotate_directions.unsqueeze(-1)) - self.rotate_directions.unsqueeze(-1)
                             body_trans_i = body_trans_i.squeeze(-1)
-                            body_rots_pred.append(rot_resi_i)
+                            body_rots_pred.append(rot_i_correction)
+                            body_trans_pred.append(global_trans_i)
                             #zero_eulers = torch.zeros_like(euler01)
                             #local_sample = self.get_particle_hopfs(zero_eulers, hp_order=32, depth=0) #hp_order=64, depth=0)
                             #rot = lie_tools.hopf_to_SO3(local_sample).unsqueeze(1).unsqueeze(1)
@@ -1609,13 +1615,14 @@ class VanillaDecoder(nn.Module):
                             #convert to multibody field
                             #t_i = trans[i:i+1, ...]
                             #t_i -= t_i.round()
-                            zero = torch.zeros_like(t_i[..., :1])
+                            t_i_3d = t_i/self.vol_size*self.scale
+                            #zero = torch.zeros_like(t_i[..., :1])
                             #transform to the scale of cropped volume
-                            t_i_3d = torch.cat([t_i, zero], dim=-1)/self.vol_size*self.scale #(n, 3)
+                            #t_i_3d = torch.cat([t_i, zero], dim=-1)/self.vol_size*self.scale #(n, 3)
                             affine_grid_i, valid, trans_img = self.transformer.multi_body_grid(rot_i, rot_resi_i, self.com_bodies/self.vol_size,
-                                                                             t_i_3d, body_trans_i, radius=self.radius,)
+                                                                             t_i_3d, body_trans_i, radius=self.radius, axes=self.principal_axesT)
 
-                            body_trans_pred.append(trans_img[..., :2]*self.vol_size/self.scale)
+                            #body_trans_pred.append(trans_img[..., :2]*self.vol_size/self.scale)
                             pos = self.transformer.rotate(rot_i)
                             valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
                             #if save_mrc and i == 0:
