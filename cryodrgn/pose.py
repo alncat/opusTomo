@@ -51,6 +51,14 @@ class PoseTracker(nn.Module):
             #    emb_data = torch.randn(rots.shape[0], deform_emb_size)
             #deform_emb.weight.data.copy_(emb_data)
             #self.deform_emb = deform_emb
+
+            rots_from_euler = lie_tools.euler_to_SO3(self.eulers)
+            print(rots_from_euler[:5, ...], self.rots[:5, ...])
+            self.rots = rots_from_euler
+            self.rots_update = torch.eye(3).unsqueeze(0).repeat(self.rots.shape[0], 1, 1)
+            self.trans_update = torch.zeros_like(self.trans)
+            self.trans_o = self.trans.clone()
+
             # convert euler to hopf
             self.hopfs = lie_tools.euler_to_hopf(self.eulers)
             new_eulers = lie_tools.hopf_to_euler(self.hopfs)
@@ -342,7 +350,7 @@ class PoseTracker(nn.Module):
             if ind is not None:
                 if len(trans) > Nimg: # HACK
                     trans = trans[ind]
-            assert trans.shape == (Nimg,2), f"Input translations have shape {trans.shape} but expected ({Nimg},2)"
+            assert trans.shape == (Nimg,3), f"Input translations have shape {trans.shape} but expected ({Nimg},3)"
             assert np.all(trans <= 1), "ERROR: Old pose format detected. Translations must be in units of fraction of box."
             trans *= D # convert from fraction to pixels
             log("loaded eulers")
@@ -354,8 +362,8 @@ class PoseTracker(nn.Module):
             body_eulers = poses[3]
             body_trans = poses[4]
             assert body_eulers.shape[0] == Nimg and body_eulers.shape[2] == 3, f"Input eulers have shape {body_eulers.shape} but expected ({Nimg},3)"
-            assert body_trans.shape[0] == Nimg and body_trans.shape[2] == 2 and body_trans.shape[1] == body_eulers.shape[1], \
-                                f"Input translations have shape {body_trans.shape} but expected ({Nimg},2)"
+            assert body_trans.shape[0] == Nimg and body_trans.shape[2] == 3 and body_trans.shape[1] == body_eulers.shape[1], \
+                                f"Input translations have shape {body_trans.shape} but expected ({Nimg},3)"
 
         else:
             log('WARNING: No translations provided')
@@ -389,10 +397,25 @@ class PoseTracker(nn.Module):
                 t = self.trans.cpu().numpy()
             else:
                 t = self.trans_emb.weight.data.cpu().numpy()
+
+            #add update
+            t = self.trans_o.cpu().numpy() + self.trans_update.cpu().numpy()
+
             t = t/self.D # convert from pixels to extent
             if self.eulers is not None:
+                r = self.rots.cpu().numpy()
+                rots_to_save = self.rots @ self.rots_update
+                delta_angle, delta_axis = lie_tools.rot_to_axis(self.rots_update)
+                #print(delta_angle[:8], delta_axis[:8])
+                #convert rotation to hopfs
+                new_hopfs = lie_tools.so3_to_hopf(rots_to_save)
+                hopfs_diff = new_hopfs - self.hopfs
+                #print(hopfs_diff[:8, :])
+                #print(self.trans_o[:8, :] - self.trans[:8, :], self.trans_update[:8, :])
+                new_eulers = lie_tools.hopf_to_euler(new_hopfs)
+
                 # convert from hopf back to euler
-                new_eulers = lie_tools.hopf_to_euler(self.eulers)
+                #new_eulers = lie_tools.hopf_to_euler(self.eulers)
                 #e = self.eulers.cpu().numpy()
                 e = new_eulers.cpu().numpy()
                 poses = (r,t,e)
@@ -410,6 +433,31 @@ class PoseTracker(nn.Module):
 
     def set_euler(self, euler, ind):
         self.eulers[ind] = euler
+
+    def set_pose(self, rots, trans, ind, mu=0.7):
+        # the learning rate is 0.3
+        #doing slerp in for rotation
+        rot_o = self.rots_update[ind]
+        #print(rots.shape, rot_o.shape)
+        delta_R = lie_tools.hopf_to_SO3(rots.squeeze(1).cpu())
+        delta_R = torch.transpose(rot_o, -1, -2) @ delta_R
+        #convert delta_R to axis angle
+        delta_angle, delta_axis = lie_tools.rot_to_axis(delta_R)
+        delta_R_mu = lie_tools.axis_rot(delta_angle*(1.-mu), delta_axis)
+        rot_n = rot_o @ delta_R_mu
+        #print(rot_n.shape, delta_R_mu.shape, trans.shape, rot_o.shape)
+        delta_t = self.rots[ind] @ trans.squeeze(1).unsqueeze(-1).cpu()
+        delta_t = delta_t.squeeze(-1).cpu()
+        #print(delta_angle, delta_axis, delta_t)#, delta_R_mu)
+        delta_angle, delta_axis = lie_tools.rot_to_axis(rot_n)
+        self.rots_update[ind] = rot_n
+        self.trans_update[ind] = self.trans_update[ind]*mu + delta_t[:, :]*(1-mu)
+        #update euler and trans
+        new_rots = self.rots[ind] @ self.rots_update[ind]
+        new_eulers = lie_tools.so3_to_hopf(new_rots)
+        self.eulers[ind] = new_eulers
+        self.trans[ind] = self.trans_o[ind] + self.trans_update[ind]
+        #print(delta_t, delta_angle, delta_axis)
 
     def set_body_euler(self, euler, trans, ind):
         self.eulers[ind] = euler
