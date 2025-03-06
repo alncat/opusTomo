@@ -14,10 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-try:
-    import apex.amp as amp
-except:
-    pass
+torch.backends.cudnn.benchmark = True
 
 import cryodrgn
 from cryodrgn import mrc
@@ -158,13 +155,13 @@ def train_batch(model, lattice, y, yt, rot, trans, optim, beta,
                                         mus=mus, neg_mus=neg_mus, y_recon_ori=y_recon_ori, euler_samples=euler_samples,
                                         snr2=snr2, body_poses=body_poses, body_poses_pred=None)
 
-    if top_euler is not None and not update_params:
-        posetracker.set_euler(top_euler, ind)
+    #if top_euler is not None and not update_params:
+    #    posetracker.set_euler(top_euler, ind)
 
-    if use_amp:
-        with amp.scale_loss(loss, optim) as scaled_loss:
-            scaled_loss.backward()
-    elif update_params:
+    #if use_amp:
+    #    with amp.scale_loss(loss, optim) as scaled_loss:
+    #        scaled_loss.backward()
+    if update_params:
         loss.backward()
     if update_params:
         optim.step()
@@ -410,8 +407,8 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
                   body_poses=None, body_poses_pred=None):
     # reconstruction error
     B = y.size(0)
-    C = y_recon.size(1)
-    W = y_recon.size(-1)
+    C = losses["y_recon2"].size(1)
+    W = y.size(-1)
     mask_sum = mask_sum.float()
     #print(B, W, C, mask_sum, W**3*np.pi*0.05)
     mask_sum = torch.maximum(mask_sum, torch.ones_like(mask_sum)*W**3*np.pi*0.05)
@@ -792,7 +789,7 @@ def main(args):
                 enc_type=args.pe_type, enc_dim=args.pe_dim, domain=args.domain,
                 activation=activation, ref_vol=ref_vol, Apix=args.angpix,
                 template_type=args.template_type, warp_type=args.warp_type,
-                device=device, symm=args.symm, ctf_grid=ctf_grid,
+                device=device, symm=None, ctf_grid=ctf_grid,
                 deform_emb_size=args.deform_size,
                 downfrac=args.downfrac,
                 templateres=args.templateres,
@@ -942,7 +939,7 @@ def main(args):
     bfactor = args.bfactor
     lamb = args.lamb
     if args.log_interval % args.batch_size != 0:
-        args.log_interval = args.batch_size*10
+        args.log_interval = args.batch_size*8
 
     for epoch in range(start_epoch, num_epochs):
         t2 = dt.now()
@@ -972,8 +969,8 @@ def main(args):
         for batch_idx, minibatch in loop:
         #for minibatch in data_generator:
             ind = minibatch[-1]#.to(device)
-            y = minibatch[0][0].to(device)
-            ctf_param = minibatch[0][1].float().to(device)
+            y = minibatch[0][0].to(device, non_blocking=True)
+            ctf_param = minibatch[0][1].float().to(device, non_blocking=True)
             #apixs = torch.ones(ctf_param.shape[:-1]).to(device)*args.angpix
             #ctf_param = torch.cat([apixs.unsqueeze(-1), ctf_param], dim=-1)
             # compute ctf!
@@ -992,7 +989,7 @@ def main(args):
             beta_control = args.beta_control*snr_ema
             beta = beta_schedule(global_it) * beta_max
 
-            yr = torch.from_numpy(data.particles_real[ind.numpy()]).to(device) if args.use_real else None
+            yr = None#torch.from_numpy(data.particles_real[ind.numpy()]).to(device) if args.use_real else None
             if do_pose_sgd:
                 pose_optimizer.zero_grad()
             rot, tran = posetracker.get_pose(ind)
@@ -1079,8 +1076,8 @@ def main(args):
         #for minibatch in val_data_generator:
             ind = minibatch[-1]
             yt = None
-            y = minibatch[0][0].to(device)
-            ctf_param = minibatch[0][1].float().to(device)
+            y = minibatch[0][0].to(device, non_blocking=True)
+            ctf_param = minibatch[0][1].float().to(device, non_blocking=True)
             B = len(ind)
             if B % args.num_gpus != 0:
                 continue
@@ -1088,7 +1085,7 @@ def main(args):
             save_image = False
             beta = beta_schedule(global_it)
 
-            yr = torch.from_numpy(data.particles_real[ind.numpy()]).to(device) if args.use_real else None
+            yr = None #torch.from_numpy(data.particles_real[ind.numpy()]).to(device) if args.use_real else None
             rot, tran = posetracker.get_pose(ind)
             euler = posetracker.get_euler(ind)
             rot = rot.to(device)
