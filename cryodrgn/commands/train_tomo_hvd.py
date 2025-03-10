@@ -350,7 +350,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
             trans_local = decout["affine"][1].detach()
             rot_global = hvd.allgather(rot_local)
             trans_global = hvd.allgather(trans_local)
-            posetracker.set_pose(rot_global, trans_global, ind_global)
+            #posetracker.set_pose(rot_global, trans_global, ind_global)
 
             #posetracker.set_pose(decout["affine"][0].detach(), decout["affine"][1].detach(), ind)
 
