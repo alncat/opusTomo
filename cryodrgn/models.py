@@ -15,7 +15,6 @@ from . import utils
 from . import lattice
 from . import mrc
 from . import symm_groups
-from . import unet
 from . import healpix_sampler
 from . import ctf
 
