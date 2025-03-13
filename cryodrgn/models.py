@@ -1548,7 +1548,7 @@ class VanillaDecoder(nn.Module):
                         #zero euler2
                         #rand_ang = torch.zeros(1, 1).to(euler.get_device())
                         # random ang is just eluer2, which means we rotate the 3d volume to target pose directly !
-                        #rand_ang = euler_i[:, 2:]
+                        rand_ang = euler_i[:, 2:]
 
                         euler2_sample_i = -euler_i[:, 2] #(1,) hopf angle == minus of euler angle
                         euler2 = euler2_sample_i + rand_ang.squeeze(1) # use minus if using euler
@@ -1715,7 +1715,7 @@ class VanillaDecoder(nn.Module):
 
                     # rotate reference
                     if self.num_bodies >= 0:
-                        ref_i = self.transformer.rotate_2d(ref_i, -euler2, mode='bicubic').unsqueeze(0)
+                        #ref_i = self.transformer.rotate_2d(ref_i, -euler2, mode='bicubic').unsqueeze(0)
                         #applying 3d mask to reference here
                         ref = ref_i*(valid>0)
                         ref = ref.squeeze(1)
