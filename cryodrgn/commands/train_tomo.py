@@ -297,7 +297,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
                 #assert diff.shape[-1] == model.encoder_image_size, "y shape {y.shape[-1]} should equal with {model.encoder_image_size}"
 
             if plot:
-                print(f"ctf {c.shape}, y {y.shape}")
+                print(f"ctf {c.shape}, z projection of y {y.shape}")
                 #print(c[...,-1])
                 #utils.plot_image(axes, exp_fac.detach().cpu().numpy(), 0)
                 #utils.plot_image(axes, i_c[d_i,d_i,...].detach().cpu().numpy(), d_i, 0, log=True)
@@ -390,7 +390,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
                 utils.plot_image(axes, y_ref[0,0,...].detach().cpu().numpy(), 0, 2, log=True, log_msg="y_ref0")
                 utils.plot_image(axes, y_ref[d_i,d_k,...].detach().cpu().numpy(), d_j, 2)
 
-                print('y_recon and y_ref: ', y_recon.shape, y_ref.shape, B)
+                print('z projection of y_recon and y_ref: ', y_recon.shape, y_ref.shape, B)
                 correlations = F.cosine_similarity(y_recon[:,d_k,...].reshape(B,-1), y_ref[:,d_k,...].reshape(B,-1))
                 log("correlations with mask: {}".format(correlations.detach().cpu().numpy()))
                 log(f"mean correlations {correlations.mean()}")

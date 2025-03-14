@@ -1835,7 +1835,7 @@ class VanillaDecoder(nn.Module):
                 self.save_mrc(template_FT[0:1, ...], self.tmp_prefix, flip=False)
             else:
                 self.save_mrc(template[0:1, ...], self.tmp_prefix, flip=False)
-        return {"y_recon_ori": None, "y_recon": images_fft,"losses": losses, "y_ref": refs, "mask_sum": mask_sums,
+        return {"y_recon_ori": None, "y_recon": images_fft.sum(dim=(-3)),"losses": losses, "y_ref": refs.sum(dim=(-3)), "mask_sum": mask_sums,
                 "affine": body_poses_pred,}
 
     def save_mrc(self, template, filename, flip=False):
