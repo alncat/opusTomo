@@ -1473,7 +1473,7 @@ class VanillaDecoder(nn.Module):
             return out
 
     def forward(self, rots, trans, z=None, in_template=None, euler=None, ref_fft=None, ctf_param=None,
-                others=None, save_mrc=False, refine_pose=True, body_euler=None, body_trans=None, ctf_grid=None, estimate_pose=False,
+                save_mrc=False, refine_pose=True, body_euler=None, body_trans=None, ctf_grid=None, estimate_pose=False,
                 ctf_filename=None, write_ctf=False):
         #generate a projection
         if self.use_conv_template:
