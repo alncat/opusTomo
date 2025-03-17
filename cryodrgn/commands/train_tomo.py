@@ -85,7 +85,7 @@ def add_args(parser):
     group.add_argument('--amp', action='store_true', help='Use mixed-precision training')
     group.add_argument('--multigpu', action='store_true', help='Parallelize training across all detected GPUs')
     group.add_argument('--num-gpus', type=int, default=4, help='number of gpus used for training')
-
+    parser.add_argument('--write-ctf', default=False, action='store_true', help='save CTF as mrc')
     group = parser.add_argument_group('Pose SGD')
     group.add_argument('--do-pose-sgd', action='store_true', help='Refine poses with gradient descent')
     group.add_argument('--pretrain', type=int, default=1, help='Number of epochs with fixed poses before pose SGD (default: %(default)s)')
@@ -113,7 +113,7 @@ def add_args(parser):
     group.add_argument('--pe-type', choices=('geom_ft','geom_full','geom_lowf','geom_nohighf','linear_lowf','none', 'vanilla'), default='vanilla', help='Type of positional encoding (default: %(default)s)')
     group.add_argument('--template-type', choices=('conv'), default='conv', help='Type of template decoding method (default: %(default)s)')
     group.add_argument('--warp-type', choices=('blurmix', 'diffeo', 'deform'), help='Type of warp decoding method (default: %(default)s)')
-    group.add_argument('--symm', help='Type of symmetry of the 3D volume (default: %(default)s)')
+    #group.add_argument('--symm', help='Type of symmetry of the 3D volume (default: %(default)s)')
     group.add_argument('--num-struct', type=int, default=1, help='Num of structures (default: %(default)s)')
     group.add_argument('--deform-size', type=int, default=2, help='Num of structures (default: %(default)s)')
     group.add_argument('--pe-dim', type=int, help='Num features in positional encoding (default: image D)')
@@ -126,7 +126,7 @@ def train_batch(model, lattice, y, yt, rot, trans, optim, beta,
                 ctf_params=None, yr=None, use_amp=False, save_image=False, vanilla=True,
                 group_stat=None, do_scale=False, it=None, enc=None,
                 args=None, euler=None, posetracker=None, data=None, update_params=True,
-                snr2=1., body_poses=None):
+                snr2=1., body_poses=None, ctf_filename=None):
 
     if update_params:
         model.train()
@@ -144,7 +144,7 @@ def train_batch(model, lattice, y, yt, rot, trans, optim, beta,
                                                                  trans=trans, it=it, enc=enc,
                                                                  args=args, euler=euler,
                                                                  posetracker=posetracker, data=data,
-                                                                 snr2=snr2, body_poses=body_poses)
+                                                                 snr2=snr2, body_poses=body_poses, ctf_filename=ctf_filename)
     if update_params:
         optim.zero_grad()
 
@@ -255,7 +255,7 @@ def sample_neighbors(posetracker, data, euler, rot, ind, ctf_params, ctf_grid, g
 def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
               yr=None, vanilla=True, ctf_grid=None, grid=None, save_image=False,
               group_stat=None, do_scale=True, trans=None, it=None, enc=None,
-              args=None, euler=None, posetracker=None, data=None, snr2=1., body_poses=None):
+              args=None, euler=None, posetracker=None, data=None, snr2=1., body_poses=None, ctf_filename=None):
     use_tilt = yt is not None
     use_ctf = ctf_params is not None
     B = y.size(0)
@@ -281,7 +281,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
     random_b = np.random.gamma(1., 0.6)
     c[...,-2] = c[...,-2] + (args.bfactor+random_b)*(4*np.pi**2)
 
-    plot = args.plot and it % (args.log_interval*2) == B
+    plot = args.plot and it % (args.log_interval) == B
     if plot:
         f, axes = plt.subplots(2, 3)
     # decode
@@ -297,7 +297,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
                 #assert diff.shape[-1] == model.encoder_image_size, "y shape {y.shape[-1]} should equal with {model.encoder_image_size}"
 
             if plot:
-                print(f"ctf {c.shape}, z projection of y {y.shape}")
+                print(f"ctf {c.shape}, y {y.shape}")
                 #print(c[...,-1])
                 #utils.plot_image(axes, exp_fac.detach().cpu().numpy(), 0)
                 #utils.plot_image(axes, i_c[d_i,d_i,...].detach().cpu().numpy(), d_i, 0, log=True)
@@ -329,7 +329,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         # decode latents
         decout = model.vanilla_decode(rot, trans, z=z, save_mrc=save_image, eulers=euler,
                                       ref_fft=y, ctf_param=c, encout=encout, mask=mask_real, body_poses=body_poses,
-                                      ctf_grid=ctf_grid, estpose=args.estpose)
+                                      ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename, write_ctf=args.write_ctf)
         y_recon_fft = None
         y_ref_fft   = None #torch.view_as_complex(decout["y_ref_fft"])
         y_ffts      = {"y_recon_fft":y_recon_fft, "y_ref_fft":y_ref_fft}
@@ -1078,6 +1078,7 @@ def main(args):
             yt = None
             y = minibatch[0][0].to(device, non_blocking=True)
             ctf_param = minibatch[0][1].float().to(device, non_blocking=True)
+            ctf_filename = minibatch[0][2]
             B = len(ind)
             if B % args.num_gpus != 0:
                 continue
@@ -1137,9 +1138,6 @@ def main(args):
             if args.do_pose_sgd and epoch >= args.pretrain:
                 out_pose = '{}/pose.{}.pkl'.format(args.outdir, epoch)
                 posetracker.save(out_pose)
-            if group_stat is not None:
-                out_group_stat = '{}/group_stat.{}.pkl'.format(args.outdir, epoch)
-                group_stat.save(out_group_stat)
         #update learning rate
         lr_scheduler.step()
     # save model weights, latent encoding, and evaluate the model on 3D lattice

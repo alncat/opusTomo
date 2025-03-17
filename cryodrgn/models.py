@@ -389,7 +389,7 @@ class ConvTemplate(nn.Module):
             #self.affine_out = nn.Sequential(nn.Linear(2048, self.affine_hidden), nn.LeakyReLU(0.2), nn.Linear(self.affine_hidden, num_bodies*6))
             self.z_affine_dim = affine_dim
             self.affine_out = nn.Sequential(nn.Linear(self.z_affine_dim, self.affine_hidden), nn.LeakyReLU(0.2), nn.Linear(self.affine_hidden, (num_bodies+1)*6))
-            torch.nn.init.zeros_(self.affine_out[2].weight, std=0.5/self.affine_hidden)
+            torch.nn.init.normal_(self.affine_out[2].weight, std=0.5/self.affine_hidden)
             torch.nn.init.zeros_(self.affine_out[2].bias)
             self.use_affine = True
         template2 = []
@@ -1532,6 +1532,7 @@ class VanillaDecoder(nn.Module):
         body_rots = []
         body_trans_pred = []
         rand_tilt = (torch.randn(1).to(euler.get_device()))/6.*10.
+        # precompute ctf here
         freqs = ctf_grid.freqs2d.unsqueeze(0)/self.Apix
         ctf_param[:, :, 0] += rand_tilt
         c = ctf.compute_3dctf(ref_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False,)
@@ -1601,12 +1602,13 @@ class VanillaDecoder(nn.Module):
                             #print(rot_resi_i)
                             rot_resi_i = lie_tools.quaternions_to_SO3_wiki(body_quat_i)
 
-                            # multiply rot_i by an estimated global rot
+                            # global rotation corrected by mlp
                             rot_i = rot_i @ rot_resi_i[self.num_bodies:, ...].unsqueeze(1).unsqueeze(1)
                             # global translation corrected by mlp
                             global_trans_i = affine[1][i, self.num_bodies:, ...]
                             #print(rot_resi_i, body_trans_i)
-                            rot_i_correction = lie_tools.so3_to_hopf(rot_resi_i[self.num_bodies, ...])
+                            rot_i_correction = lie_tools.so3_to_hopf(rot_resi_i[self.num_bodies:,...])
+                            #save estimated global pose
                             body_rots_pred.append(rot_i_correction)
                             body_trans_pred.append(global_trans_i)
 
@@ -1632,7 +1634,7 @@ class VanillaDecoder(nn.Module):
                             affine_grid_i, valid, trans_img = self.transformer.multi_body_grid(rot_i, rot_resi_i, self.com_bodies/self.vol_size,
                                                                              t_i_3d, body_trans_i, radius=self.radius, axes=self.principal_axesT)
 
-                            #body_trans_pred.append(trans_img[..., :2]*self.vol_size/self.scale)
+                            #body_trans_pred.append(trans_img[..., :3]*self.vol_size/self.scale)
                             pos = self.transformer.rotate(rot_i)
                             valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
                             #if save_mrc and i == 0:
@@ -1792,7 +1794,7 @@ class VanillaDecoder(nn.Module):
         losses["y_recon2"] = torch.stack(losses["y_recon2"], 0)
         losses["ycorr"] = torch.stack(losses["ycorr"], 0) #B, 1
         losses["y2"] = torch.stack(losses["y2"], 0)
-
+        #print(losses["y_recon2"].shape, losses["ycorr"].shape, losses["y2"].shape)
         images = torch.stack(images, 0)
         refs   = torch.stack(refs, 0)
         #print("images and refs shape: ", images.shape, refs.shape)

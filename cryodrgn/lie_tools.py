@@ -261,6 +261,31 @@ def zrot_2d(x):
         -sa, ca
     ], -1).view(*x.shape, 2, 2)
 
+def skew_symmetric(u):
+    ux = u[..., 0]
+    uy = u[..., 1]
+    uz = u[..., 2]
+    zero = torch.zeros_like(ux)
+    K = torch.stack([
+    zero, -uz, uy,
+    uz, zero, -ux,
+    -uy, ux, zero
+    ], -1).view(*u.shape[:-1], 3, 3)
+    return K
+
+def axis_rot(x, u):
+    x = x*np.pi/180.
+    #normalize u
+    #u = u/u.norm(p=2, dim=-1, keepdim=True)
+    K = skew_symmetric(u)
+    K2 = K @ K
+    x = x.unsqueeze(-1).unsqueeze(-1)
+    R = torch.eye(3, device=u.device) + x.sin()*K + (1 - x.cos())*K2
+    #quat = torch.cat([(x.unsqueeze(-1)/2.).cos(), (x.unsqueeze(-1)/2.).sin()*u], dim=-1)
+    #R_quat = quaternions_to_SO3_wiki(quat)
+    #print( R_quat - R, R @ torch.transpose(R, -1, -2) )
+    return R
+
 
 def euler_to_direction(euler):
     alpha = euler[...,0]*np.pi/180

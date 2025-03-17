@@ -1078,11 +1078,11 @@ def main(args):
             #rand_z = o_rot @ symm_ops[samples].to(o_rot.get_device())
             #print(rand_z)
             ##pixrad = hp.max_pixrad(64)
-            rand_z = lie_tools.random_biased_SO3(o_rot.shape[0], bias=256*np.sqrt(3)).to(o_rot.get_device())
-            rand_z = o_rot @ rand_z
-            rand_e = lie_tools.so3_to_hopf(rand_z)
-            #print(rand_e - euler[:, :3])
-            euler = rand_e
+            #rand_z = lie_tools.random_biased_SO3(o_rot.shape[0], bias=256*np.sqrt(3)).to(o_rot.get_device())
+            #rand_z = o_rot @ rand_z
+            #rand_e = lie_tools.so3_to_hopf(rand_z)
+            ##print(rand_e - euler[:, :3])
+            #euler = rand_e
 
             #print("euler, trans: ", euler.shape, tran.shape, y.shape)
             #ctf_param = ctf_params[ind] if ctf_params is not None else None
