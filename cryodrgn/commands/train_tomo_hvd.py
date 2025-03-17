@@ -350,7 +350,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
             trans_local = decout["affine"][1].detach()
             rot_global = hvd.allgather(rot_local)
             trans_global = hvd.allgather(trans_local)
-            #posetracker.set_pose(rot_global, trans_global, ind_global)
+            posetracker.set_pose(rot_global, trans_global, ind_global)
 
             #posetracker.set_pose(decout["affine"][0].detach(), decout["affine"][1].detach(), ind)
 
@@ -414,7 +414,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
                 utils.plot_image(axes, y_ref[0,0,...].detach().cpu().numpy(), 0, 2, log=True, log_msg="y_ref0")
                 utils.plot_image(axes, y_ref[d_i,d_k,...].detach().cpu().numpy(), d_j, 2)
 
-                print('y_recon and y_ref: ', y_recon.shape, y_ref.shape, B)
+                print('z projection of y_recon and y_ref: ', y_recon.shape, y_ref.shape, B)
                 correlations = F.cosine_similarity(y_recon[:,d_k,...].reshape(B,-1), y_ref[:,d_k,...].reshape(B,-1))
                 log("correlations with mask: {}".format(correlations.detach().cpu().numpy()))
                 log(f"mean correlations {correlations.mean()}")
@@ -848,6 +848,7 @@ def main(args):
     save_config(args, data, lattice, model, out_config)
     # move model to gpu
     model = model.to(device)
+    Backward_passes_per_step = 2
 
     # set model parameters to be encoder and decoder
     #model_parameters = list(model.parameters())+list(group_stat.parameters())
@@ -857,7 +858,8 @@ def main(args):
     optim = hvd.DistributedOptimizer(optim,
                                      named_parameters=model.named_parameters(),
                                      op=hvd.Average,
-                                     gradient_predivide_factor=1.,)
+                                     gradient_predivide_factor=1.,
+                                     backward_passes_per_step=Backward_passes_per_step)
 
     #if args.encode_mode == "grad":
     #    discriminator_parameters = list(model.shape_encoder.parameters())
@@ -870,7 +872,7 @@ def main(args):
     #                                 0.5 * (math.cos((epoch - warm_up_epochs)/(max_num_epochs - warm_up_epochs) * \
     #                                                 math.pi) + 1.)
     #lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=warm_up_with_cosine_lr)
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optim, 1, gamma=0.96)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optim, 1, gamma=0.98)
 
     # Mixed precision training with AMP
     if args.amp:
@@ -1092,7 +1094,7 @@ def main(args):
                                               save_image=save_image, group_stat=group_stat,
                                               it=batch_it, enc=None,
                                               args=args, euler=euler,
-                                              posetracker=posetracker, data=data, update_params=True,
+                                              posetracker=posetracker, data=data, update_params=(batch_idx%Backward_passes_per_step == 0),
                                               snr2=snr_ema, body_poses=(body_euler, body_trans), ctf_filename=ctf_filename)
             c_m_avg += c_m
             update_it += 1

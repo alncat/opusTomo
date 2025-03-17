@@ -1,5 +1,6 @@
 '''Pytorch models'''
 
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -238,8 +239,8 @@ class HetOnlyVAE(nn.Module):
         return z, encout
 
     def vanilla_decode(self, rots, trans, z=None, save_mrc=False, eulers=None,
-                       ref_fft=None, ctf_param=None, encout=None, others=None, mask=None,
-                       body_poses=(None, None), ctf_grid=None, estpose=False,):
+                       ref_fft=None, ctf_param=None, encout=None, mask=None,
+                       body_poses=(None, None), ctf_grid=None, estpose=False, ctf_filename=None, write_ctf=False):
         in_template = None
         if self.encode_mode != 'deform':
             #randomly perturb rotation
@@ -274,7 +275,7 @@ class HetOnlyVAE(nn.Module):
         #decout["y_recon"] = fft.torch_irfft3_center(y_recon_fft)
 
         # crop reconstruction here
-        decout["y_recon"] = utils.crop_vol(decout["y_recon"], self.encoder_crop_size)
+        #decout["y_recon"] = utils.crop_vol(decout["y_recon"], self.encoder_crop_size)
         #images = decout["y_recon"]
         #decout["y_recon_mean"] = images.detach().mean(dim=1, keepdim=True)
         # substract reconstruction to form diff image
@@ -338,7 +339,7 @@ def load_decoder(config, weights=None, device=None):
 def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activation=nn.ReLU, templateres=128,
                 ref_vol=None, Apix=1., template_type=None, warp_type=None,
                 symm=None, ctf_grid=None, fixed_deform=False, deform_emb_size=2, render_size=140,
-                down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0):
+                down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4):
     if enc_type == 'none':
         if domain == 'hartley':
             model = ResidLinearMLP(in_dim, layers, dim, 1, activation)
@@ -352,7 +353,8 @@ def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activati
                               fixed_deform=fixed_deform,
                               deform_emb_size=deform_emb_size,
                               zdim=in_dim - 3, render_size=render_size,
-                              down_vol_size=down_vol_size, tmp_prefix=tmp_prefix, masks_params=masks_params, num_bodies=num_bodies)
+                              down_vol_size=down_vol_size, tmp_prefix=tmp_prefix, masks_params=masks_params, num_bodies=num_bodies,
+                              affine_dim=affine_dim)
     else:
         model = PositionalDecoder if domain == 'hartley' else FTPositionalDecoder
         return model(in_dim, D, layers, dim, activation, enc_type=enc_type, enc_dim=enc_dim)
@@ -387,7 +389,7 @@ class ConvTemplate(nn.Module):
             #self.affine_out = nn.Sequential(nn.Linear(2048, self.affine_hidden), nn.LeakyReLU(0.2), nn.Linear(self.affine_hidden, num_bodies*6))
             self.z_affine_dim = affine_dim
             self.affine_out = nn.Sequential(nn.Linear(self.z_affine_dim, self.affine_hidden), nn.LeakyReLU(0.2), nn.Linear(self.affine_hidden, (num_bodies+1)*6))
-            torch.nn.init.zeros_(self.affine_out[2].weight)
+            torch.nn.init.zeros_(self.affine_out[2].weight, std=0.5/self.affine_hidden)
             torch.nn.init.zeros_(self.affine_out[2].bias)
             self.use_affine = True
         template2 = []
@@ -446,7 +448,7 @@ class ConvTemplate(nn.Module):
         if self.use_affine and encoding.shape[-1] > self.zdim:
             #affine = self.affine_out(template1).view(-1, self.num_bodies, 6)
             affine = self.affine_out(encoding[..., self.zdim:]).view(-1, (self.num_bodies+1), 6)
-            one = torch.ones_like(affine[..., :1])*30.
+            one = torch.ones_like(affine[..., :1])*16.
             quat = torch.cat([one, affine[..., :3]], dim=-1)
             #quat = lie_tools.exp_quaternion(affine[..., :3])
             trans = affine[..., 3:]
@@ -733,13 +735,14 @@ class Encoder(nn.Module):
             #x_i = self.bicubic_translate(x_i, -trans[i]*(self.render_size/self.vol_size)*2./(self.render_size - 1), -euler2, scale=1.)
 
             x_i = utils.crop_vol(x_i, self.crop_vol_size)
+
             x_i = self.transformer_e.rotate_2d(x_i.squeeze(0), -euler2, mode='bicubic').unsqueeze(0) #(1, 1, H, W)
 
 
             # data augmentation
             if self.training:
                 x_i = x_i *(1. + snr*0.3*(torch.rand(1).float().to(x.get_device()) - 0.5)) \
-                    + 0.2*snr*torch.randn(1).to(x.get_device())
+                    + 0.1*snr*torch.randn(1).to(x.get_device())
 
             # construct pseudo volume
             #x3d_i = x_i.unsqueeze(0).repeat(1, 1, self.crop_vol_size, 1, 1) #(N, C, D, H, W)
@@ -855,6 +858,7 @@ class SpatialTransformer(nn.Module):
         zgrid = torch.zeros_like(xgrid)
         grid = torch.stack([xgrid, ygrid, zgrid], dim=-1).unsqueeze(0).unsqueeze(0)
         self.register_buffer("grid2d", grid)
+
 
     def rotate(self, rot):
         return self.grid @ rot #(1, 1, H, W, D, 3) @ (N, 1, 1, 1, 3, 3)
@@ -1469,7 +1473,8 @@ class VanillaDecoder(nn.Module):
             return out
 
     def forward(self, rots, trans, z=None, in_template=None, euler=None, ref_fft=None, ctf_param=None,
-                others=None, save_mrc=False, refine_pose=True, body_euler=None, body_trans=None, ctf_grid=None, estimate_pose=False):
+                others=None, save_mrc=False, refine_pose=True, body_euler=None, body_trans=None, ctf_grid=None, estimate_pose=False,
+                ctf_filename=None, write_ctf=False):
         #generate a projection
         if self.use_conv_template:
             #print((z[0] == z[1]).sum())
@@ -1526,6 +1531,13 @@ class VanillaDecoder(nn.Module):
         body_rots_pred = []
         body_rots = []
         body_trans_pred = []
+        rand_tilt = (torch.randn(1).to(euler.get_device()))/6.*10.
+        freqs = ctf_grid.freqs2d.unsqueeze(0)/self.Apix
+        ctf_param[:, :, 0] += rand_tilt
+        c = ctf.compute_3dctf(ref_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False,)
+
+
+
         for i in range(B):
             mask_sums.append(self.mask_sum)
 
@@ -1591,9 +1603,10 @@ class VanillaDecoder(nn.Module):
 
                             # multiply rot_i by an estimated global rot
                             rot_i = rot_i @ rot_resi_i[self.num_bodies:, ...].unsqueeze(1).unsqueeze(1)
+                            # global translation corrected by mlp
                             global_trans_i = affine[1][i, self.num_bodies:, ...]
-                            rot_i_correction = lie_tools.so3_to_hopf(rot_resi_i[self.num_bodies, ...])
                             #print(rot_resi_i, body_trans_i)
+                            rot_i_correction = lie_tools.so3_to_hopf(rot_resi_i[self.num_bodies, ...])
                             body_rots_pred.append(rot_i_correction)
                             body_trans_pred.append(global_trans_i)
 
@@ -1715,16 +1728,25 @@ class VanillaDecoder(nn.Module):
 
                     # rotate reference
                     if self.num_bodies >= 0:
-                        ref_i = self.transformer.rotate_2d(ref_i, -euler2, mode='bicubic').unsqueeze(0)
+                        #ref: (1, D, H, W)
+                        ###rotate tilt around y, permute ref_i from [z, y, x] to [y, z, x], then convert back
+                        ref_i = torch.permute(ref_i, [0, 2, 1, 3,])
+                        ##rotate_2d using lie_tools.zrot, which is the inverse of lie_tools.rot_2d
+                        ##but in compute3dctf, we use -tilt, so rotate_2d is identical to compute3dctf
+                        ##so if the ref is rotated by rand_tilt using rotate_2d, the 3dctf should be rotated by tilt + rand_tilt
+                        ref_i = self.transformer.rotate_2d(ref_i, rand_tilt, mode='bicubic')
+                        ref_i = torch.permute(ref_i, [0, 2, 1, 3])
+                        ##rotate the images around z axis by -(-euler2) == euler2 counter-clockwise
+                        ref_i = self.transformer.rotate_2d(ref_i, -euler2, mode='bicubic') #.unsqueeze(0)
                         #applying 3d mask to reference here
                         ref = ref_i*(valid>0)
                         ref = ref.squeeze(1)
                         # if you want to translate the 2d experimental image
                         #ref = self.transformer.translate_2d(ref_i, -t_i/self.vol_size*2.).squeeze(1)
                     else:
-                        pass
+                        raise RuntimeError("num_bodies should not be negative")
                         #ref = self.transformer.rotate_2d(ref_i, -euler2).squeeze(1)
-                    refs.append(ref)
+                    refs.append(ref.sum(dim=-3))
                     #pos = self.transformer.rotate(rot) # + 1)/2*(self.crop_vol_size - 1) #(B, 1, H, W, D, 3) x ( B, 1, 1, 3, 3) -> (B, 1, H, W, D, 3)
                     #mask_i = (torch.sum(valid, axis=-3) > 0).detach().squeeze(1)
                     #masks.append(mask_i)
@@ -1745,55 +1767,32 @@ class VanillaDecoder(nn.Module):
                     # append sampled angles
                     euler_samples.append(euler_sample_i)
 
-            elif self.warp_type == "affine":
-                if self.use_fourier:
-                    image, ref = self.fourier_transformer.hp_sample_(template_FT,
-                                                               euler[i:i+1,...], ref_fft[i:i+1,...], ctf[i:i+1,...],
-                                                               trans=trans[i:i+1,...])
-                    image = image.squeeze(0) #(1, B, H, W)
-                    ref = ref.squeeze(0) #(1, B, H, W)
-                    refs.append(ref)
+            image = self.transformer.pad3d(image, self.render_size)
+            image_fft = fft.torch_rfft3_center(image)
+            #print(image_fft.shape, c.shape, ref.shape)
+
+            #image_fft: 8, D, H, W; c: 1, D, H, W; ref: 1, crop_D, crop_H, crop_W
+            image_fft = image_fft*c[i:i+1]
+            image_fft = fft.torch_irfft3_center(image_fft)
+            image_fft = utils.crop_vol(image_fft, self.crop_vol_size)
+            image = utils.crop_vol(image, self.crop_vol_size)
+
+            if "y_recon2" not in losses:
+                losses["y_recon2"] = [(image_fft**2).sum(dim=(-1,-2,-3)).view(-1)]
+                losses["ycorr"] = [(-2.*image_fft*ref).sum(dim=(-1,-2,-3)).view(-1)]
+                losses["y2"] = [(ref**2).sum(dim=(-1,-2,-3)).view(-1)]
             else:
-                if refine_pose:
-                    euler_i = euler[i:i+1,...] #(B, 3)
+                losses["y_recon2"].append((image_fft**2).sum(dim=(-1,-2,-3)).view(-1))
+                losses["ycorr"].append((-2.*image_fft*ref).sum(dim=(-1,-2,-3)).view(-1))
+                losses["y2"].append((ref**2).sum(dim=(-1,-2,-3)).view(-1))
 
-                    rand_ang = (torch.rand(1, 1).to(euler.get_device()) - .5)*360
+            images.append(image.sum(dim=-3))
 
-                    euler2_sample_i = -euler_i[:, 2] #(1,) hopf angle == minus of euler angle
-                    euler2 = euler2_sample_i + rand_ang.squeeze(1) # use minus if using euler
+        #B, 8
+        losses["y_recon2"] = torch.stack(losses["y_recon2"], 0)
+        losses["ycorr"] = torch.stack(losses["ycorr"], 0) #B, 1
+        losses["y2"] = torch.stack(losses["y2"], 0)
 
-                    euler01 = euler_i[..., :2]
-                    neighbor_eulers = self.get_particle_hopfs(euler01, hp_order=32, depth=0) #hp_order=64, depth=0)
-
-                    len_euler = neighbor_eulers.shape[0]
-                    n_eulers = torch.cat([neighbor_eulers, rand_ang.repeat(len_euler, 1)], dim=-1)
-                    rot = lie_tools.hopf_to_SO3(n_eulers).unsqueeze(1).unsqueeze(1)
-
-                    i_euler = torch.cat([euler_i[..., :2], rand_ang], dim=-1)
-                    rot_i = lie_tools.hopf_to_SO3(i_euler).unsqueeze(1).unsqueeze(1)
-
-                    ref_i = ref_fft[i:i+1,...].repeat(euler2.shape[0], 1, 1, 1)
-                    # convert neighbor_eulers to a list
-                    euler_sample_i = neighbor_eulers#.repeat(2, 1)
-                    euler2_sample_i = euler2_sample_i.unsqueeze(0).repeat(len_euler, 1).view(len_euler, -1)
-                    euler_sample_i = torch.cat([euler_sample_i, -euler2_sample_i], dim=1)
-                    pos = self.transformer.rotate(rot_i)
-                    valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
-                    template_i = template.repeat(rot.shape[0], 1, 1, 1, 1)
-                    if affine is not None:
-                        pos = affine_grid @ rot
-                    else:
-                        pos = self.transformer.rotate(rot)
-                    vol = F.grid_sample(template_i, pos, align_corners=ALIGN_CORNERS)
-                    image = torch.sum(vol, axis=-3).squeeze(1)
-                    # rotate reference
-                    ref = self.transformer.rotate_2d(ref_i, -euler2).squeeze(1)
-                    refs.append(ref)
-                    mask_i = (torch.sum(valid, axis=-3) > 0).detach().squeeze(1)
-                    masks.append(mask_i)
-                else:
-                    raise RuntimeError
-            images.append(image)
         images = torch.stack(images, 0)
         refs   = torch.stack(refs, 0)
         #print("images and refs shape: ", images.shape, refs.shape)
@@ -1812,31 +1811,36 @@ class VanillaDecoder(nn.Module):
         else:
             body_poses_pred = None
         # pad to original size
-        if not self.use_fourier:
-            images = self.transformer.pad3d(images, self.render_size)
-            images_fft = fft.torch_rfft3_center(images)
-            # compute ctf here
-            freqs = ctf_grid.freqs2d.unsqueeze(0)/self.Apix
-            c = ctf.compute_3dctf(images_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False)
-            # Uncomment if you want to check the 3DCTF
-            #c_to_write = torch.fft.fftshift(c[:1,...], dim=(-3, -2,))
-            #mrc.write("ctf" + str(c.get_device()) + ".mrc", c_to_write.squeeze().detach().cpu().numpy(), Apix=self.Apix/self.apix_ori, is_vol=True)
-            images_fft = images_fft*c.unsqueeze(1)
-            images_fft = fft.torch_irfft3_center(images_fft)
-            images_fft = utils.crop_vol(images_fft, self.crop_vol_size)
-            images = utils.crop_vol(images, self.crop_vol_size)
-            # compute reconstruction loss locally
-            losses["y_recon2"] = (images_fft**2).sum(dim=(-1,-2,-3)).view(B, -1)
-            losses["ycorr"] = (-2.*images_fft*refs).sum(dim=(-1,-2,-3)).view(B, -1)
-            losses["y2"] = (refs**2).sum(dim=(-1,-2,-3)).view(B, -1)
+        #if not self.use_fourier:
+        #    images = self.transformer.pad3d(images, self.render_size)
+        #    images_fft = fft.torch_rfft3_center(images)
+        #    # compute ctf here
+        #    freqs = ctf_grid.freqs2d.unsqueeze(0)/self.Apix
+        #    c = ctf.compute_3dctf(images_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False)
+        #    # Uncomment if you want to check the 3DCTF
+        #    #c_to_write = torch.fft.fftshift(c[:1,...], dim=(-3, -2,))
+        #    #mrc.write("ctf" + str(c.get_device()) + ".mrc", c_to_write.squeeze().detach().cpu().numpy(), Apix=self.Apix/self.apix_ori, is_vol=True)
+        #    images_fft = images_fft*c.unsqueeze(1)
+        #    images_fft = fft.torch_irfft3_center(images_fft)
+        #    images_fft = utils.crop_vol(images_fft, self.crop_vol_size)
+        #    images = utils.crop_vol(images, self.crop_vol_size)
+        #    # compute reconstruction loss locally
+        #    losses["y_recon2"] = (images_fft**2).sum(dim=(-1,-2,-3)).view(B, -1)
+        #    losses["ycorr"] = (-2.*images_fft*refs).sum(dim=(-1,-2,-3)).view(B, -1)
+        #    losses["y2"] = (refs**2).sum(dim=(-1,-2,-3)).view(B, -1)
 
+        if write_ctf:
+            for f_i in range(len(ctf_filename)):
+                if not os.path.exists(ctf_filename[f_i]):
+                    c_to_write = c[f_i]
+                    mrc.write(ctf_filename[f_i], c_to_write.squeeze().detach().cpu().numpy(), Apix=self.Apix, is_vol=True)
         if save_mrc:
             if self.use_fourier:
                 self.save_mrc(template_FT[0:1, ...], self.tmp_prefix, flip=False)
             else:
                 self.save_mrc(template[0:1, ...], self.tmp_prefix, flip=False)
-        return {"y_recon_ori": None, "y_recon": images_fft.sum(dim=(-3)),"losses": losses, "y_ref": refs.sum(dim=(-3)), "mask_sum": mask_sums,
-                "affine": body_poses_pred,}
+        return {"y_recon_ori": None, "y_recon": images ,"losses": losses, "y_ref": refs, "mask_sum": mask_sums,
+                "affine": body_poses_pred, "ctf_3d": None}
 
     def save_mrc(self, template, filename, flip=False):
         with torch.no_grad():

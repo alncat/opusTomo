@@ -7,8 +7,10 @@ import pandas as pd
 from datetime import datetime as dt
 import os
 from pathlib import Path
+import torch
 
 from . import mrc
+from . import lie_tools
 from .mrc import LazyImage
 
 class Starfile():
@@ -139,6 +141,19 @@ class Starfile():
             f.write('\n')
         #f.write('\n'.join([' '.join(self.df.loc[i]) for i in range(len(self.df))]))
 
+    def write_df(self, df, outstar):
+        f = open(outstar,'w')
+        f.write('# Created {}\n'.format(dt.now()))
+        f.write('\n')
+        f.write('data_images\n\n')
+        f.write('loop_\n')
+        f.write('\n'.join(df.columns))
+        f.write('\n')
+        for i in df.index:
+            # TODO: Assumes header and df ordering is consistent
+            f.write(' '.join([str(v) for v in df.loc[i]]))
+            f.write('\n')
+
     def write_subset(self, outstar, label):
         f = open(outstar,'w')
         f.write('# Created {}\n'.format(dt.now()))
@@ -166,6 +181,153 @@ class Starfile():
         dec_pixel = self.df['_rlnDetectorPixelSize']
 
         return dataset
+
+    def get_drgn_subtomos(self, datadir=None, key='_rlnImageName', lazy=True,):
+        '''
+        Return particles of the starfile
+
+        Input:
+            datadir (str): Overwrite base directories of particle .mrcs
+                Tries both substituting the base path and prepending to the path
+            If lazy=True, returns list of LazyImage instances, else np.array
+        '''
+        #particles = self.df[key]
+        #group
+        particles = self.df.groupby('_rlnGroupName')[key].apply(list)
+        #ind = [int(x[0])-1 for x in particles] # convert to 0-based indexing
+
+        # format is index@path_to_mrc
+        #particles = [x for x in particles]
+        mrcs = []
+        inds = []
+        for part in particles:
+            mrc_i = []
+            ind_i = []
+            for x in part:
+                ind_ii, mrc_ii = x.split('@')
+                mrc_i.append(mrc_ii)
+                ind_i.append(int(ind_ii)-1)
+            inds.append(ind_i)
+            mrcs.append(mrc_i)
+        #mrcs = [[x for x in part] for part in particles]
+
+        #if datadir is not None:
+        #    mrcs = [prefix_paths(mrcs, datadir) for mrc in mrcs]
+        #for path in set(mrcs):
+        #    assert os.path.exists(path), f'{path} not found'
+        header = mrc.parse_header(mrcs[0][0])
+        D = header.D # image size along one dimension in pixels
+        dtype = header.dtype
+        ## get the number of bytes in extended header
+        extbytes = header.fields['next']
+        start = 1024+extbytes # start of image data
+        dtype = header.dtype
+        print("start: ", start)
+        #print(inds)
+
+        stride = dtype().itemsize*D*D
+        dataset = []
+        for i in range(len(particles)):
+            data = []
+            for j in range(len(mrcs[i])):
+                #dataset = [[LazyImage(f, (D,D), dtype, start, 1024+ii*stride) for f in mrc] for mrc in mrcs]
+                ii = inds[i][j]
+                data.append(LazyImage(mrcs[i][j], (D,D), dtype, start+ii*stride))
+            dataset.append(data)
+        #read lazy tomos
+        #dataset = []
+        #for f in mrcs:
+        #    tomo, header = mrc.parse_tomo(f)
+        #    dataset.append(tomo)
+        #print(dataset)
+
+        if not lazy:
+            dataset = np.array([[x.get() for x in d] for d in dataset])
+        return dataset
+
+    def get_drgn3dctfs(self, datadir=None, lazy=True):
+        '''
+        Return ctfs of particles of the starfile
+
+        Input:
+            datadir (str): Overwrite base directories of particle .mrcs
+                Tries both substituting the base path and prepending to the path
+            If lazy=True, returns list of LazyImage instances, else np.array
+        '''
+        particles = self.df.groupby(['_rlnGroupName'])
+
+        # format is index@path_to_mrc
+        #particles = [x for x in particles]
+        #parse the information of starfile
+        ctfs = []
+        rots = []
+        rots_0 = []
+        trans = []
+        df_subtomos = pd.DataFrame(columns=['_rlnImageName', '_rlnCtfImage', '_rlnAngleRot', '_rlnAngleTilt', '_rlnAnglePsi'])
+
+        # define directory
+        directory = Path("./subtomos")
+        # check directory
+        directory.mkdir(parents=True, exist_ok=True)
+        for name, df in particles:
+            #print(headers)
+            #tilt = df['_rlnAngleTilt'].astype(float).to_numpy()
+            #Hack, just use the last before micrograph name
+            mic_name = df['_rlnMicrographName'].str.split('_').str[-1].str.split('.').str[0]
+            #print(mic_name)
+            tilt = mic_name.astype(float).to_numpy()
+            defocusu = df['_rlnDefocusU'].astype(float).to_numpy()
+            defocusv = df['_rlnDefocusV'].astype(float).to_numpy()
+            defocusangle = df['_rlnDefocusAngle'].astype(float).to_numpy()
+            voltage = df['_rlnVoltage'].astype(float).to_numpy()
+            cs = df['_rlnSphericalAberration'].astype(float).to_numpy()
+            w = df['_rlnAmplitudeContrast'].astype(float).to_numpy()
+            bfactor = df['_rlnCtfBfactor'].astype(float).to_numpy()
+            scale = df['_rlnCtfScalefactor'].astype(float).to_numpy()
+            rot = df['_rlnAngleRot'].astype(float).to_numpy()
+            tilt = df['_rlnAngleTilt'].astype(float).to_numpy()
+            psi = df['_rlnAnglePsi'].astype(float).to_numpy()
+            #print(scale)
+            name = name[0]
+            image_name = name + '.mrc'
+            ctf_name = name + '_ctf.mrc'
+            rot_i = np.stack([rot, tilt, psi], axis=1)
+            rots.append(rot_i)
+            rots_0.append(rot_i[0])
+            rot_i = torch.from_numpy(rot_i)
+            R_i = lie_tools.euler_to_SO3(rot_i)
+            R_i = R_i @ R_i[0].T
+            #R_i = torch.transpose(R_i, -1, -2) @ R_i[0]
+            euler_i = lie_tools.so3_to_euler(R_i.float())
+            R_i_veri = lie_tools.euler_to_SO3(euler_i)
+            assert torch.abs(torch.min(torch.sum(R_i * R_i_veri, dim=(-1,-2))) - 3) < 1e-4
+            axis_i = lie_tools.rot_to_axis(torch.transpose(R_i, -1, -2))
+            tilt_angle = axis_i[0]*torch.sign(axis_i[1][:, 1])
+            df['_rlnAngleRot'] = euler_i[:, 0]
+            df['_rlnAngleTilt'] = euler_i[:, 1]
+            df['_rlnAnglePsi'] = euler_i[:, 2]
+            df['_rlnCtfBfactor'] = -bfactor/4.
+            #print(tilt_angle)
+            #print(euler_i)
+            #print(torch.max(torch.acos(axis_i[1][1:, 1].abs()))*180/np.pi)
+
+            subtomo = [image_name, ctf_name, rot_i[0][0].item(), rot_i[0][1].item(), rot_i[0][2].item()]
+            df_subtomos.loc[len(df_subtomos)] = subtomo
+            self.write_df(df, './subtomos/'+name+'_subtomo.star')
+
+            def_tlt = np.stack([tilt_angle.cpu().numpy(), defocusu, defocusv, defocusangle, voltage, cs, w, bfactor, scale], axis=1)
+            df['_rlnAngleRot'] = 0.
+            df['_rlnAngleTilt'] = tilt_angle
+            df['_rlnAnglePsi'] = 0.
+            self.write_df(df, './subtomos/'+name+'_ctf.star')
+            #save as starfile
+            #print(axis_i)
+            #print(def_tlt.shape)
+            ctfs.append(def_tlt)
+        self.write_df(df_subtomos, './subtomos/subtomos.star',)
+        #print(ctfs)
+
+        return ctfs, rots, rots_0
 
     def get_subtomos(self, datadir=None, key='_rlnImageName', lazy=True,):
         '''
@@ -219,11 +381,12 @@ class Starfile():
 
         # format is index@path_to_mrc
         #particles = [x for x in particles]
-        mrcs = [Path(x) for x in particles]
-        mrcs = [x.with_suffix('.star') for x in mrcs]
+        mrc_files = [Path(x) for x in particles]
+        mrcs = [x.with_suffix('.star') for x in mrc_files]
         #print(mrcs)
         if datadir is not None:
             mrcs = prefix_paths(mrcs, datadir)
+            mrc_files = ['{}/{}'.format(datadir, x) for x in mrc_files]
         for path in set(mrcs):
             assert os.path.exists(path), f'{path} not found'
 
@@ -234,9 +397,12 @@ class Starfile():
             # get to data block
             BLOCK = 'data_images'
             headers, df = Starfile.get_block(f, BLOCK)
-            #print(headers)
             tilt = df['_rlnAngleTilt'].astype(float).to_numpy()
             defocus = df['_rlnDefocusU'].astype(float).to_numpy()
+            #average defocus!
+            if '_rlnDefocusV' in df:
+                defocus += df['_rlnDefocusV'].astype(float).to_numpy()
+                defocus /= 2.
             voltage = df['_rlnVoltage'].astype(float).to_numpy()
             cs = df['_rlnSphericalAberration'].astype(float).to_numpy()
             w = df['_rlnAmplitudeContrast'].astype(float).to_numpy()
@@ -265,7 +431,7 @@ class Starfile():
         #    dataset.append(tomo)
         #print(dataset)
 
-        return ctfs
+        return ctfs, mrc_files
 
     def get_particles(self, datadir=None, lazy=True):
         '''

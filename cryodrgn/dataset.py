@@ -65,7 +65,7 @@ def load_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
         try:
             star = starfile.Starfile.load(mrcs_txt_star, relion31=relion31)
             particles = star.get_subtomos(datadir=datadir, lazy=lazy,)# key='_rlnCtfImage')
-            ctfs = star.get_3dctfs(datadir=datadir, lazy=lazy)
+            ctfs, ctf_files = star.get_3dctfs(datadir=datadir, lazy=lazy)
         except Exception as e:
             if datadir is None:
                 datadir = os.path.dirname(mrcs_txt_star) # assume .mrcs files are in the same director as the starfile
@@ -75,6 +75,28 @@ def load_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
     else:
         raise NotImplementedError
     return particles, ctfs
+def load_drgn_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
+    '''
+    Load particle stack from either a .mrcs file, a .star file, a .txt file containing paths to .mrcs files, or a cryosparc particles.cs file
+
+    lazy (bool): Return numpy array if True, or return list of LazyImages
+    datadir (str or None): Base directory overwrite for .star or .cs file parsing
+    '''
+    if mrcs_txt_star.endswith('.star'):
+        # not exactly sure what the default behavior should be for the data paths if parsing a starfile
+        try:
+            star = starfile.Starfile.load(mrcs_txt_star, relion31=relion31)
+            particles = star.get_drgn_subtomos(datadir=datadir, lazy=lazy,)# key='_rlnCtfImage')
+            ctfs, rots, rots0 = star.get_drgn3dctfs(datadir=datadir, lazy=lazy)
+        except Exception as e:
+            if datadir is None:
+                datadir = os.path.dirname(mrcs_txt_star) # assume .mrcs files are in the same director as the starfile
+                particles = starfile.Starfile.load(mrcs_txt_star, relion31=relion31).get_particles(datadir=datadir, lazy=lazy)
+                ctfs, rots, rots0 = star.get_drgn3dctfs(datadir=datadir, lazy=lazy)
+            else: raise RuntimeError(e)
+    else:
+        raise NotImplementedError
+    return particles, ctfs, rots, rots0
 
 def load_particles(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
     '''
@@ -290,6 +312,67 @@ class LazyStructMRCData(data.Dataset):
     def __getitem__(self, index):
         return self.get(index), index
 
+class LazyTomoDRGNMRCData(data.Dataset):
+    '''
+    Class representing an .mrcs stack file -- images loaded on the fly
+    '''
+    def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
+                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75):
+        #assert not keepreal, 'Not implemented error'
+        assert mrcfile.endswith('.star')
+        particles, ctfs, rots, rots0 = load_drgn_subtomos(mrcfile, True, datadir=datadir, relion31=relion31)
+        assert len(particles) == len(ctfs)
+        N = len(particles)
+        ny, nx = particles[0][0].get().shape
+        nz = len(particles[0])
+        assert ny == nx, "Images must be square"
+        assert ny % 2 == 0, "Image size must be even"
+        log('Loaded {} {}x{}x{} images'.format(N, ny, nx, nz))
+        self.particles = particles
+        self.N = N
+        self.D = ny + 1 # after symmetrizing HT
+        self.invert_data = invert_data
+        self.real_data = real_data
+        if norm is None:
+            norm = self.estimate_normalization()
+        self.norm = norm
+        log('Image Mean, Std are {} +/- {}'.format(*self.norm))
+        self.window = window_cos_mask(ny, window_r, .95) if window else None
+        self.in_mem = in_mem
+        self.ctfs = ctfs
+        self.rots = rots
+        self.rots0 = rots0
+        print("ctf is of shape: ", self.ctfs[0].shape)
+
+    def estimate_normalization(self, n=100):
+        assert self.real_data
+        n = min(n,self.N)
+        if self.real_data:
+            imgs = []
+            for i in range(0, self.N, self.N//n):
+                imgs.extend([self.particles[i][j].get() for j in range(len(self.particles[i]))])
+            imgs = np.asarray(imgs)
+        #if self.invert_data: imgs *= -1
+        log('first image: {}'.format(imgs[0]))
+        norm = [np.mean(imgs), np.std(imgs)]
+        norm[0] = 0
+        return norm
+
+    def get(self, i):
+        part = [self.particles[i][j].get() for j in range(len(self.particles[i]))]
+        part = np.asarray(part)
+        #part *= -1/self.norm[1]
+        ctf = self.ctfs[i]
+        rot = self.rots[i]
+        return part, ctf, rot
+
+    def __len__(self):
+        return self.N
+
+    # the getter of the dataset
+    def __getitem__(self, index):
+        return self.get(index), index
+
 class LazyTomoMRCData(data.Dataset):
     '''
     Class representing an .mrcs stack file -- images loaded on the fly
@@ -298,7 +381,7 @@ class LazyTomoMRCData(data.Dataset):
                  window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75):
         #assert not keepreal, 'Not implemented error'
         assert mrcfile.endswith('.star')
-        particles, ctfs = load_subtomos(mrcfile, True, datadir=datadir, relion31=relion31)
+        particles, ctfs, ctf_files = load_subtomos(mrcfile, True, datadir=datadir, relion31=relion31)
         assert len(particles) == len(ctfs)
         N = len(particles)
         ny, nx, nz = particles[0].get().shape
@@ -317,6 +400,7 @@ class LazyTomoMRCData(data.Dataset):
         self.window = window_cos_mask(ny, window_r, .95) if window else None
         self.in_mem = in_mem
         self.ctfs = np.stack(ctfs, axis=0)
+        self.ctf_files = ctf_files
         print("ctf is of shape: ", self.ctfs.shape)
 
     def estimate_normalization(self, n=100):
@@ -324,17 +408,20 @@ class LazyTomoMRCData(data.Dataset):
         n = min(n,self.N)
         if self.real_data:
             imgs = np.asarray([self.particles[i].get() for i in range(0,self.N, self.N//n)])
-        if self.invert_data: imgs *= -1
+        #if self.invert_data: imgs *= -1
         log('first image: {}'.format(imgs[0]))
+        imgs = imgs[:, :self.D//4, :, :]
         norm = [np.mean(imgs), np.std(imgs)]
         norm[0] = 0
         return norm
 
     def get(self, i):
         part = self.particles[i].get()
+        #standardize it
+        part = (part - self.norm[0])/self.norm[1]
         #part *= -1/self.norm[1]
         ctf = self.ctfs[i]
-        return part, ctf
+        return part, ctf, self.ctf_files[i]
 
     def get_batch(self, batch):
         imgs = []
