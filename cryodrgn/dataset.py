@@ -74,7 +74,8 @@ def load_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
             else: raise RuntimeError(e)
     else:
         raise NotImplementedError
-    return particles, ctfs
+    return particles, ctfs, ctf_files
+
 def load_drgn_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
     '''
     Load particle stack from either a .mrcs file, a .star file, a .txt file containing paths to .mrcs files, or a cryosparc particles.cs file
