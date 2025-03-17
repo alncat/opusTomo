@@ -214,7 +214,10 @@ def exp_quaternion(q):
 def rot_to_axis(R):
     quat = SO3_to_quaternions_wiki(R)
     axis = quat[..., 1:]
-    return torch.nn.functional.normalize(axis, p=2, dim=-1)
+    quat_norm = axis.norm(p=2, dim=-1, keepdim=False)
+    #angle in degree
+    angle = torch.atan2(quat_norm, quat[..., 0])*2/np.pi*180
+    return angle, torch.nn.functional.normalize(axis, p=2, dim=-1)
 
 def zrot(x):
     x = x*np.pi/180.
@@ -346,6 +349,10 @@ def quat_mul(a, b):
 def euler_to_hopf(euler):
     R = euler_to_SO3(euler)
     return so3_to_hopf(R)
+
+def euler_to_quat(euler):
+    R = euler_to_SO3(euler)
+    return SO3_to_quaternions_wiki(R)
 
 def hopf_to_euler(hopf):
     R = hopf_to_SO3(hopf)
