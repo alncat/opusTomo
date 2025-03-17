@@ -13,7 +13,8 @@
 
 # Opus-TOMO <div id="opustomo">
 This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei (Benedict，本笃) Luo at the group of
-Prof. Jianpeng Ma at Fudan University. The preprint of OPUS-TOMO is available at https://www.biorxiv.org/content/10.1101/2024.06.30.601442v1 or https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
+Prof. Jianpeng Ma at Fudan University. OPUS-TOMO supports structural heterogeneity anlaysis at all stages of cryo-ET data processing.  For intial stages, the workflow of OPUS-TOMO involves the tomogram reconstruction using the automated **AreTOMO**, the particle localization using **DeePiCt** or **PyTOM**, the ctf estimation using **ctfplotter from IMOD**, the subtomogram averaing using **Relion 3.0.8**, and the heterogeneity analysis using **OPUS-TOMO**. The whole workflow works on Linux environment! OPUS-TOMO can also uncovering high resolution heterogeneities using **high resolution STA results prepared by M**! 
+The preprint of OPUS-TOMO is available at https://www.biorxiv.org/content/10.1101/2024.06.30.601442v1 or https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
 A part of translation elongation cycle resolved by traversing PC8, which shows the translocation of A/T- and P- site tRNAs to A/P- and P/E- site tRNAs.
 A superb reference for the translation elongation cycle can be found in Ranjan's work, https://www.embopress.org/doi/full/10.15252/embj.2020106449 .
 
@@ -39,7 +40,6 @@ DeePiCt's result in each tilt series, and OPUS-TOMO refers to the ratio of subto
 easy to observe that OPUS-TOMO improves the overlapping ratio by a large margin. It is worth noting that OPUS-TOMO is trained by using the subtomograms with their 
 orientation determined by template matching in pyTOM directly without any other processing. The template matching results for this case are in the folder https://drive.google.com/drive/folders/1xR_zD_nF9Hvw9S3nsjxxPR2DQmod3Fmu?usp=drive_link .
 
-The workflow of OPUS-TOMO involves the tomogram reconstruction using the automated **AreTOMO**, the particle localization using **DeePiCt** or **PyTOM**, the ctf estimation using **ctfplotter from IMOD**, the subtomogram averaing using **Relion 3.0.8**, and the heterogeneity analysis using **OPUS-TOMO**. The whole workflow works on Linux environment! OPUS-TOMO is also compatible with high resolution STA results prepared by M! (stay tuned, the updates are testing and coming soon!)
 
 Structural heterogeneity is a central problem for cryo-ET which occurs at many stage of tomography processing. Specifically, at the very first stage, after reconstructing a tomogram, you then encounter the problem to pick subtomograms corresponding to macromolecule of interest from the tomogram. Given the abundance of different molecules inside the
 cell sample, subtomogram picking faces large challenges from structural heterogeneity. At a later stage, when you have obtained a purer set of subtomograms for the molecule of interest, you may still encounter the structural heterogeneity problem as the molecule is in constant dynamics in cell environment. 
