@@ -330,6 +330,9 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         decout = model.vanilla_decode(rot, trans, z=z, save_mrc=save_image, eulers=euler,
                                       ref_fft=y, ctf_param=c, encout=encout, mask=mask_real, body_poses=body_poses,
                                       ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename, write_ctf=args.write_ctf)
+        if decout["affine"] is not None:
+            posetracker.set_pose(decout["affine"][0].detach(), decout["affine"][1].detach(), ind)
+
         y_recon_fft = None
         y_ref_fft   = None #torch.view_as_complex(decout["y_ref_fft"])
         y_ffts      = {"y_recon_fft":y_recon_fft, "y_ref_fft":y_ref_fft}
