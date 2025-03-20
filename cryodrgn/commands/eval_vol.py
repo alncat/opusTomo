@@ -126,6 +126,17 @@ def main(args):
     if args.downsample:
         assert args.downsample % 2 == 0, "Boxsize must be even"
         assert args.downsample <= D - 1, "Must be smaller than original box size"
+
+    if args.load:
+        log('Loading checkpoint from {}'.format(args.load))
+        checkpoint = torch.load(args.load)
+        print(checkpoint.keys())
+        pretrained_dict = checkpoint['model_state_dict']
+        pretrained_dict = checkpoint['decoder_state_dict']
+        if "principal_axes" in pretrained_dict:
+            args.num_bodies = pretrained_dict["principal_axes"].shape[0]
+            print("principal_axes: ", pretrained_dict["principal_axes"], "num_bodies: ", args.num_bodies)
+
     #create and load model
     activation={"relu": nn.ReLU, "leaky_relu": nn.LeakyReLU}[args.activation]
     model = HetOnlyVAE(lattice, args.qlayers, args.qdim, args.players, args.pdim,
@@ -145,15 +156,15 @@ def main(args):
         log('Loading checkpoint from {}'.format(args.load))
         checkpoint = torch.load(args.load)
         print(checkpoint.keys())
-        pretrained_dict = checkpoint['model_state_dict']
-        model_dict = model.state_dict()
-        #print(pretrained_dict, model_dict)
-        # 1. filter out unnecessary keys
-        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-        # 2. overwrite entries in the existing state dict
-        model_dict.update(pretrained_dict)
-        # 3. load the new state dict
-        model.load_state_dict(model_dict)
+        #pretrained_dict = checkpoint['model_state_dict']
+        #model_dict = model.state_dict()
+        ##print(pretrained_dict, model_dict)
+        ## 1. filter out unnecessary keys
+        #pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+        ## 2. overwrite entries in the existing state dict
+        #model_dict.update(pretrained_dict)
+        ## 3. load the new state dict
+        #model.load_state_dict(model_dict)
 
         if vanilla:
             pretrained_dict = checkpoint['encoder_state_dict']
@@ -167,6 +178,18 @@ def main(args):
 
             pretrained_dict = checkpoint['decoder_state_dict']
             #overwrite ref_mask
+            if "principal_axes" in pretrained_dict:
+                masks_params = {}
+                print("principal_axes: ", pretrained_dict["principal_axes"], "vol_size: ", D-1)
+                print("rotate_directions: ", pretrained_dict["rotate_directions"])
+                model.decoder.com_bodies = pretrained_dict["com_bodies"]
+                model.decoder.rotate_directions = pretrained_dict["rotate_directions"]
+                model.decoder.orient_bodies = pretrained_dict["orient_bodies"]
+                model.decoder.orient_bodiesT = pretrained_dict["orient_bodiesT"]
+                model.decoder.principal_axes = pretrained_dict["principal_axes"]
+                model.decoder.principal_axesT = pretrained_dict["principal_axesT"]
+                model.decoder.radius = pretrained_dict["radius"]
+
             if "ref_mask" in pretrained_dict:
                 model.decoder.ref_mask =  pretrained_dict["ref_mask"]
             model_dict = model.decoder.state_dict()
