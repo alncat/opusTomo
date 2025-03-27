@@ -14,7 +14,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-torch.backends.cudnn.benchmark = True
 
 import cryodrgn
 from cryodrgn import mrc
@@ -129,10 +128,10 @@ def train_batch(model, lattice, y, yt, rot, trans, optim, beta,
                 beta_control=None, tilt=None, ind=None, grid=None, ctf_grid=None,
                 ctf_params=None, yr=None, use_amp=False, save_image=False, vanilla=True,
                 group_stat=None, do_scale=False, it=None, enc=None,
-                args=None, euler=None, posetracker=None, data=None, update_params=True,
+                args=None, euler=None, posetracker=None, data=None, backward=True, update_params=True,
                 snr2=1., body_poses=None, ctf_filename=None):
 
-    if update_params:
+    if backward:
         model.train()
     else:
         model.eval()
@@ -165,7 +164,7 @@ def train_batch(model, lattice, y, yt, rot, trans, optim, beta,
     #if use_amp:
     #    with amp.scale_loss(loss, optim) as scaled_loss:
     #        scaled_loss.backward()
-    if update_params:
+    if backward:
         loss.backward()
     if update_params:
         optim.step()
@@ -284,8 +283,9 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
 
     # add bfactors to ctf_params, the second from last column stores bfactor, the last column stores scale
     #random_b = np.random.rand()*1.5
-    random_b = np.random.gamma(1., 0.6)
-    c[...,-2] = c[...,-2] + (args.bfactor+random_b)*(4*np.pi**2)
+    #random_b = np.random.gamma(1., 0.6)
+    random_b = torch.randn_like(c[..., 0, -2])/3.
+    c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
 
     plot = args.plot and it % (args.log_interval) == B
     if plot:
@@ -451,8 +451,8 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         l2_diff = losses["ycorr"] + y_recon2
         #print(l2_diff)
         #print(y_recon.shape, y.shape, mask_sum.shape, l2_diff)
-        var = max(snr2*(W*0.125/2.)**6, W*0.125)
-        probs = F.softmax(-l2_diff.detach()/var, dim=-1).detach()
+        probs = F.softmax(-l2_diff.detach()/(W*0.125), dim=-1).detach()
+        #var = max(snr2*(W*0.125/2.)**6, W*0.125)
         #print(var, W*0.125)
         #print(snr2*(W*0.125/2.)**6, y_recon2.mean())
         #exp_weights = torch.exp(-l2_diff.detach()/(np.sqrt(snr2)))
@@ -522,7 +522,7 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
 
     #print(losses["kldiv"].shape, losses["tvl2"].shape)
 
-    lamb = args.lamb * (1. - torch.exp(-torch.clamp((snr.detach()/0.01)**2, max=16))) #*torch.clamp(snr.abs().sqrt().detach(), max=1.)
+    lamb = args.lamb * (1. - torch.exp(-torch.clamp(0.25*(snr.detach()/0.01)**2, max=16))) #*torch.clamp(snr.abs().sqrt().detach(), max=1.)
     eps = 1e-3
     #kld, mu2 = utils.compute_kld(z_mu, z_logstd)
     #cross_corr = utils.compute_cross_corr(z_mu)
@@ -564,7 +564,7 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
 
     if it % (args.log_interval) == B and args.plot:
         #group_stat.plot_variance(ind[0])
-        log(f"mask_sum {mask_sum.detach().cpu()}")
+        log(f"mask_sum {mask_sum.detach().cpu()}, lamb {lamb}")
         torch.set_printoptions(precision=3, sci_mode=False, linewidth=120)
         #print(probs)
         torch.set_printoptions(profile='default')
@@ -930,10 +930,13 @@ def main(args):
         #pose_optimizer.load_state_dict(checkpoint['pose_optimizer_state_dict'])
         #model.load_state_dict(checkpoint['model_state_dict'])
         #optim.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = 0 #checkpoint['epoch']+1
+        start_epoch = checkpoint['epoch']+1
+        start_epoch = torch.tensor([start_epoch])
         model.train()
     else:
-        start_epoch = 0
+        start_epoch = torch.tensor([0])
+    start_epoch = hvd.broadcast(start_epoch, root_rank=0)
+    start_epoch = start_epoch.item()
     hvd.broadcast_parameters(model.state_dict(), root_rank=0)
     hvd.broadcast_optimizer_state(optim, root_rank=0)
 
@@ -958,7 +961,7 @@ def main(args):
         rand_split = torch.arange(Nimg, dtype=torch.int64) #
         if hvd.rank() == 0:
             torch.save(rand_split, args.split)
-        hvd.broadcast(rand_split, 0)
+        rand_split = hvd.broadcast(rand_split, 0)
     else:
         log(f'loading train validation split from {args.split}')
         rand_split = torch.load(args.split)
@@ -966,7 +969,6 @@ def main(args):
     Nimg_train = int(Nimg*(1. - args.valfrac))
     Nimg_test = int(Nimg*args.valfrac)
     train_split, val_split = rand_split[:Nimg_train], rand_split[Nimg_train:]
-
     train_sampler = dataset.ClassSplitBatchHvdSampler(args.batch_size, posetracker.poses_ind, train_split, rank=hvd.rank(), size=hvd.size())
     val_sampler = dataset.ClassSplitBatchHvdSampler(args.batch_size, posetracker.poses_ind, val_split, rank=hvd.rank(), size=hvd.size())
 
@@ -1024,7 +1026,7 @@ def main(args):
         update_it = 0
         beta_control = args.beta_control
         #increasing bfactor slowly
-        args.bfactor = bfactor*(1. - 0.1/(1. + 3.*math.exp(-0.25*epoch)))*10./9.
+        args.bfactor = bfactor*(1. + 0.5/(1. + 3.*math.exp(-0.1*epoch)))
         beta_max    = 1. #0.98 ** (epoch)
         log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
                         lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
@@ -1094,7 +1096,7 @@ def main(args):
                                               save_image=save_image, group_stat=group_stat,
                                               it=batch_it, enc=None,
                                               args=args, euler=euler,
-                                              posetracker=posetracker, data=data, update_params=(batch_idx%Backward_passes_per_step == 0),
+                                              posetracker=posetracker, data=data, backward=True, update_params=(batch_idx%Backward_passes_per_step == 0),
                                               snr2=snr_ema, body_poses=(body_euler, body_trans), ctf_filename=ctf_filename)
             c_m_avg += c_m
             update_it += 1
@@ -1189,7 +1191,7 @@ def main(args):
                                               save_image=save_image, group_stat=group_stat,
                                               it=batch_it, enc=None,
                                               args=args, euler=euler,
-                                              posetracker=posetracker, data=data, update_params=False,
+                                              posetracker=posetracker, data=data, backward=False, update_params=False,
                                               snr2=snr_ema, body_poses = (body_euler, body_trans), ctf_filename=ctf_filename)
             if do_pose_sgd and epoch >= args.pretrain:
                 pose_optimizer.step()

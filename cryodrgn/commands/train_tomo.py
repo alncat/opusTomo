@@ -278,8 +278,9 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
 
     # add bfactors to ctf_params, the second from last column stores bfactor, the last column stores scale
     #random_b = np.random.rand()*1.5
-    random_b = np.random.gamma(1., 0.6)
-    c[...,-2] = c[...,-2] + (args.bfactor+random_b)*(4*np.pi**2)
+    #random_b = np.random.gamma(1., 0.6)
+    random_b = torch.randn_like(c[..., 0, -2])/3.
+    c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
 
     plot = args.plot and it % (args.log_interval) == B
     if plot:
@@ -493,7 +494,7 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
 
     #print(losses["kldiv"].shape, losses["tvl2"].shape)
 
-    lamb = args.lamb * (1. - torch.exp(-torch.clamp((snr.detach()/0.01)**2, max=16))) #*torch.clamp(snr.abs().sqrt().detach(), max=1.)
+    lamb = args.lamb * (1. - torch.exp(-torch.clamp(0.5*(snr.detach()/0.01)**2, max=16))) #*torch.clamp(snr.abs().sqrt().detach(), max=1.)
     eps = 1e-3
     #kld, mu2 = utils.compute_kld(z_mu, z_logstd)
     #cross_corr = utils.compute_cross_corr(z_mu)
@@ -535,7 +536,7 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
 
     if it % (args.log_interval) == B and args.plot:
         #group_stat.plot_variance(ind[0])
-        log(f"mask_sum {mask_sum.detach().cpu()}")
+        log(f"mask_sum {mask_sum.detach().cpu()}, lamb {lamb}")
         torch.set_printoptions(precision=3, sci_mode=False, linewidth=120)
         #print(probs)
         torch.set_printoptions(profile='default')
@@ -833,7 +834,7 @@ def main(args):
     #                                 0.5 * (math.cos((epoch - warm_up_epochs)/(max_num_epochs - warm_up_epochs) * \
     #                                                 math.pi) + 1.)
     #lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=warm_up_with_cosine_lr)
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optim, 1, gamma=0.96)
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optim, 1, gamma=0.98)
 
     # Mixed precision training with AMP
     if args.amp:
@@ -963,7 +964,7 @@ def main(args):
         update_it = 0
         beta_control = args.beta_control
         #increasing bfactor slowly
-        args.bfactor = bfactor*(1. - 0.1/(1. + 3.*math.exp(-0.25*epoch)))*10./9.
+        args.bfactor = bfactor*(1. + 0.5/(1. + 3.*math.exp(-0.1*epoch)))
         beta_max    = 1. #0.98 ** (epoch)
         log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
                         lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
