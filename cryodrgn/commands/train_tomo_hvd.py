@@ -283,9 +283,9 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
 
     # add bfactors to ctf_params, the second from last column stores bfactor, the last column stores scale
     #random_b = np.random.rand()*1.5
-    #random_b = np.random.gamma(1., 0.6)
-    random_b = torch.randn_like(c[..., 0, -2])/3.
-    c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
+    random_b = np.random.gamma(1., 0.6)
+    #random_b = torch.randn_like(c[..., 0, -2])/3.
+    c[...,-2] = c[...,-2] + (args.bfactor+random_b)*(4*np.pi**2)
 
     plot = args.plot and it % (args.log_interval) == B
     if plot:
@@ -1026,7 +1026,7 @@ def main(args):
         update_it = 0
         beta_control = args.beta_control
         #increasing bfactor slowly
-        args.bfactor = bfactor*(1. + 0.5/(1. + 3.*math.exp(-0.1*epoch)))
+        args.bfactor = bfactor*(1. + 0.25/(1. + 3.*math.exp(-0.1*epoch)))
         beta_max    = 1. #0.98 ** (epoch)
         log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
                         lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
