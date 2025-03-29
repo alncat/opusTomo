@@ -824,7 +824,7 @@ def main(args):
     model_parameters = list(model.encoder.parameters()) + list(model.decoder.parameters()) #+ list(group_stat.parameters())
     pose_encoder = None
     optim = torch.optim.AdamW(model_parameters, lr=args.lr, weight_decay=args.wd)
-    assert args.accum_step > 1
+    assert args.accum_step >= 1
 
     #if args.encode_mode == "grad":
     #    discriminator_parameters = list(model.shape_encoder.parameters())
@@ -973,6 +973,7 @@ def main(args):
                         lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
 
         loop = tqdm(enumerate(data_generator), total=len(data_generator), leave=True, colour='green', file=sys.stdout)
+        optim.zero_grad()
         for batch_idx, minibatch in loop:
         #for minibatch in data_generator:
             ind = minibatch[-1]#.to(device)
