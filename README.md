@@ -20,8 +20,13 @@ The model is trained using M refined subtomograms.
 
 https://github.com/user-attachments/assets/ea9d12d1-29f0-4572-b1d4-3c22d1c77d89
 
+The movie without cropping
 
-A part of translation elongation cycle resolved by traversing PC8, which shows the translocation of A/T- and P- site tRNAs to A/P- and P/E- site tRNAs.
+
+https://github.com/user-attachments/assets/6e04a762-9bbb-4a69-a485-6803a39a6b4b
+
+
+For S. pombe 80S ribosome, a part of translation elongation cycle resolved by traversing PC8, which shows the translocation of A/T- and P- site tRNAs to A/P- and P/E- site tRNAs.
 A superb reference for the translation elongation cycle can be found in Ranjan's work, https://www.embopress.org/doi/full/10.15252/embj.2020106449 .
 
 https://github.com/alncat/opusTomo/assets/3967300/4fb1a46c-97bf-45ba-868d-b108cc2862f8
