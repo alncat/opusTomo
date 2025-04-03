@@ -14,7 +14,7 @@
 # Opus-TOMO <div id="opustomo">
 This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei (Benedict，本笃) Luo at the group of
 Prof. Jianpeng Ma at Fudan University. OPUS-TOMO supports structural heterogeneity analysis at all stages of cryo-ET data processing.  For intial stages, the workflow of OPUS-TOMO involves the tomogram reconstruction using the automated **AreTOMO**, the particle localization using **DeePiCt** or **PyTOM**, the ctf estimation using **ctfplotter from IMOD**, the subtomogram averaing using **Relion 3.0.8**. **OPUS-TOMO** can directly filter template matching results, and the whole workflow works on Linux environment! OPUS-TOMO can work with **WARP**'s subtomogram which can save you lots of works on ctf estimation! OPUS-TOMO can also uncover high resolution heterogeneities using **high resolution STA results prepared by M**! The tutorials are in https://github.com/alncat/opusTomo/wiki!
-The preprint of OPUS-TOMO is available at https://www.biorxiv.org/content/10.1101/2024.06.30.601442v1 or https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
+The preprint of OPUS-TOMO is available at https://www.biorxiv.org/content/10.1101/2024.06.30.601442 or https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
 A part of translation elongation cycle resolved by traversing PC9, which shows the translocation of A/T- tRNAs to A-site and the exit of E-site tRNA for Cm-treated M. pneumoniae 70S ribosome.
 The model is trained using M refined subtomograms.
 
