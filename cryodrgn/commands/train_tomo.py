@@ -95,7 +95,7 @@ def add_args(parser):
     group.add_argument('--pose-enc', action='store_true', help='predict pose parameter using encoder')
     group.add_argument('--pose-only', action='store_true', help='train pose encoder only')
     group.add_argument('--plot', action='store_true', help='plot intermediate result')
-    group.add_argument('--estpose', default=False, action='store_true', help='estimate pose')
+    group.add_argument('--estpose', default=True, action='store_true', help='estimate pose (default: %(default)s)')
 
     group = parser.add_argument_group('Encoder Network')
     group.add_argument('--enc-layers', dest='qlayers', type=int, default=3, help='Number of hidden layers (default: %(default)s)')
