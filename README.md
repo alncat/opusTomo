@@ -27,8 +27,7 @@ https://github.com/user-attachments/assets/6e04a762-9bbb-4a69-a485-6803a39a6b4b
 
 Clustering the template matching result and improving resolution! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
 
-<img width="1001" alt="image" src="https://github.com/user-attachments/assets/bb5d1566-b16c-4f7c-a7c7-68aef8261e2c" />
-
+<img width="983" alt="image" src="https://github.com/user-attachments/assets/def3f84a-6c3e-4eb0-a8de-02f8d8461476" />
 <img width="918" alt="image" src="https://github.com/user-attachments/assets/5b7ccdfe-d5b6-433b-93ba-b2ede4bc411f" />
 
 The histograms at the right panel shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
