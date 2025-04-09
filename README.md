@@ -25,6 +25,21 @@ The movie without cropping
 
 https://github.com/user-attachments/assets/6e04a762-9bbb-4a69-a485-6803a39a6b4b
 
+Clustering the template matching result and improving resolution! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
+
+<img width="1001" alt="image" src="https://github.com/user-attachments/assets/bb5d1566-b16c-4f7c-a7c7-68aef8261e2c" />
+
+<img width="918" alt="image" src="https://github.com/user-attachments/assets/5b7ccdfe-d5b6-433b-93ba-b2ede4bc411f" />
+
+The histograms at the right panel shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
+TM Overlapping With DeePiCt refers to the number of subtomograms from Template Mathching that overlap with DeePiCt's result, and OPUS-TOMO
+refers to the number of subtomograms in classes 12-17 that overlaps with DeePiCt's result. TM Overlapping Ratio refers to the ratio of subtomograms that overlaps with 
+DeePiCt's result in each tilt series, and OPUS-TOMO refers to the ratio of subtomograms in classes 12-17 that overlaps with DeePiCt's result in each tilt series. It is 
+easy to observe that OPUS-TOMO improves the overlapping ratio by a large margin. It is worth noting that OPUS-TOMO is trained by using the subtomograms with their 
+orientation determined by template matching in pyTOM directly without any other processing. The template matching results for this case are in the folder https://drive.google.com/drive/folders/1xR_zD_nF9Hvw9S3nsjxxPR2DQmod3Fmu?usp=drive_link .
+
+The results for M. pneumoniae 70S ribosome,
+<img width="604" alt="image" src="https://github.com/user-attachments/assets/d3d02cfc-d2bd-4913-946c-40c82970cdfd" />
 
 For S. pombe 80S ribosome, a part of translation elongation cycle resolved by traversing PC8, which shows the translocation of A/T- and P- site tRNAs to A/P- and P/E- site tRNAs.
 A superb reference for the translation elongation cycle can be found in Ranjan's work, https://www.embopress.org/doi/full/10.15252/embj.2020106449 .
@@ -40,16 +55,6 @@ The movement of L1 stalk resolved by traversing PC12
 
 https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b7ae343
 
-Clustering the template matching result directly! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
-
-<img width="1140" alt="image" src="https://github.com/user-attachments/assets/4f7731b4-3a9a-458d-8f25-16026d71ec15">
-
-The histograms at the right panel shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
-TM Overlapping With DeePiCt refers to the number of subtomograms from Template Mathching that overlap with DeePiCt's result, and OPUS-TOMO
-refers to the number of subtomograms in classes 11-17 that overlaps with DeePiCt's result. TM Overlapping Ratio refers to the ratio of subtomograms that overlaps with 
-DeePiCt's result in each tilt series, and OPUS-TOMO refers to the ratio of subtomograms in classes 11-17 that overlaps with DeePiCt's result in each tilt series. It is 
-easy to observe that OPUS-TOMO improves the overlapping ratio by a large margin. It is worth noting that OPUS-TOMO is trained by using the subtomograms with their 
-orientation determined by template matching in pyTOM directly without any other processing. The template matching results for this case are in the folder https://drive.google.com/drive/folders/1xR_zD_nF9Hvw9S3nsjxxPR2DQmod3Fmu?usp=drive_link .
 
 
 Structural heterogeneity is a central problem for cryo-ET which occurs at many stage of tomography processing. Specifically, at the very first stage, after reconstructing a tomogram, you then encounter the problem to pick subtomograms corresponding to macromolecule of interest from the tomogram. Given the abundance of different molecules inside the
