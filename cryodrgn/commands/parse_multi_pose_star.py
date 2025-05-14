@@ -31,15 +31,17 @@ def center_of_mass(volume):
     #center = torch.where(center > 0, (center + 0.5).int(), (center - 0.5).int()).float()
     centered = (grid - center)
     radius = (centered).pow(2)*vol
-    r = torch.sqrt(radius.sum(dim=(0,1,2))/mass)
+    r0 = torch.sqrt(radius.sum(dim=(0,1,2))/mass)
     #principal axes
     matrix = -centered.unsqueeze(-1) * centered.unsqueeze(-2)
     radius_sum = torch.eye(3) * (radius.sum(dim=-1, keepdim=True).unsqueeze(-1))
-    matrix = ((matrix+radius_sum)*vol.unsqueeze(-1)).sum(dim=(0, 1, 2))
+    matrix = ((-matrix)*vol.unsqueeze(-1)).sum(dim=(0, 1, 2))
     eigvals, eigvecs = np.linalg.eig(matrix.numpy())
     indices = np.argsort(eigvals)
     #print(matrix, eigvals[indices])
     eigvecs = torch.from_numpy(eigvecs[:, indices].T) # eigvecs[0] is the first eigen vector with largest eigenvalues
+    r = np.sqrt(eigvals[indices]/mass)
+    print("r0 vs r: ", r0, r)
 
     return center, r, eigvecs
 
@@ -53,6 +55,7 @@ def add_args(parser):
     parser.add_argument('--masks', metavar='PKL', type=os.path.abspath, required=False, help='masks for multi-body')
     parser.add_argument('--volumes', metavar='PKL', type=os.path.abspath, required=False, help='Output label.pkl')
     parser.add_argument('--bodies', type=int, required=True, help='Number of bodies')
+    parser.add_argument('--outmasks', default="mask_params", help="the name of pkl file storing masks related parameters")
     parser.add_argument('--outdir', type=os.path.abspath)
     return parser
 
@@ -77,14 +80,16 @@ def main(args):
     log(rot[0])
 
     # parse translations
-    trans = np.empty((N,2))
-    if '_rlnOriginX' in s.headers and '_rlnOriginY' in s.headers:
+    trans = np.zeros((N,3))
+    if '_rlnOriginX' in s.headers and '_rlnOriginY' in s.headers and '_rlnOriginZ' in s.headers:
         trans[:,0] = s.df['_rlnOriginX']
         trans[:,1] = s.df['_rlnOriginY']
-    elif '_rlnOriginXAngst' in s.headers and '_rlnOriginYAngst' in s.headers:
+        trans[:,2] = s.df['_rlnOriginZ']
+    elif '_rlnOriginXAngst' in s.headers and '_rlnOriginYAngst' in s.headers and '_rlnOriginZAngst' in s.headers:
         assert args.Apix is not None, "Must provide --Apix argument to convert _rlnOriginXAngst and _rlnOriginYAngst translation units"
         trans[:,0] = s.df['_rlnOriginXAngst']
         trans[:,1] = s.df['_rlnOriginYAngst']
+        trans[:,2] = s.df['_rlnOriginZAngst']
         trans /= args.Apix
 
     log('Translations (pixels):')
@@ -95,7 +100,7 @@ def main(args):
 
     #process multibody
     log(f"there are {args.bodies} bodies")
-    if s.multibodies is not None:
+    if s.multibodies is not None and len(s.multibodies) != 0:
         assert len(s.multibodies) == args.bodies
         body_eulers = []
         body_trans = []
@@ -109,7 +114,7 @@ def main(args):
             log('Euler angles (Rot, Tilt, Psi):')
             log(euler_body[0])
             body_eulers.append(euler_body)
-            trans_body = np.empty((N,1,2))
+            trans_body = np.empty((N,1,3))
             body_header = s.multibody_headers[b_i]
             if '_rlnOriginX' in body_header and '_rlnOriginY' in body_header:
                 trans_body[:,0,0] = body['_rlnOriginX']
@@ -129,7 +134,7 @@ def main(args):
         for b_i in range(args.bodies):
             euler_body = np.zeros((N,1,3))
             euler_body[:,0,1] = 90.
-            trans_body = np.zeros((N,1,2))
+            trans_body = np.zeros((N,1,3))
             body_eulers.append(euler_body)
             body_trans.append(trans_body)
 
@@ -249,16 +254,21 @@ def main(args):
     relats = []
     print("in_relatives: ", in_relatives)
     #print("com_bodies: ", com_bodies - vol_coms, "radii_bodies: ", radii_bodies)
-    origin_rel = np.bincount(in_relatives).argmax()
+    origin_rel = 1 #np.bincount(in_relatives).argmax()
+    print("origin_rel:", origin_rel)
     for b_i in range(len(s_mask.df)):
         rotate_directions.append(com_bodies[in_relatives[b_i]] - com_bodies[b_i])
         rotate_directions_ori.append(com_bodies[b_i] - com_bodies[in_relatives[b_i]])
         rotate_directions[-1] = F.normalize(rotate_directions[-1], dim=0)
-        orient_bodies.append(utils.align_with_z(-rotate_directions[-1]))
+        if b_i != origin_rel:
+            orient_bodies.append(utils.align_with_z(-rotate_directions[-1]))
+        else:
+            orient_bodies.append(utils.align_with_z(rotate_directions[-1]))
+        print(rotate_directions[-1].shape, orient_bodies[-1] @ rotate_directions[-1])
         relats.append(com_bodies[in_relatives[b_i]])
         #reset rotation axis for center
-        if b_i == origin_rel:
-            rotate_directions_ori[b_i] = com_bodies[b_i] - com_bodies[b_i]
+        #if b_i == origin_rel:
+        #    rotate_directions_ori[b_i] = com_bodies[b_i] - com_bodies[b_i]
         #normalize direction
     A_rot90 = lie_tools.yrot(torch.tensor(-90))
     rotate_directions = torch.stack(rotate_directions, dim=0)
@@ -268,7 +278,7 @@ def main(args):
     #print((orientations@rotate_directions_ori.unsqueeze(-1)).squeeze(), rot_axes, orientations)
     #print((orientations@rot_radii.unsqueeze(-1)).squeeze())
     #print(orientations@torch.transpose(principal_axes, -1, -2))
-    print("rot_radii: ", rot_radii)
+    print("rotate_directions from volumes: ", rot_radii)
     orient_bodies = torch.stack(orient_bodies, dim=0)
     relats = torch.stack(relats, dim=0)
     axes = torch.stack(axes, dim=0)
@@ -276,11 +286,12 @@ def main(args):
     #print("relats: ", relats)
     print("rotate_directions: ", rotate_directions_ori)
     print("orient_bodies: ", orient_bodies)
-    output_name = prefix + "/masks.pkl"
+    output_name = prefix + f"/{args.outmasks}.pkl"
     log(f'Writing {output_name}')
     if not args.volumes:
-        torch.save({"in_relatives": in_relatives, "com_bodies": com_bodies,
-                "orient_bodies": orient_bodies, "rotate_directions": rotate_directions_ori, "radii_bodies": radii_bodies}, \
+        print("principal_axes: ", axes)
+        torch.save({"in_relatives": relats, "com_bodies": com_bodies,
+                "orient_bodies": orient_bodies, "rotate_directions": rotate_directions_ori, "radii_bodies": radii_bodies, "principal_axes": axes}, \
     #            #"weights": weights, "consensus_mask": consensus_mask},
                output_name)
     else:

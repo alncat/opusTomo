@@ -253,7 +253,7 @@ class HetOnlyVAE(nn.Module):
             encout = {'encoding': None}
         decout = self.decoder(rots, trans, z=z, in_template=in_template, save_mrc=save_mrc,
                         euler=eulers, ref_fft=ref_fft, ctf_param=ctf_param,
-                        body_euler=body_poses[0], body_trans=body_poses[1], ctf_grid=ctf_grid, estimate_pose=estpose)
+                        body_euler=body_poses[0], body_trans=body_poses[1], ctf_grid=ctf_grid, estimate_pose=estpose, ctf_filename=ctf_filename)
         #decout["y_recon_ori"] = y_recon_ori = decout["y_recon"]
         y_recon_ori = decout["y_recon_ori"]
         pad_size = (self.render_size - self.down_vol_size)//2
@@ -1788,7 +1788,7 @@ class VanillaDecoder(nn.Module):
                 losses["ycorr"].append((-2.*image_fft*ref).sum(dim=(-1,-2,-3)).view(-1))
                 losses["y2"].append((ref**2).sum(dim=(-1,-2,-3)).view(-1))
 
-            images.append(image.sum(dim=-3))
+            images.append(image.sum(dim=-3).detach())
 
         #B, 8
         losses["y_recon2"] = torch.stack(losses["y_recon2"], 0)

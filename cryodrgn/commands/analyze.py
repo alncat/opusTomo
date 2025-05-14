@@ -41,6 +41,7 @@ def add_args(parser):
     group.add_argument('-d','--downsample', type=int, help='Downsample volumes to this box size (pixels)')
     group.add_argument('--pc', type=int, default=2, help='Number of principal component traversals to generate (default: %(default)s)')
     group.add_argument('--ksample', type=int, default=20, help='Number of kmeans samples to generate (default: %(default)s)')
+    group.add_argument('--kpc', type=str, default=None, help='Perform PCA within the kpc cluster (default: %(default)s)')
     return parser
 
 def analyze_z1(z, outdir, vg):
@@ -74,7 +75,7 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     print(pc[:4, :])
     log('Generating volumes...')
     for i in range(num_pcs):
-        start, end = np.percentile(pc[:,i],(5,95))
+        start, end = np.percentile(pc[:,i],(1,99))
         log(f'traversing pc {i} from {start} to {end}')
         z_pc = analysis.get_pc_traj(pca, z.shape[1], 10, i+1, start, end)
         if not os.path.exists(f'{outdir}/pc{i+1}'):
@@ -155,6 +156,8 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
         ymin = np.min(umap_emb[:, 1])
         pmax = max(xmax, ymax)
         pmin = min(xmin, ymin)
+        ymax = max(xmax - xmin, ymax - ymin) + ymin
+        xmax = max(xmax - xmin, ymax - ymin) + xmin
         plt.figure(3)
         g = sns.jointplot(x=umap_emb[:,0], y=umap_emb[:,1], hue=groups, palette="inferno", s=3., alpha=.3, xlim=(xmin, xmax), ylim=(ymin, ymax))
         g.ax_joint.set_aspect('equal')
@@ -197,7 +200,7 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
 
         analysis.scatter_annotate(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True,
                                   xlim=(xmin, xmax), ylim=(ymin, ymax),
-                                  alpha=.15, s=1.)
+                                  alpha=.15, s=0.5)
         plt.xlabel('UMAP1', fontsize=14, weight='bold')
         plt.ylabel('UMAP2', fontsize=14, weight='bold')
         plt.savefig(f'{outdir}/kmeans{K}/umap.png')
@@ -215,6 +218,7 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
             plt.tight_layout()
 
             plt.savefig(f'{outdir}/pc{i+1}/umap.png')
+    return kmeans_labels, umap_emb
 
 class VolumeGenerator:
     '''Helper class to call analysis.gen_volumes'''
@@ -256,18 +260,19 @@ def main(args):
 
 
     if args.vanilla:
-        losses = analysis.parse_loss_vanilla(f"{workdir}/run.log", "validation")
-        #plt.ylabel('validation loss')
-        #plt.xlabel('step')
-        plt.plot(np.arange(1,len(losses)+1), losses, label="validation")
-        #plt.savefig(f"{workdir}/val_losses.png")
-        losses = analysis.parse_loss_vanilla(f"{workdir}/run.log", "training")
-        plt.ylabel('loss')
-        plt.xlabel('epoch')
-        plt.plot(np.arange(1,len(losses)+1), losses, label="training")
-        plt.xticks(range(1, len(losses)+1))
-        plt.legend(loc="upper right")
-        plt.savefig(f"{workdir}/train_losses.png")
+        if os.path.isfile(f"{workdir}/run.log"):
+            losses = analysis.parse_loss_vanilla(f"{workdir}/run.log", "validation")
+            #plt.ylabel('validation loss')
+            #plt.xlabel('step')
+            plt.plot(np.arange(1,len(losses)+1), losses, label="validation")
+            #plt.savefig(f"{workdir}/val_losses.png")
+            losses = analysis.parse_loss_vanilla(f"{workdir}/run.log", "training")
+            plt.ylabel('loss')
+            plt.xlabel('epoch')
+            plt.plot(np.arange(1,len(losses)+1), losses, label="training")
+            plt.xticks(range(1, len(losses)+1))
+            plt.legend(loc="upper right")
+            plt.savefig(f"{workdir}/train_losses.png")
 
         z = torch.load(zfile)["mu"].cpu().numpy()
         log("loading {}, z shape {}".format(zfile, z.shape))

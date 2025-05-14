@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+torch.backends.cudnn.benchmark = True
 
 import cryodrgn
 from cryodrgn import mrc
@@ -97,7 +98,10 @@ def add_args(parser):
     group.add_argument('--pose-enc', action='store_true', help='predict pose parameter using encoder')
     group.add_argument('--pose-only', action='store_true', help='train pose encoder only')
     group.add_argument('--plot', action='store_true', help='plot intermediate result')
-    group.add_argument('--estpose', default=False, action='store_true', help='estimate pose')
+    group.add_argument('--estpose', default=True, action='store_true', help='estimate pose')
+    group.add_argument('--warp', default=False, action='store_true', help='using subtomograms from warp')
+    group.add_argument('--tilt-step', type=int, default=2, help='the interval between successive tilts (default: %(default)s)')
+    group.add_argument('--tilt-range', type=int, default=50, help='the range of tilt angles (default: %(default)s)')
 
     group = parser.add_argument_group('Encoder Network')
     group.add_argument('--enc-layers', dest='qlayers', type=int, default=3, help='Number of hidden layers (default: %(default)s)')
@@ -283,9 +287,9 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
 
     # add bfactors to ctf_params, the second from last column stores bfactor, the last column stores scale
     #random_b = np.random.rand()*1.5
-    random_b = np.random.gamma(1., 0.6)
-    #random_b = torch.randn_like(c[..., 0, -2])/3.
-    c[...,-2] = c[...,-2] + (args.bfactor+random_b)*(4*np.pi**2)
+    #random_b = np.random.gamma(1., 0.6)
+    random_b = torch.randn_like(c[..., 0, -2])/3.
+    c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
 
     plot = args.plot and it % (args.log_interval) == B
     if plot:
@@ -451,8 +455,8 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         l2_diff = losses["ycorr"] + y_recon2
         #print(l2_diff)
         #print(y_recon.shape, y.shape, mask_sum.shape, l2_diff)
-        probs = F.softmax(-l2_diff.detach()/(W*0.125), dim=-1).detach()
-        #var = max(snr2*(W*0.125/2.)**6, W*0.125)
+        var = max(snr2*(W*0.125/2.)**6, W*0.125)
+        probs = F.softmax(-l2_diff.detach()/var, dim=-1).detach()
         #print(var, W*0.125)
         #print(snr2*(W*0.125/2.)**6, y_recon2.mean())
         #exp_weights = torch.exp(-l2_diff.detach()/(np.sqrt(snr2)))
@@ -738,11 +742,17 @@ def main(args):
         args.use_real = args.encode_mode == 'conv'
         args.real_data = args.pe_type == 'vanilla'
 
-        if args.lazy_single:
+        if args.lazy_single and not args.warp:
             data = dataset.LazyTomoMRCData(args.particles, norm=args.norm,
                                        real_data=args.real_data, invert_data=args.invert_data,
                                        ind=ind, keepreal=args.use_real, window=False,
                                        datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac)
+        elif args.lazy_single and args.warp:
+            data = dataset.LazyTomoWARPMRCData(args.particles, norm=args.norm,
+                                       real_data=args.real_data, invert_data=args.invert_data,
+                                       ind=ind, keepreal=args.use_real, window=False,
+                                       datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
+                                       tilt_step=args.tilt_step, tilt_range=args.tilt_range)
         else:
             raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
 
@@ -930,7 +940,7 @@ def main(args):
         #pose_optimizer.load_state_dict(checkpoint['pose_optimizer_state_dict'])
         #model.load_state_dict(checkpoint['model_state_dict'])
         #optim.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint['epoch']+1
+        start_epoch = checkpoint['epoch']+1 #checkpoint['epoch']+1
         start_epoch = torch.tensor([start_epoch])
         model.train()
     else:
@@ -969,6 +979,7 @@ def main(args):
     Nimg_train = int(Nimg*(1. - args.valfrac))
     Nimg_test = int(Nimg*args.valfrac)
     train_split, val_split = rand_split[:Nimg_train], rand_split[Nimg_train:]
+
     train_sampler = dataset.ClassSplitBatchHvdSampler(args.batch_size, posetracker.poses_ind, train_split, rank=hvd.rank(), size=hvd.size())
     val_sampler = dataset.ClassSplitBatchHvdSampler(args.batch_size, posetracker.poses_ind, val_split, rank=hvd.rank(), size=hvd.size())
 
@@ -1026,7 +1037,7 @@ def main(args):
         update_it = 0
         beta_control = args.beta_control
         #increasing bfactor slowly
-        args.bfactor = bfactor*(1. + 0.25/(1. + 3.*math.exp(-0.1*epoch)))
+        args.bfactor = bfactor*(1. + 0.5/(1. + 3.*math.exp(-0.1*epoch)))
         beta_max    = 1. #0.98 ** (epoch)
         log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
                         lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
@@ -1202,8 +1213,8 @@ def main(args):
 
         flog('# =====> Epoch: {} Average validation gen_loss = {:.6}, SNR2 = {:.6f}, '\
              'total loss = {:.6f}; Finished in {}'.format(epoch+1,
-                                                         gen_loss_accum/Nimg_test*hvd.size(),
-                                                         snr_accum/Nimg_test*hvd.size(), loss_accum/Nimg_test*hvd.size(), dt.now()-t2))
+                                                         gen_loss_accum/(Nimg_test*hvd.size()+1),
+                                                         snr_accum/(Nimg_test*hvd.size()+1), loss_accum/(Nimg_test*hvd.size()+1), dt.now()-t2))
 
         hvd.barrier()
 

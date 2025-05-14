@@ -76,6 +76,29 @@ def load_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
         raise NotImplementedError
     return particles, ctfs, ctf_files
 
+def load_warp_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False, tilt_step=2, tilt_range=50):
+    '''
+    Load particle stack from either a .mrcs file, a .star file, a .txt file containing paths to .mrcs files, or a cryosparc particles.cs file
+
+    lazy (bool): Return numpy array if True, or return list of LazyImages
+    datadir (str or None): Base directory overwrite for .star or .cs file parsing
+    '''
+    if mrcs_txt_star.endswith('.star'):
+        # not exactly sure what the default behavior should be for the data paths if parsing a starfile
+        try:
+            star = starfile.Starfile.load(mrcs_txt_star, relion31=relion31)
+            particles = star.get_subtomos(datadir=datadir, lazy=lazy,)# key='_rlnCtfImage')
+            ctfs, ctf_files, ctf_params = star.get_warp3dctfs(datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range)
+        except Exception as e:
+            if datadir is None:
+                datadir = os.path.dirname(mrcs_txt_star) # assume .mrcs files are in the same director as the starfile
+                particles = starfile.Starfile.load(mrcs_txt_star, relion31=relion31).get_particles(datadir=datadir, lazy=lazy)
+                ctfs, ctfs_files, ctf_params = star.get_warp3dctfs(datadir=datadir, lazy=lazy)
+            else: raise RuntimeError(e)
+    else:
+        raise NotImplementedError
+    return particles, ctf_params, ctf_files
+
 def load_drgn_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
     '''
     Load particle stack from either a .mrcs file, a .star file, a .txt file containing paths to .mrcs files, or a cryosparc particles.cs file
@@ -373,6 +396,69 @@ class LazyTomoDRGNMRCData(data.Dataset):
     # the getter of the dataset
     def __getitem__(self, index):
         return self.get(index), index
+
+class LazyTomoWARPMRCData(data.Dataset):
+    '''
+    Class representing an .mrcs stack file -- images loaded on the fly
+    '''
+    def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
+                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75,
+                 tilt_step=2, tilt_range=50):
+        #assert not keepreal, 'Not implemented error'
+        assert mrcfile.endswith('.star')
+        print(f"tilt_range is {tilt_range}, tilt_step is {tilt_step}")
+        particles, ctfs, ctf_files = load_warp_subtomos(mrcfile, True, datadir=datadir, relion31=relion31,
+                                                        tilt_step=tilt_step, tilt_range=tilt_range)
+        self.tilt_step = tilt_step
+        self.tilt_range = tilt_range
+        assert len(particles) == len(ctf_files)
+        N = len(particles)
+        ny, nx, nz = particles[0].get().shape
+        assert ny == nx == nz, "Images must be cubic"
+        assert ny % 2 == 0, "Image size must be even"
+        log('Loaded {} {}x{}x{} images'.format(N, ny, nx, nz))
+        self.particles = particles
+        self.N = N
+        self.D = ny + 1 # after symmetrizing HT
+        self.invert_data = invert_data
+        self.real_data = real_data
+        if norm is None:
+            norm = self.estimate_normalization()
+        self.norm = norm
+        log('Image Mean, Std are {} +/- {}'.format(*self.norm))
+        self.window = window_cos_mask(ny, window_r, .95) if window else None
+        self.in_mem = in_mem
+        self.ctfs = np.stack(ctfs, axis=0)
+        self.ctf_files = ctf_files
+        print("ctf is of shape: ", self.ctfs.shape)
+        print("first ctf is: ", self.ctfs[0])
+
+    def estimate_normalization(self, n=100):
+        assert self.real_data
+        n = min(n,self.N)
+        if self.real_data:
+            imgs = np.asarray([self.particles[i].get() for i in range(0,self.N, self.N//n)])
+        #if self.invert_data: imgs *= -1
+        log('first image: {}'.format(imgs[0]))
+        imgs = np.nan_to_num(imgs[:, :self.D//4, :, :])
+        norm = [np.mean(imgs), np.std(imgs)]
+        norm[0] = 0
+        return norm
+
+    def get(self, i):
+        part = np.nan_to_num(self.particles[i].get())
+        #standardize it
+        part = (part - self.norm[0])/self.norm[1]
+        ctf = self.ctfs[i]
+        return part, ctf, self.ctf_files[i]
+
+    def __len__(self):
+        return self.N
+
+    # the getter of the dataset
+    def __getitem__(self, index):
+        return self.get(index), index
+
 
 class LazyTomoMRCData(data.Dataset):
     '''
@@ -759,12 +845,16 @@ class VolData(data.Dataset):
         #principal axes
         matrix = -centered.unsqueeze(-1) * centered.unsqueeze(-2)
         radius_sum = torch.eye(3) * (radius.sum(dim=-1, keepdim=True).unsqueeze(-1))
-        matrix = ((matrix+radius_sum)*vol.unsqueeze(-1)).sum(dim=(0, 1, 2))
+        #matrix = ((matrix+radius_sum)*vol.unsqueeze(-1)).sum(dim=(0, 1, 2))
+        matrix = ((-matrix)*vol.unsqueeze(-1)).sum(dim=(0, 1, 2))
         eigvals, eigvecs = np.linalg.eig(matrix.numpy())
         indices = np.argsort(eigvals)
+        eigvals = eigvals[indices]
         #print(matrix, eigvals[indices])
         eigvecs = torch.from_numpy(eigvecs[:, indices].T) # eigvecs[0] is the first eigen vector with largest eigenvalues
-        #print(eigvecs @ eigvecs[2])
+        print(eigvecs @ (matrix @ eigvecs.T), eigvals)
+        print("r:", r, "eigvals:", np.sqrt(eigvals/mass))
+        r = np.sqrt(eigvals/mass)
 
         return center, r, eigvecs
 

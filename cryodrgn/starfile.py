@@ -368,6 +368,85 @@ class Starfile():
             dataset = np.array([x.get() for x in dataset])
         return dataset
 
+    def get_warp3dctfs(self, datadir=None, lazy=True, tilt_step=2, tilt_range=50):
+        '''
+        Return ctfs of particles of the starfile
+
+        Input:
+            datadir (str): Overwrite base directories of particle .mrcs
+                Tries both substituting the base path and prepending to the path
+            If lazy=True, returns list of LazyImage instances, else np.array
+        '''
+        particles = self.df['_rlnCtfImage']
+
+        # format is index@path_to_mrc
+        #particles = [x for x in particles]
+        mrc_files = [Path(x) for x in particles]
+        csvs = [x.with_suffix('.csv') for x in mrc_files]
+
+        #print(mrc_files)
+        if datadir is not None:
+            #mrcs = prefix_paths(mrcs, datadir)
+            mrc_files = ['{}/{}'.format(datadir, x) for x in mrc_files]
+            csvs = ['{}/{}'.format(datadir, x) for x in csvs]
+        ctfs = []
+        tilt_range = int(tilt_range)
+        tilt_step = int(tilt_step)
+        len_tilt = ((tilt_range*2)//tilt_step+1)
+        for csv in csvs:
+            dummy_tlt = np.zeros((len_tilt, 7))
+            dummy_tlt[:, 0] = np.linspace(-tilt_range, tilt_range, len_tilt)
+            dummy_tlt[:, 1] = 2e4
+            dummy_tlt[:, 2] = 300
+            dummy_tlt[:, 3] = 2.7
+            assert os.path.exists(csv), f'{csv} not found'
+            #parse csv
+            df = pd.read_csv(csv, skipinitialspace=True)
+            #df.columns = df.columns.str.strip()
+            tilt = df['TiltAngle'].astype(float).to_numpy()
+            defocus = -df['Defocus'].astype(float).to_numpy()*1e10 #defocus from warp is in m, -(dfu + dfv)/2
+            voltage = df['Voltage'].astype(float).to_numpy()/1e3
+            cs = df['Cs'].astype(float).to_numpy()*1e3
+            w = df['Amplitude'].astype(float).to_numpy()
+            bfactor = -df['Bfactor'].astype(float).to_numpy()*1e20/4. #bfactor from warp is in m^2, scale it down a little bit
+            scale = df['Scale'].astype(float).to_numpy()
+            defocus_delta = -df['DefocusDelta'].astype(float).to_numpy()*1e10 # -(dfu - dfv)/2
+            dfu = defocus + defocus_delta # dfu/2 + dfv/2 + dfu/2 - dfv/2
+            dfv = defocus - defocus_delta # dfu/2 + dfv/2 - dfu/2 + dfv/2
+
+            dfangle = df['AstigmatismAngle'].astype(float)/np.pi*180
+            #print(scale)
+            #def_tlt = np.stack([tilt, dfu, dfv, dfangle, voltage, cs, w, bfactor, scale], axis=1)
+            def_tlt = np.stack([tilt, defocus, voltage, cs, w, bfactor, scale], axis=1)
+            mask = np.isclose(def_tlt[:, 0, None], dummy_tlt[:, 0], atol=tilt_step/2.-0.1)
+            #print(def_tlt[:, 0], dummy_tlt[np.where(mask)[1]][:, 0],)
+            mask_indices = np.where(mask)[1]
+            dummy_tlt[mask_indices] = def_tlt
+            if dummy_tlt[dummy_tlt[:, -1] != 0.].shape[0] != def_tlt.shape[0]:
+                print(mask_indices, dummy_tlt, def_tlt)
+            assert np.sum(np.abs(dummy_tlt[dummy_tlt[:, -1] != 0.] - def_tlt)) == 0.
+            ctfs.append(dummy_tlt)
+
+        #header = mrc.parse_header(mrc_files[0])
+        #Dx = header.fields['nx'] # image size along one dimension in pixels
+        #Dy = header.fields['ny']
+        #Dz = header.fields['nz']
+        #dtype = header.dtype
+        ### get the number of bytes in extended header
+        #extbytes = header.fields['next']
+        #start = 1024+extbytes # start of image data
+        #dtype = header.dtype
+
+        #stride = dtype().itemsize*Dx*Dy*Dz
+        #dataset = [LazyImage(f, (Dx,Dy,Dz), dtype, start) for f in mrcs]
+
+        #_, header = mrc.parse_tomo(mrc_files[0])
+        #dataset = [mrc.parse_tomo(f, header)[0] for f in mrc_files]
+        dataset = None
+
+        return dataset, mrc_files, ctfs
+
+
     def get_3dctfs(self, datadir=None, lazy=True):
         '''
         Return ctfs of particles of the starfile

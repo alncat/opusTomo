@@ -15,6 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.7+
 
 import cryodrgn
 from cryodrgn import mrc
@@ -95,7 +96,10 @@ def add_args(parser):
     group.add_argument('--pose-enc', action='store_true', help='predict pose parameter using encoder')
     group.add_argument('--pose-only', action='store_true', help='train pose encoder only')
     group.add_argument('--plot', action='store_true', help='plot intermediate result')
-    group.add_argument('--estpose', default=True, action='store_true', help='estimate pose (default: %(default)s)')
+    group.add_argument('--estpose', default=False, action='store_true', help='estimate pose')
+    group.add_argument('--warp', default=False, action='store_true', help='using subtomograms from warp')
+    group.add_argument('--tilt-step', type=int, default=2, help='the interval between successive tilts (default: %(default)s)')
+    group.add_argument('--tilt-range', type=int, default=50, help='the range of tilt angles (default: %(default)s)')
 
     group = parser.add_argument_group('Encoder Network')
     group.add_argument('--enc-layers', dest='qlayers', type=int, default=3, help='Number of hidden layers (default: %(default)s)')
@@ -279,10 +283,10 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         z_mu, z_logvar, z = 0., 0., 0.
 
     # add bfactors to ctf_params, the second from last column stores bfactor, the last column stores scale
-    #random_b = np.random.rand()*1.5
-    random_b = np.random.gamma(1., 0.6)
-    #random_b = torch.randn_like(c[..., 0, -2])/3.
-    c[...,-2] = c[...,-2] + (args.bfactor+random_b)*(4*np.pi**2)
+    #random_b = (np.random.normal())/3.
+    #random_b = np.random.gamma(1., 0.6)
+    random_b = torch.randn_like(c[..., 0, -2])/3.
+    c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
 
     plot = args.plot and it % (args.log_interval) == B
     if plot:
@@ -333,6 +337,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         decout = model.vanilla_decode(rot, trans, z=z, save_mrc=save_image, eulers=euler,
                                       ref_fft=y, ctf_param=c, encout=encout, mask=mask_real, body_poses=body_poses,
                                       ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename, write_ctf=args.write_ctf)
+
         if decout["affine"] is not None:
             posetracker.set_pose(decout["affine"][0].detach(), decout["affine"][1].detach(), ind)
 
@@ -712,11 +717,17 @@ def main(args):
         args.use_real = args.encode_mode == 'conv'
         args.real_data = args.pe_type == 'vanilla'
 
-        if args.lazy_single:
+        if args.lazy_single and not args.warp:
             data = dataset.LazyTomoMRCData(args.particles, norm=args.norm,
                                        real_data=args.real_data, invert_data=args.invert_data,
                                        ind=ind, keepreal=args.use_real, window=False,
                                        datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac)
+        elif args.lazy_single and args.warp:
+            data = dataset.LazyTomoWARPMRCData(args.particles, norm=args.norm,
+                                       real_data=args.real_data, invert_data=args.invert_data,
+                                       ind=ind, keepreal=args.use_real, window=False,
+                                       datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
+                                       tilt_step=args.tilt_step, tilt_range=args.tilt_range)
         else:
             raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
 
@@ -751,8 +762,6 @@ def main(args):
 
     # load ctf
     if args.ctf is not None:
-        #if args.use_real:
-        #    raise NotImplementedError("Not implemented with real-space encoder. Use phase-flipped images instead")
         flog('Loading ctf params from {}'.format(args.ctf))
         ctf_params = ctf.load_ctf_for_training(D-1, args.ctf)
         log('first ctf params is: {}'.format(ctf_params[0,:]))
@@ -824,7 +833,6 @@ def main(args):
     model_parameters = list(model.encoder.parameters()) + list(model.decoder.parameters()) #+ list(group_stat.parameters())
     pose_encoder = None
     optim = torch.optim.AdamW(model_parameters, lr=args.lr, weight_decay=args.wd)
-    assert args.accum_step >= 1
 
     #if args.encode_mode == "grad":
     #    discriminator_parameters = list(model.shape_encoder.parameters())
@@ -946,7 +954,8 @@ def main(args):
     bfactor = args.bfactor
     lamb = args.lamb
     if args.log_interval % args.batch_size != 0:
-        args.log_interval = args.batch_size*8
+        args.log_interval = args.batch_size*16
+    assert args.accum_step >= 1
 
     for epoch in range(start_epoch, num_epochs):
         t2 = dt.now()
@@ -979,6 +988,7 @@ def main(args):
             ind = minibatch[-1]#.to(device)
             y = minibatch[0][0].to(device, non_blocking=True)
             ctf_param = minibatch[0][1].float().to(device, non_blocking=True)
+            ctf_filename = minibatch[0][2]
             #apixs = torch.ones(ctf_param.shape[:-1]).to(device)*args.angpix
             #ctf_param = torch.cat([apixs.unsqueeze(-1), ctf_param], dim=-1)
             # compute ctf!
@@ -1009,6 +1019,20 @@ def main(args):
             if body_euler is not None:
                 body_euler = body_euler.to(device)
                 body_trans = body_trans.to(device)
+
+            o_rot = lie_tools.hopf_to_SO3(euler[:, :3])
+            ## perturb rotation by symm ops
+            #samples = torch.multinomial(symm_ops_weights, o_rot.shape[0], replacement=True)
+
+            ###rand_z = o_rot @ symm_ops[samples].to(o_rot.get_device())
+            ###print(rand_z)
+            ####pixrad = hp.max_pixrad(64)
+            #rand_z = lie_tools.random_biased_SO3(o_rot.shape[0], bias=256*np.sqrt(3)).to(o_rot.get_device())
+            #rand_z = o_rot @ rand_z
+            #rand_e = lie_tools.so3_to_hopf(rand_z)
+            ##print(rand_e - euler[:, :3])
+            #euler = rand_e
+
             #print("euler, trans: ", euler.shape, tran.shape, y.shape)
             #ctf_param = ctf_params[ind] if ctf_params is not None else None
             z_mu, loss, gen_loss, snr, l1_loss, tv_loss, mu2, std2, mmd, c_mmd, mse, body_poses_pred = \
@@ -1020,7 +1044,7 @@ def main(args):
                                               it=batch_it, enc=None,
                                               args=args, euler=euler,
                                               posetracker=posetracker, data=data, update_params=(update_it%args.accum_step == args.accum_step - 1),
-                                              snr2=snr_ema, body_poses=(body_euler, body_trans))
+                                              snr2=snr_ema, body_poses=(body_euler, body_trans), ctf_filename=ctf_filename)
             update_it += 1
             if do_pose_sgd and epoch >= args.pretrain:
                 pose_optimizer.step()
@@ -1114,7 +1138,7 @@ def main(args):
                                               it=batch_it, enc=None,
                                               args=args, euler=euler,
                                               posetracker=posetracker, data=data, backward=False, update_params=False,
-                                              snr2=snr_ema, body_poses = (body_euler, body_trans))
+                                              snr2=snr_ema, body_poses = (body_euler, body_trans), ctf_filename=ctf_filename)
             if do_pose_sgd and epoch >= args.pretrain:
                 pose_optimizer.step()
             # logging
@@ -1124,8 +1148,8 @@ def main(args):
 
         flog('# =====> Epoch: {} Average validation gen_loss = {:.6}, SNR2 = {:.6f}, '\
              'total loss = {:.6f}; Finished in {}'.format(epoch+1,
-                                                         gen_loss_accum/Nimg_test,
-                                                         snr_accum/Nimg_test, loss_accum/Nimg_test, dt.now()-t2))
+                                                         gen_loss_accum/(Nimg_test+1),
+                                                         snr_accum/(Nimg_test+1), loss_accum/(Nimg_test+1), dt.now()-t2))
 
 
         if args.checkpoint and epoch % args.checkpoint == 0:
