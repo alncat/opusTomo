@@ -27,8 +27,13 @@ https://github.com/user-attachments/assets/6e04a762-9bbb-4a69-a485-6803a39a6b4b
 
 Clustering the template matching result and improving resolution! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
 
-<img width="983" alt="image" src="https://github.com/user-attachments/assets/def3f84a-6c3e-4eb0-a8de-02f8d8461476" />
-<img width="918" alt="image" src="https://github.com/user-attachments/assets/5b7ccdfe-d5b6-433b-93ba-b2ede4bc411f" />
+<img width="612" alt="image" src="https://github.com/user-attachments/assets/295ecda6-1979-49d8-8607-90f17abdc093" />
+
+<img width="896" alt="image" src="https://github.com/user-attachments/assets/ca6573a1-4878-4cef-a2d9-6bc4e952b480" />
+
+<img width="416" alt="image" src="https://github.com/user-attachments/assets/32bb10fd-ecec-47ff-b5f3-ca70611cfc1f" />
+
+<img width="725" alt="image" src="https://github.com/user-attachments/assets/a905ca82-4c20-4167-95f9-4956f45b5e37" />
 
 The histograms at the right panel shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
 TM Overlapping With DeePiCt refers to the number of subtomograms from Template Mathching that overlap with DeePiCt's result, and OPUS-TOMO
@@ -38,6 +43,7 @@ easy to observe that OPUS-TOMO improves the overlapping ratio by a large margin.
 orientation determined by template matching in pyTOM directly without any other processing. The template matching results for this case are in the folder https://drive.google.com/drive/folders/1xR_zD_nF9Hvw9S3nsjxxPR2DQmod3Fmu?usp=drive_link .
 
 The results for M. pneumoniae 70S ribosome,
+
 <img width="604" alt="image" src="https://github.com/user-attachments/assets/d3d02cfc-d2bd-4913-946c-40c82970cdfd" />
 
 For S. pombe 80S ribosome, a part of translation elongation cycle resolved by traversing PC8, which shows the translocation of A/T- and P- site tRNAs to A/P- and P/E- site tRNAs.
@@ -105,11 +111,6 @@ structurally heterogeneous subpopulations. The results are deposited in https://
 
 It can even reconstruct higher resolution structure for FAS in EMPIAR-10988 by clustering 221 particles from 4800 noisy subtomograms picked by template matching!
 The template matching and subtomogram averaging results are in the folder https://drive.google.com/drive/folders/1OijHVrCu3M-OgqvNu_YZ4jW8OWn6OwaV?usp=drive_link, fasp_expanded.star stores the subtomogram averaging results after D3 symmetry expansion.
-
-<img width="1107" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/3ae62232-b3d3-4c00-91a1-1b1a1714a59d">
-
-Class 19 as a distinct cluster in UMAP projection shows the densities below:
-<img width="740" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/9ad2da65-36cb-474a-be65-943b398f0294">
 
 We can also reconstruct the dynamics for FAS, using only 221 particles!
 
