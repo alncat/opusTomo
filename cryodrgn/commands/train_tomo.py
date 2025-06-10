@@ -40,6 +40,7 @@ def add_args(parser):
     parser.add_argument('-o', '--outdir', type=os.path.abspath, required=True, help='Output directory to save model')
     parser.add_argument('-r', '--ref_vol', type=os.path.abspath, help='Input volume (.mrcs)')
     parser.add_argument('--zdim', type=int, required=False, help='Dimension of latent variable')
+    parser.add_argument('--zaffinedim', type=int, default=4, required=False, help='Dimension of latent variable')
     parser.add_argument('--poses', type=os.path.abspath, required=True, help='Image poses (.pkl)')
     parser.add_argument('--masks', type=os.path.abspath, required=False, help='Masks related parameters (.pkl)')
     parser.add_argument('--ctf', metavar='pkl', type=os.path.abspath, help='CTF parameters (.pkl)')
@@ -100,6 +101,8 @@ def add_args(parser):
     group.add_argument('--warp', default=False, action='store_true', help='using subtomograms from warp')
     group.add_argument('--tilt-step', type=int, default=2, help='the interval between successive tilts (default: %(default)s)')
     group.add_argument('--tilt-range', type=int, default=50, help='the range of tilt angles (default: %(default)s)')
+    group.add_argument('--ctfalpha', type=float, default=0, help='the degree of ctf correction to experimental subtomogram (default: %(default)s)')
+    group.add_argument('--ctfbeta', type=float, default=1, help='the degree of ctf correction to reconstruction of decoder (default: %(default)s)')
 
     group = parser.add_argument_group('Encoder Network')
     group.add_argument('--enc-layers', dest='qlayers', type=int, default=3, help='Number of hidden layers (default: %(default)s)')
@@ -809,7 +812,10 @@ def main(args):
                 downfrac=args.downfrac,
                 templateres=args.templateres,
                 tmp_prefix=args.tmp_prefix,
-                masks_params=masks_params)
+                masks_params=masks_params,
+                z_affine_dim=args.zaffinedim,
+                ctf_alpha=args.ctfalpha,
+                ctf_beta=args.ctfbeta)
 
     # use downsampled ctf grid
     ctf_grid = CTFGrid(model.render_size+1, device)

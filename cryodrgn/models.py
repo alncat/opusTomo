@@ -50,7 +50,9 @@ class HetOnlyVAE(nn.Module):
             window_r=0.85,
             masks_params=None,
             num_bodies=0,
-            z_affine_dim=4,):
+            z_affine_dim=4,
+            ctf_alpha=0.,
+            ctf_beta=1.):
         super(HetOnlyVAE, self).__init__()
         self.lattice = lattice
         self.zdim = zdim
@@ -63,6 +65,8 @@ class HetOnlyVAE(nn.Module):
         self.render_size = (int((lattice.D - 1)*downfrac)//2)*2
         self.num_bodies = num_bodies
         self.z_affine_dim = z_affine_dim
+        self.ctf_alpha = ctf_alpha
+        self.ctf_beta = ctf_beta
         if ref_vol is not None:
             in_vol_nonzeros = torch.nonzero(ref_vol)
             in_vol_mins, _ = in_vol_nonzeros.min(dim=0)
@@ -128,7 +132,7 @@ class HetOnlyVAE(nn.Module):
                                    symm=self.symm, ctf_grid=ctf_grid,
                                    fixed_deform=self.fixed_deform, deform_emb_size=self.deform_emb_size,
                                    render_size=self.encoder_image_size, down_vol_size=self.down_vol_size, tmp_prefix=tmp_prefix,
-                                   masks_params=self.masks_params, num_bodies=self.num_bodies)
+                                   masks_params=self.masks_params, num_bodies=self.num_bodies, ctf_alpha=self.ctf_alpha, ctf_beta=self.ctf_beta)
 
     @classmethod
     def load(self, config, weights=None, device=None):
@@ -339,7 +343,7 @@ def load_decoder(config, weights=None, device=None):
 def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activation=nn.ReLU, templateres=128,
                 ref_vol=None, Apix=1., template_type=None, warp_type=None,
                 symm=None, ctf_grid=None, fixed_deform=False, deform_emb_size=2, render_size=140,
-                down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4):
+                down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4, ctf_alpha=0, ctf_beta=1):
     if enc_type == 'none':
         if domain == 'hartley':
             model = ResidLinearMLP(in_dim, layers, dim, 1, activation)
@@ -354,7 +358,7 @@ def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activati
                               deform_emb_size=deform_emb_size,
                               zdim=in_dim - 3, render_size=render_size,
                               down_vol_size=down_vol_size, tmp_prefix=tmp_prefix, masks_params=masks_params, num_bodies=num_bodies,
-                              affine_dim=affine_dim)
+                              affine_dim=affine_dim, ctf_alpha=ctf_alpha, ctf_beta=ctf_beta)
     else:
         model = PositionalDecoder if domain == 'hartley' else FTPositionalDecoder
         return model(in_dim, D, layers, dim, activation, enc_type=enc_type, enc_dim=enc_dim)
@@ -434,7 +438,7 @@ class ConvTemplate(nn.Module):
         self.conv_out = nn.ConvTranspose3d(inchannels, 1, 4, 2, 1)
         #self.conv_out = nn.Conv3d(inchannels, 1, 3, 1, 1)
 
-        utils.initmod(self.conv_out, gain=1./np.sqrt(templateres))
+        utils.initmod(self.conv_out)#, gain=1./np.sqrt(templateres))
         self.intermediate_size = int(16*self.templateres/256)
         log('convtemplate: the output volume is of size {}, resample intermediate activations of size 16 to {}'.format(self.templateres, self.intermediate_size))
         # output rigid grid transformations
@@ -1076,7 +1080,7 @@ class SpatialTransformer(nn.Module):
 class VanillaDecoder(nn.Module):
     def __init__(self, D, in_vol=None, Apix=1., template_type=None, templateres=256, warp_type=None, symm_group=None,
                  ctf_grid=None, fixed_deform=False, deform_emb_size=2, zdim=8, render_size=140,
-                 use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4):
+                 use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4, ctf_alpha=0., ctf_beta=1.):
         super(VanillaDecoder, self).__init__()
         self.D = D
         self.vol_size = (D - 1)
@@ -1090,6 +1094,9 @@ class VanillaDecoder(nn.Module):
         self.render_size = render_size
         self.use_fourier = use_fourier
         self.tmp_prefix = tmp_prefix
+        self.ctf_alpha = ctf_alpha
+        self.ctf_beta = ctf_beta
+        log("decoder: correct ctf using alpha {}, beta {}".format(self.ctf_alpha, self.ctf_beta))
 
         if symm_group is not None:
             self.symm_group = symm_groups.SymmGroup(symm_group)
@@ -1531,7 +1538,8 @@ class VanillaDecoder(nn.Module):
         body_rots_pred = []
         body_rots = []
         body_trans_pred = []
-        rand_tilt = (torch.randn(1).to(euler.get_device()))/6.*10.
+        #rand_tilt = (torch.randn(1).to(euler.get_device()))/6.*10.
+        rand_tilt = torch.tensor([0.]).to(euler.get_device())
         # precompute ctf here
         freqs = ctf_grid.freqs2d.unsqueeze(0)/self.Apix
         ctf_param[:, :, 0] += rand_tilt
@@ -1732,12 +1740,22 @@ class VanillaDecoder(nn.Module):
                     if self.num_bodies >= 0:
                         #ref: (1, D, H, W)
                         ###rotate tilt around y, permute ref_i from [z, y, x] to [y, z, x], then convert back
-                        ref_i = torch.permute(ref_i, [0, 2, 1, 3,])
+                        #ref_i = torch.permute(ref_i, [0, 2, 1, 3,])
                         ##rotate_2d using lie_tools.zrot, which is the inverse of lie_tools.rot_2d
                         ##but in compute3dctf, we use -tilt, so rotate_2d is identical to compute3dctf
                         ##so if the ref is rotated by rand_tilt using rotate_2d, the 3dctf should be rotated by tilt + rand_tilt
-                        ref_i = self.transformer.rotate_2d(ref_i, rand_tilt, mode='bicubic')
-                        ref_i = torch.permute(ref_i, [0, 2, 1, 3])
+                        #ref_i = self.transformer.rotate_2d(ref_i, rand_tilt, mode='bicubic')
+                        #ref_i = torch.permute(ref_i, [0, 2, 1, 3])
+
+                        ref_i = self.transformer.pad3d(ref_i, self.render_size)
+                        ref_i_ft = fft.torch_rfft3_center(ref_i)
+                        #ctf correction by phase flipping and sqrt of ctf, sqrt(ctf)*ctf.sign()
+                        #print(ref_i_ft.shape, c.shape)
+                        #ref_i_ft *= torch.sign(c[i:i+1])
+                        ref_i_ft *= c[i:i+1].abs().pow(self.ctf_alpha)*torch.sign(c[i:i+1]) # 1, Z, Y, X, * 1, Z, Y, X
+                        ref_i = fft.torch_irfft3_center(ref_i_ft)
+                        ref_i = utils.crop_vol(ref_i, self.crop_vol_size)
+
                         ##rotate the images around z axis by -(-euler2) == euler2 counter-clockwise
                         ref_i = self.transformer.rotate_2d(ref_i, -euler2, mode='bicubic') #.unsqueeze(0)
                         #applying 3d mask to reference here
@@ -1774,7 +1792,7 @@ class VanillaDecoder(nn.Module):
             #print(image_fft.shape, c.shape, ref.shape)
 
             #image_fft: 8, D, H, W; c: 1, D, H, W; ref: 1, crop_D, crop_H, crop_W
-            image_fft = image_fft*c[i:i+1]
+            image_fft = image_fft*c[i:i+1].abs().pow(self.ctf_beta)
             image_fft = fft.torch_irfft3_center(image_fft)
             image_fft = utils.crop_vol(image_fft, self.crop_vol_size)
             image = utils.crop_vol(image, self.crop_vol_size)
