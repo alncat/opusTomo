@@ -25,21 +25,20 @@ The movie without cropping
 
 https://github.com/user-attachments/assets/6e04a762-9bbb-4a69-a485-6803a39a6b4b
 
-Clustering the template matching result and improving resolution! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
+Clustering the template matching result and achiving high-resolution reconstruction in one shot! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
 
-<img width="612" alt="image" src="https://github.com/user-attachments/assets/295ecda6-1979-49d8-8607-90f17abdc093" />
+<img width="700" alt="image" src="https://github.com/user-attachments/assets/dc31b7c1-bc67-4ee6-82c6-de6ee4941868" />
 
-<img width="896" alt="image" src="https://github.com/user-attachments/assets/ca6573a1-4878-4cef-a2d9-6bc4e952b480" />
+<img width="1225" alt="image" src="https://github.com/user-attachments/assets/15281466-a07e-40df-a860-d20487fadeaa" />
 
 <img width="416" alt="image" src="https://github.com/user-attachments/assets/32bb10fd-ecec-47ff-b5f3-ca70611cfc1f" />
 
-<img width="725" alt="image" src="https://github.com/user-attachments/assets/a905ca82-4c20-4167-95f9-4956f45b5e37" />
+<img width="810" alt="image" src="https://github.com/user-attachments/assets/859013af-5713-4f21-99af-0a3a1957fca3" />
 
-The histograms at the right panel shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
+The histograms shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
 TM Overlapping With DeePiCt refers to the number of subtomograms from Template Mathching that overlap with DeePiCt's result, and OPUS-TOMO
 refers to the number of subtomograms in classes 12-17 that overlaps with DeePiCt's result. TM Overlapping Ratio refers to the ratio of subtomograms that overlaps with 
-DeePiCt's result in each tilt series, and OPUS-TOMO refers to the ratio of subtomograms in classes 12-17 that overlaps with DeePiCt's result in each tilt series. It is 
-easy to observe that OPUS-TOMO improves the overlapping ratio by a large margin. It is worth noting that OPUS-TOMO is trained by using the subtomograms with their 
+DeePiCt's result in each tilt series, and OPUS-TOMO refers to the ratio of subtomograms in classes 12-17 that overlaps with DeePiCt's result in each tilt series. It is worth noting that OPUS-TOMO is trained by using the subtomograms with their 
 orientation determined by template matching in pyTOM directly without any other processing. The template matching results for this case are in the folder https://drive.google.com/drive/folders/1xR_zD_nF9Hvw9S3nsjxxPR2DQmod3Fmu?usp=drive_link .
 
 The results for M. pneumoniae 70S ribosome,
