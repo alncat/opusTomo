@@ -290,6 +290,7 @@ def main(args):
     log(f'Writing {output_name}')
     if not args.volumes:
         print("principal_axes: ", axes)
+        print("com_bodies: ", com_bodies)
         torch.save({"in_relatives": relats, "com_bodies": com_bodies,
                 "orient_bodies": orient_bodies, "rotate_directions": rotate_directions_ori, "radii_bodies": radii_bodies, "principal_axes": axes}, \
     #            #"weights": weights, "consensus_mask": consensus_mask},

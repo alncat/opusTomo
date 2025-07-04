@@ -109,9 +109,10 @@ def compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift=0, bfactor=None
     cs = cs * 10**7
     dfang = dfang * np.pi / 180
     phase_shift = phase_shift * np.pi / 180
+    delta_w = torch.atan2(w, (1-w**2)**.5) #atan(w/sqrt(1-w**2))
 
     # lam = sqrt(h^2/(2*m*e*Vr)); Vr = V + (e/(2*m*c^2))*V^2
-    lam = 12.2643247 / (volt + 0.978466e-6 * volt**2)**.5
+    lam = 12.2643247 / (volt + 0.978466e-6 * volt**2)**.5 #wavelength of eletron with relativity correction, 300kv, 0.0197
     x = freqs[...,0]
     y = freqs[...,1]
     ang = torch.atan2(y,x)
@@ -119,7 +120,8 @@ def compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift=0, bfactor=None
     #print(s2.shape, dfu.shape)
     df = .5*(dfu + dfv + (dfu-dfv)*torch.cos(2.*(ang-dfang)))
     gamma = 2*np.pi*(-.5*df*lam*s2 + .25*cs*lam**3*s2**2) - phase_shift
-    ctf = (1-w**2)**.5*torch.sin(gamma) - w*torch.cos(gamma)
+    #ctf = (1-w**2)**.5*torch.sin(gamma) - w*torch.cos(gamma) #equivalent to sin(gamma - atan(w, sqrt(1-w**2)))
+    ctf = torch.sin(gamma - delta_w)
     if bfactor is not None:
         ctf *= torch.exp(-bfactor/4*s2 * 4*np.pi**2)
         if rweight:
@@ -133,6 +135,110 @@ def compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift=0, bfactor=None
         mtf_curve = (1. - torch.sigmoid(s2.sqrt()*mtf))*2.
         ctf *= mtf_curve
     return -ctf
+
+def compute_3dctfaniso(y, centered_freqs, freqs, tilts, dfu, dfv, dfang, volt, cs, w, bfactor=None, scale=None,
+                       phase_shift=0, Apix=1., plot=True, phaseflipped=False):
+    # compute a ctf in 3d volume
+    # compute a stack of ctfs
+    #print(freqs.shape, tilts.shape, dfu.shape, bfactor.shape)
+    # consider only isotropic ctf so far
+    # centered freqs are in the range [-Y//2+1, Y//2]
+    centered_freqs = centered_freqs.to(y.get_device())
+    freqs = freqs.to(y.get_device())
+    dfu = dfu.unsqueeze(-1)
+    volt = volt.unsqueeze(-1)
+    cs = cs.unsqueeze(-1)
+    w = w.unsqueeze(-1)
+    bfactor = -bfactor.unsqueeze(-1)
+    scale = scale.unsqueeze(-1)
+    #print(volt, cs, w, Apix)
+    dfv = dfv.unsqueeze(-1)
+    dfang = dfang.unsqueeze(-1)
+    #if rot_angs is not None:
+    #    #dfang: (B, T, 1, 1), rot_angs: (B, 1)
+    #    dfang += rot_angs.unsqueeze(-2).unsqueeze(-2)
+    ctfs = compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift, bfactor/(4*np.pi**2), scale, Apix=Apix, rweight=False)
+    #print(bfactor[0].squeeze()/(4*np.pi**2))
+
+    # the transpose of tilt rotation
+    # xtilt = R xori
+    #NOTE: use this if the tilt angle in ctf stars are flipped! (by my script), namely, follow relion's convention
+    Rtilts = lie_tools.rot_2d(-tilts.squeeze(-1).float()).unsqueeze(-3)
+    # test other tilt direction
+    #NOTE: use this if the tilt angle is the same as given
+    #Rtilts = lie_tools.rot_2d(tilts.squeeze(-1).float()).unsqueeze(-3)
+    grid_rotated = centered_freqs @ Rtilts #(D, W, 2) x (N, T, 1, 2, 2)
+    # grid_rotated now is (N, T, D, W, 2)
+    #print(Rtilts.shape, tilts[0,], grid_rotated.shape)
+    # generate tilts
+    # shift ctfs to image center
+    N = ctfs.shape[0]
+    T = ctfs.shape[1]
+    Y = ctfs.shape[-2]
+    X = ctfs.shape[-1]
+    #print(N, T, Y, X)
+    ctfs = torch.fft.fftshift(ctfs, dim=(-2)) # fftshift move the input by Y//2
+    ctfs = ctfs.unsqueeze(-2) #N, T, H, 1, W,
+
+
+    # now padding zeros to the z dim, make it 3d
+    pad_size = Y//2
+    # tensor is ordered as, after padding the zero frequency is centered at Y//2
+    ctfs = F.pad(ctfs, (0, 0, pad_size, pad_size-1)) #N, T, H, D, W
+    ctfs /= scale.sum(dim=1, keepdim=True).unsqueeze(-1) #normalize ctf by number of tilts
+    if plot:
+        fig, axes = plt.subplots(nrows=1, ncols=2)
+        #print(ctfs.shape,)
+        cmap = 'gray'
+        axes[0].imshow(ctfs[0, -1, 0].cpu().numpy(), cmap=cmap)
+
+    # rotate the grid
+
+    #centered_freqs #(-z//2, z//2-1), map it to -1, 1 by (+ z//2 )/(Y-1)
+    # also need to map (0, z//2) to -1, 1 by
+    centered_freqs_Z = grid_rotated[..., 1]
+    centered_freqs_Z = (centered_freqs_Z*Y + Y//2)/(Y - 1)
+    centered_freqs_Z = centered_freqs_Z*2. - 1.
+    centered_freqs_X = grid_rotated[..., 0]
+    centered_freqs_X = (centered_freqs_X*Y)/(X - 1)
+    centered_freqs_X = centered_freqs_X*2. - 1.
+    grid_rotated[..., 0] = centered_freqs_X
+    grid_rotated[..., 1] = centered_freqs_Z
+
+    #reshape ctfs to N*T, H, D, W
+    ctfs = ctfs.view(N*T, Y, Y, X)
+    grid_rotated = grid_rotated.view(N*T, Y, X, 2)
+    #sampling ctfs
+    ctfs_3d = F.grid_sample(ctfs, grid_rotated, mode='bicubic', align_corners=True)
+
+    #print the some ctfs
+    #summing along the tilt channel to obtain 3d ctf
+    ctfs_3d = ctfs_3d.view(N, T, Y, Y, X)#.sum(dim=1) #(N, Y, Z, X)
+    if plot:
+        axes[1].imshow(ctfs_3d[0, -1, 0].cpu().numpy(), cmap=cmap)
+        plt.show()
+    ctfs_3d = ctfs_3d.sum(dim=1)
+    #rearrange ctf from x, z, y to x, y, z order, n y z x -> n z y x
+    ctfs_3d = torch.permute(ctfs_3d, [0, 2, 1, 3])
+    #print(ctfs_3d[0, Y//2-1, Y//2-1, 0])
+    if plot:
+        fig, axes = plt.subplots(nrows=1, ncols=2)
+        axes[0].imshow(ctfs_3d[0,:,Y//2, :].cpu().numpy(), cmap=cmap)
+        print(y.shape, y[0,:,Y//2-1,Y//2-1:].shape)
+        #axes[1].imshow(y[0,:,Y//2,Y//2:].cpu().numpy(), cmap=cmap)
+        #plt.show()
+
+    #lastly, shift the ctf back to fftw style, by -Y//2
+    #ctfs_3d = torch.fft.ifftshift(ctfs_3d, dim=(-3, -2,))
+    #diff = (ctfs_3d[0, :, Y//2-1, :] - y[0, :, Y//2, Y//2-1:])
+    if plot:
+        #diff = (ctfs_3d[0, :-1, Y//2-1, :-1] - y[0, 1:, Y//2, Y//2:])
+        #plt.imshow(diff.cpu().numpy(), cmap=cmap)
+        #print(diff.abs().mean())
+        axes[1].imshow(ctfs_3d[0, :, 0, :].cpu().numpy(), cmap=cmap)
+        plt.show()
+    # if the input subtomograms are phaseflipped, then ctf should have no phase information
+    return ctfs_3d
 
 def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=None, scale=None, phase_shift=0, Apix=1., plot=True, use_warp=True):
     # compute a ctf in 3d volume
@@ -151,7 +257,8 @@ def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=Non
     #print(volt, cs, w, Apix)
     dfv = dfu
     dfang = torch.zeros_like(dfu)
-    ctfs = compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift, bfactor/(4*np.pi**2), scale, Apix=Apix, rweight=True)
+    ctfs = compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift,
+                       bfactor/(4*np.pi**2), scale, Apix=Apix, rweight=False)
 
     #print(bfactor[0].squeeze()/(4*np.pi**2))
 
@@ -236,7 +343,7 @@ def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=Non
         #plt.show()
 
     #lastly, shift the ctf back to fftw style, by -Y//2
-    ctfs_3d = torch.fft.ifftshift(ctfs_3d, dim=(-3, -2,))
+    #ctfs_3d = torch.fft.ifftshift(ctfs_3d, dim=(-3, -2,))
     #diff = (ctfs_3d[0, :, Y//2-1, :] - y[0, :, Y//2, Y//2-1:])
     if plot:
         #diff = (ctfs_3d[0, :-1, Y//2-1, :-1] - y[0, 1:, Y//2, Y//2:])

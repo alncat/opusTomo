@@ -393,12 +393,21 @@ class Starfile():
         tilt_range = int(tilt_range)
         tilt_step = int(tilt_step)
         len_tilt = ((tilt_range*2)//tilt_step+1)
+        isotropic = False
         for csv in csvs:
-            dummy_tlt = np.zeros((len_tilt, 7))
-            dummy_tlt[:, 0] = np.linspace(-tilt_range, tilt_range, len_tilt)
-            dummy_tlt[:, 1] = 2e4
-            dummy_tlt[:, 2] = 300
-            dummy_tlt[:, 3] = 2.7
+            if isotropic:
+                dummy_tlt = np.zeros((len_tilt, 7)) #isotropic
+                dummy_tlt[:, 0] = np.linspace(-tilt_range, tilt_range, len_tilt)
+                dummy_tlt[:, 1] = 2e4 #defocus
+                dummy_tlt[:, 2] = 300 #volt
+                dummy_tlt[:, 3] = 2.7
+            else:
+                dummy_tlt = np.zeros((len_tilt, 9))
+                dummy_tlt[:, 0] = np.linspace(-tilt_range, tilt_range, len_tilt)
+                dummy_tlt[:, 1] = 2e4 #dfu
+                dummy_tlt[:, 2] = 2e4 #dfv
+                dummy_tlt[:, 4] = 300 #volt
+                dummy_tlt[:, 5] = 2.7 #cs
             assert os.path.exists(csv), f'{csv} not found'
             #parse csv
             df = pd.read_csv(csv, skipinitialspace=True)
@@ -416,8 +425,10 @@ class Starfile():
 
             dfangle = df['AstigmatismAngle'].astype(float)/np.pi*180
             #print(scale)
-            #def_tlt = np.stack([tilt, dfu, dfv, dfangle, voltage, cs, w, bfactor, scale], axis=1)
-            def_tlt = np.stack([tilt, defocus, voltage, cs, w, bfactor, scale], axis=1)
+            if isotropic:
+                def_tlt = np.stack([tilt, defocus, voltage, cs, w, bfactor, scale], axis=1)
+            else:
+                def_tlt = np.stack([tilt, dfu, dfv, dfangle, voltage, cs, w, bfactor, scale], axis=1)
             mask = np.isclose(def_tlt[:, 0, None], dummy_tlt[:, 0], atol=tilt_step/2.-0.1)
             #print(def_tlt[:, 0], dummy_tlt[np.where(mask)[1]][:, 0],)
             mask_indices = np.where(mask)[1]

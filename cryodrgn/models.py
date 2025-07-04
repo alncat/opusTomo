@@ -244,7 +244,7 @@ class HetOnlyVAE(nn.Module):
 
     def vanilla_decode(self, rots, trans, z=None, save_mrc=False, eulers=None,
                        ref_fft=None, ctf_param=None, encout=None, mask=None,
-                       body_poses=(None, None), ctf_grid=None, estpose=False, ctf_filename=None, write_ctf=False):
+                       body_poses=(None, None), ctf_grid=None, estpose=False, ctf_filename=None, write_ctf=False, bfactor=4.):
         in_template = None
         if self.encode_mode != 'deform':
             #randomly perturb rotation
@@ -257,7 +257,8 @@ class HetOnlyVAE(nn.Module):
             encout = {'encoding': None}
         decout = self.decoder(rots, trans, z=z, in_template=in_template, save_mrc=save_mrc,
                         euler=eulers, ref_fft=ref_fft, ctf_param=ctf_param,
-                        body_euler=body_poses[0], body_trans=body_poses[1], ctf_grid=ctf_grid, estimate_pose=estpose, ctf_filename=ctf_filename)
+                        body_euler=body_poses[0], body_trans=body_poses[1], ctf_grid=ctf_grid,
+                        estimate_pose=estpose, ctf_filename=ctf_filename, bfactor=bfactor)
         #decout["y_recon_ori"] = y_recon_ori = decout["y_recon"]
         y_recon_ori = decout["y_recon_ori"]
         pad_size = (self.render_size - self.down_vol_size)//2
@@ -719,9 +720,9 @@ class Encoder(nn.Module):
                 x_i_ori = fft.torch_irfft3_center(x_fft, center=True)
                 x_i_ori = utils.crop_vol(x_i_ori, self.crop_vol_size)
                 x3d_center.append(x_i_ori.squeeze(1))
-                b_factor = np.random.rand() - 0.25
+                b_factor = 0.5*np.random.rand() - 0.125
                 x_fft_b = self.bfactor_blurring(x_fft, b_factor)
-                # x_i is randomly augmented
+                # x_i is randomly blurred
                 x_i = fft.torch_irfft3_center(x_fft_b, center=True)
             # translate volume in real space
             #trans_i_int = trans[i].round()
@@ -741,6 +742,8 @@ class Encoder(nn.Module):
             x_i = utils.crop_vol(x_i, self.crop_vol_size)
 
             x_i = self.transformer_e.rotate_2d(x_i.squeeze(0), -euler2, mode='bicubic').unsqueeze(0) #(1, 1, H, W)
+            # standardize volume
+            x_i = (x_i - x_i.mean())/x_i.std()
 
 
             # data augmentation
@@ -1080,7 +1083,8 @@ class SpatialTransformer(nn.Module):
 class VanillaDecoder(nn.Module):
     def __init__(self, D, in_vol=None, Apix=1., template_type=None, templateres=256, warp_type=None, symm_group=None,
                  ctf_grid=None, fixed_deform=False, deform_emb_size=2, zdim=8, render_size=140,
-                 use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4, ctf_alpha=0., ctf_beta=1.):
+                 use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4,
+                 ctf_alpha=0., ctf_beta=1.):
         super(VanillaDecoder, self).__init__()
         self.D = D
         self.vol_size = (D - 1)
@@ -1119,6 +1123,18 @@ class VanillaDecoder(nn.Module):
             if self.use_fourier:
                 self.template = ConvTemplate(in_dim=self.zdim, outchannels=1, templateres=self.templateres)
             else:
+                self.x_size = self.render_size//2 + 1
+                y_idx = torch.arange(-self.x_size+1, self.x_size-1)/float(self.render_size) #[-0.5, 0.5)
+                x_idx = torch.arange(self.x_size)/float(self.render_size) #(0, 0.5]
+                grid  = torch.meshgrid(y_idx, y_idx, x_idx, indexing='ij')
+                grid_x = grid[2] #change fast [[0,1,2,3]]
+                grid_y = grid[1]
+                grid_z = grid[0]
+                freqs3d = torch.stack((grid_x, grid_y, grid_z), dim=-1)
+                #print("freq3d decoder", freqs3d)
+                #freqs3d = torch.fft.ifftshift(freqs3d, dim=(-2, -1)) # z, y, x, shift
+                self.register_buffer("freqs3d", freqs3d)
+
                 self.num_bodies = num_bodies
                 self.scale = self.render_size/(self.crop_vol_size - 1)*2.
                 log(f"decoder: the output size, aka, render_size {self.render_size}, crop_vol_size, aka, the size before padding {self.crop_vol_size}, scale {self.scale}")
@@ -1203,6 +1219,17 @@ class VanillaDecoder(nn.Module):
             #self.register_buffer("mask_sum", (torch.sum(self.sphere_mask, axis=-3) > 0).sum().detach())
 
         self.warp_type = warp_type
+
+    def bfactor_blurring(self, img, bfactor):
+        s2 = self.freqs3d.pow(2).sum(dim=-1)
+        img = img*torch.exp(-s2*bfactor*np.pi**2)
+        return img
+
+    def tilt_blurring(self, img, bfactor):
+        s2 = self.freqs3d.pow(2).sum(dim=-1)
+        tilt_angle = torch.atan2(self.freqs3d[..., 2], self.freqs3d[..., 0])
+        img = img*torch.exp(-s2*bfactor*np.pi**2*tilt_angle.abs())
+        return img
 
     def symmetrise_template(self, template, grid):
         B = template.shape[0]
@@ -1481,7 +1508,7 @@ class VanillaDecoder(nn.Module):
 
     def forward(self, rots, trans, z=None, in_template=None, euler=None, ref_fft=None, ctf_param=None,
                 save_mrc=False, refine_pose=True, body_euler=None, body_trans=None, ctf_grid=None, estimate_pose=False,
-                ctf_filename=None, write_ctf=False):
+                ctf_filename=None, write_ctf=False, bfactor=2.):
         #generate a projection
         if self.use_conv_template:
             #print((z[0] == z[1]).sum())
@@ -1542,8 +1569,12 @@ class VanillaDecoder(nn.Module):
         rand_tilt = torch.tensor([0.]).to(euler.get_device())
         # precompute ctf here
         freqs = ctf_grid.freqs2d.unsqueeze(0)/self.Apix
-        ctf_param[:, :, 0] += rand_tilt
-        c = ctf.compute_3dctf(ref_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False,)
+        #ctf_param[:, :, 0] += rand_tilt
+
+        if ctf_param.shape[-1] == 9:
+            c = ctf.compute_3dctfaniso(ref_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False,)
+        else:
+            c = ctf.compute_3dctf(ref_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False, use_warp=False)
 
 
 
@@ -1596,7 +1627,7 @@ class VanillaDecoder(nn.Module):
                         if self.num_bodies > 1:
                             body_quat_i = affine[0][i, ...]
                             #body_trans_i = affine[1][i, ...]/self.vol_size
-                            one = torch.ones_like(affine[1][i, :, :1])*8.
+                            one = torch.ones_like(affine[1][i, :, :1])*16.
                             body_trans_i = torch.cat([one, affine[1][i, ...]], dim=-1)
                             body_trans_i = lie_tools.quaternions_to_SO3_wiki(body_trans_i)
 
@@ -1663,6 +1694,7 @@ class VanillaDecoder(nn.Module):
 
                             #apply estimated global rotation and translation in this step
                             #pos = self.transformer.translate_rotate(t_i/self.vol_size*self.scale, rot_i)
+                            #position for resample mask
                             if estimate_pose:
                                 #print(global_trans_i)
                                 pos = self.transformer.rotate(rot_i) + global_trans_i/self.vol_size*self.scale
@@ -1748,12 +1780,13 @@ class VanillaDecoder(nn.Module):
                         #ref_i = torch.permute(ref_i, [0, 2, 1, 3])
 
                         ref_i = self.transformer.pad3d(ref_i, self.render_size)
-                        ref_i_ft = fft.torch_rfft3_center(ref_i)
+                        ref_i_ft = fft.torch_rfft3_center(ref_i, center=True)
                         #ctf correction by phase flipping and sqrt of ctf, sqrt(ctf)*ctf.sign()
                         #print(ref_i_ft.shape, c.shape)
                         #ref_i_ft *= torch.sign(c[i:i+1])
                         ref_i_ft *= c[i:i+1].abs().pow(self.ctf_alpha)*torch.sign(c[i:i+1]) # 1, Z, Y, X, * 1, Z, Y, X
-                        ref_i = fft.torch_irfft3_center(ref_i_ft)
+                        ref_i_ft = self.bfactor_blurring(ref_i_ft, -(bfactor)/self.Apix**2)
+                        ref_i = fft.torch_irfft3_center(ref_i_ft, center=True)
                         ref_i = utils.crop_vol(ref_i, self.crop_vol_size)
 
                         ##rotate the images around z axis by -(-euler2) == euler2 counter-clockwise
@@ -1788,12 +1821,14 @@ class VanillaDecoder(nn.Module):
                     euler_samples.append(euler_sample_i)
 
             image = self.transformer.pad3d(image, self.render_size)
-            image_fft = fft.torch_rfft3_center(image)
+            image_fft = fft.torch_rfft3_center(image, center=True)
             #print(image_fft.shape, c.shape, ref.shape)
 
             #image_fft: 8, D, H, W; c: 1, D, H, W; ref: 1, crop_D, crop_H, crop_W
             image_fft = image_fft*c[i:i+1].abs().pow(self.ctf_beta)
-            image_fft = fft.torch_irfft3_center(image_fft)
+            image_fft = self.bfactor_blurring(image_fft, bfactor/self.Apix**2)
+            image_fft = self.tilt_blurring(image_fft, bfactor/2./self.Apix**2)
+            image_fft = fft.torch_irfft3_center(image_fft, center=True)
             image_fft = utils.crop_vol(image_fft, self.crop_vol_size)
             image = utils.crop_vol(image, self.crop_vol_size)
 
@@ -1888,7 +1923,7 @@ class VanillaDecoder(nn.Module):
             print(template.shape)
             if affine is not None:
                 body_quat_i = affine[0][0, ...]
-                one = torch.ones_like(affine[1][0, :, :1])*8.
+                one = torch.ones_like(affine[1][0, :, :1])*16.
                 body_trans_i = torch.cat([one, affine[1][0, ...]], dim=-1)
                 body_trans_i = lie_tools.quaternions_to_SO3_wiki(body_trans_i)
 

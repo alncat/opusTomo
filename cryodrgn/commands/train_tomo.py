@@ -289,7 +289,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
     #random_b = (np.random.normal())/3.
     #random_b = np.random.gamma(1., 0.6)
     random_b = torch.randn_like(c[..., 0, -2])/3.
-    c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
+    #c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
 
     plot = args.plot and it % (args.log_interval) == B
     if plot:
@@ -339,7 +339,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         # decode latents
         decout = model.vanilla_decode(rot, trans, z=z, save_mrc=save_image, eulers=euler,
                                       ref_fft=y, ctf_param=c, encout=encout, mask=mask_real, body_poses=body_poses,
-                                      ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename, write_ctf=args.write_ctf)
+                                      ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename, write_ctf=args.write_ctf, bfactor=args.bfactor)
 
         if decout["affine"] is not None:
             posetracker.set_pose(decout["affine"][0].detach(), decout["affine"][1].detach(), ind)
