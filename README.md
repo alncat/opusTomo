@@ -227,18 +227,19 @@ The functionality of each argument is explained in the table:
 | --lamb | the restraint strength of structural disentanglement prior proposed in OPUS-DSD, set it according to the SNR of your dataset, for dataset with high SNR such as ribosome, splicesome, you can set it to 1. or higher, for dataset with lower SNR, consider lowering it. Possible ranges are [0.1, 3.]. If you find **the UMAP of embeedings is exaggeratedly stretched into a ribbon**, then the lamb you used during training is too high! |
 | --split | the filename for storing the train-validation split of subtomograms |
 | --valfrac | the fraction of subtomograms in the validation set, default is 0.1 |
-| --bfactor | will apply exp(-bfactor/4 * s^2 * 4*pi^2) decaying to the FT of reconstruction, s is the magnitude of frequency, increase it leads to sharper reconstruction, but takes longer to reveal the part of model with weak density since it actually dampens learning rate, possible ranges are [3, 5]. Consider using higher values for more dynamic structures. We will decay the bfactor slightly in every epoch. This is equivalent to learning rate warming up. |
+| --bfactor | will apply exp(-bfactor/4 * s^2 * 4*pi^2/ angpix**2 ) decaying to the FT of reconstruction, s is the magnitude of frequency, increase it leads to sharper reconstruction, but takes longer to reveal the part of model with weak density since it actually dampens learning rate, possible ranges are [3, 5]. Consider using higher values for more dynamic structures.  |
 | --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to subtomograms. The default value is 192. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
 | --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the Z-projection of subtomograms and experimental subtomograms after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_tomo```|
 | --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-TOMO will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
 | --angpix | the angstrom per pixel for the input subtomogram |
 | --datadir | the root directory before the filename of subtomogram in input starfile |
 | --estpose | estimate a pose correction for each subtomogram during training |
+| --masks | the mask parameters for defining the rigid-body dynamics |
+| --ctfalpha | the degree of ctf correction to experimental subtomogram, the default value is 0, which is equivalent to phase flipping. You can also try value like 0.5, which will further correct the amplitude of FT of subtomogram by the square root of the ctf function|
+| --ctfbeta | the degree of ctf correction to the reconstruction output by decoder, the default value is 1. You can also try value like 0.5, which will make the voxel values output by decoder smaller since the ctf correction is weaker.|
+The plot mode will ouput the following images in the directory where you issued the training command, the fllowing images are for ATP synthase dimer:
 
-The plot mode will ouput the following images in the directory where you issued the training command:
-
-![image](https://github.com/user-attachments/assets/f6038ee4-66ce-4a4d-b7da-88b16f1cc171)
-
+<img width="441" height="331" alt="image" src="https://github.com/user-attachments/assets/e19105e7-34fa-409b-8cbc-2abf2e870e87" />
 
 Each row shows a selected subtomogram and its reconstruction from a batch.
 In the first row, the first image is the projection of experimental subtomogram supplemented to encoder, the second image is a 2D projection from subtomogram reconstruction blurred by the corresponding CTF, the third image is the projection of correpsonding experimental subtomogram after 3D masking.
