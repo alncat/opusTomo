@@ -237,6 +237,7 @@ The functionality of each argument is explained in the table:
 | --masks | the mask parameters for defining the rigid-body dynamics |
 | --ctfalpha | the degree of ctf correction to experimental subtomogram, the default value is 0, which is equivalent to phase flipping. You can also try value like 0.5, which will further correct the amplitude of FT of subtomogram by the square root of the ctf function|
 | --ctfbeta | the degree of ctf correction to the reconstruction output by decoder, the default value is 1. You can also try value like 0.5, which will make the voxel values output by decoder smaller since the ctf correction is weaker.|
+
 The plot mode will ouput the following images in the directory where you issued the training command, the fllowing images are for ATP synthase dimer:
 
 <img width="441" height="331" alt="image" src="https://github.com/user-attachments/assets/e19105e7-34fa-409b-8cbc-2abf2e870e87" />
