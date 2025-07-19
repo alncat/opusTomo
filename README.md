@@ -1,7 +1,5 @@
 # Table of contents
 1. [Opus-TOMO](#opustomo)
-    1. [80S ribosome](#80S)
-    2. [FAS](#fas)
 2. [setup environment](#setup)
 3. [training](#training)
    1. [train_tomo](#train_tomo)
@@ -216,6 +214,7 @@ The functionality of each argument is explained in the table:
 | -n     | the number of training epoches, each training epoch loops through all subtomograms in the training set |
 | -b     | the number of subtomograms for each batch on each gpu, depends on the size of available gpu memory|
 | --zdim  | the dimension of latent encodings, increase the zdim will improve the fitting capacity of neural network, but may risk of overfitting |
+| --zaffinedim | the dimension of dynamics latent encodings, default is 4 |
 | --lr    | the initial learning rate for adam optimizer, 5.e-5 should work fine. |
 | --num-gpus | the number of gpus used for training, note that the total number of subtomograms in the total batch will be n*num-gpus |
 | --multigpu |toggle on the data parallel version |
@@ -237,6 +236,8 @@ The functionality of each argument is explained in the table:
 | --masks | the mask parameters for defining the rigid-body dynamics |
 | --ctfalpha | the degree of ctf correction to experimental subtomogram, the default value is 0, which is equivalent to phase flipping. You can also try value like 0.5, which will further correct the amplitude of FT of subtomogram by the square root of the ctf function|
 | --ctfbeta | the degree of ctf correction to the reconstruction output by decoder, the default value is 1. You can also try value like 0.5, which will make the voxel values output by decoder smaller since the ctf correction is weaker.|
+| --tilt-step | the interval between successive tilts, default is 2, you need to change it according to your experimental settings when training subtomograms from WARP|
+| --tilt-range | the range of tilt angles, default is 50, change it to your range when training subtomograms from WARP|
 
 The plot mode will ouput the following images in the directory where you issued the training command, the fllowing images are for ATP synthase dimer:
 
