@@ -10,7 +10,7 @@
 
 # Opus-TOMO <div id="opustomo">
 This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei (Benedict，本笃) Luo at the group of
-Prof. Jianpeng Ma at Fudan University. OPUS-TOMO offers two key capabilities for cryo-ET data processing. Firstly, it can **filter template matching result to obtain highly homogeneous subtomogram set that often achieves high-resolution**. Secondly, it can **reconstruct dynamics and composition changes for subtomogram averaging (STA) results of various resolutions**. OPUS-TOMO can work with **WARP**'s pipeline in a seamless way to facilitate subtomogram averaging by filtering particle sets! OPUS-TOMO can also uncover high resolution heterogeneities using **high resolution STA results prepared by M**! Moreover, OPUS-TOMO can work with tomogram reconstructed by **AreTOMO**. The tutorials are in https://github.com/alncat/opusTomo/wiki!
+Prof. Jianpeng Ma at Fudan University. OPUS-TOMO works with **WARP/M** pipeline in a seamless way to facilitate high-resolution cryo-ET structure determination and reveal dynamic process for macromolecule in situ! Specifically, it can **filter template matching result to obtain highly homogeneous subtomogram set that achieves sub-nanometer resolution**. Secondly, it can **reconstruct dynamics in various scales from subtomogram averaging (STA) results** from **M**! OPUS-TOMO can even work with tomogram reconstructed by **AreTOMO**. The tutorials are in https://github.com/alncat/opusTomo/wiki!
 The preprint of OPUS-TOMO is available at https://www.biorxiv.org/content/10.1101/2024.06.30.601442 or https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
 A part of translation elongation cycle resolved by traversing PC9, which shows the translocation of A/T- tRNAs to A-site and the exit of E-site tRNA for Cm-treated M. pneumoniae 70S ribosome.
 The model is trained using M refined subtomograms.
@@ -56,8 +56,6 @@ The movement of L1 stalk resolved by traversing PC12
 
 https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b7ae343
 
-
-
 Structural heterogeneity is a central problem for cryo-ET which occurs at many stage of tomography processing. Specifically, at the very first stage, after reconstructing a tomogram, you then encounter the problem to pick subtomograms corresponding to macromolecule of interest from the tomogram. Given the abundance of different molecules inside the
 cell sample, subtomogram picking faces large challenges from structural heterogeneity. At a later stage, when you have obtained a purer set of subtomograms for the molecule of interest, you may still encounter the structural heterogeneity problem as the molecule is in constant dynamics in cell environment. 
 The vitrified samples then preserves lots of different conformations and compositions of the molecule of interest.
@@ -67,31 +65,21 @@ OPUS-TOMO can be used to filter picked particles! At later stage, OPUS-TOMO can 
 
 OPUS-TOMO takes the **3D subtomograms** as input directly. The capacity of OPUS-TOMO is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/, this implementation is GPU-accelerated with a user-friendly GUI!). OPUS-TOMO also enables the structural heterogeneity anlaysis using **the simplest statistic methods, PCA and KMeans clustering**. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules. Specifically, **PCA** in learned latent space allows decomposing structural variations of macromolecules in cryo-ET dataset into dinstinct modes that greatly facilitate reserchers' understandings. This is in a similar spirit to the Normal Mode Analysis (NMA) for macromolecules which investigates their movement modes.
 
-This project seeks to unravel how a latent space, encoding 3D structural information, can be learned by utilizing subtomograms which are aligned against a consensus reference model by subtomogram averaging or template matching.
-
-An informative latent space is pivotal as it simplifies data analysis by providing a structured and reduced-dimensional representation of the data.
-
-Our approach strategically **leverages the inevitable pose assignment errors introduced during consensus refinement/template matching, while concurrently mitigating their impact on the quality of 3D reconstructions**. Although it might seem paradoxical to exploit errors while minimizing their effects, our method has proven effective in achieving this delicate balance.
-
 The workflow of OPUS-TOMO is demonstrated as follows:
 <img width="653" height="301" alt="image" src="https://github.com/user-attachments/assets/9a20e483-6f9e-48b8-9ac9-b18c8ae1d289" />
-
 
 Note that all input and output of this method are in real space! 
 The architecture of encoder is (Encoder class in cryodrgn/models.py):
 
 <img width="2056" height="314" alt="image" src="https://github.com/user-attachments/assets/641c9cb1-4c8e-4eb2-a2e2-a2b9cb3e4875" />
 
-
 The architecture of decoder is (ConvTemplate class in cryodrgn/models.py. In this version, the default size of output volume is set to 192^3, I downsampled the intermediate activations to save some gpu memories. You can tune it as you wish, happy training!):
 
 <img width="964" alt="image" src="https://github.com/user-attachments/assets/ed448e4a-3097-473c-8d2a-d50725e1c735">
 
-
 The architecture of dynamics decoder is:
 
 <img width="354" height="106" alt="image" src="https://github.com/user-attachments/assets/dbbe08df-210f-465d-a3e6-94dac417f815" />
-
 
 
 ## S.pombe 80S Ribosome <a name="80s"></a>
