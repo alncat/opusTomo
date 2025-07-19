@@ -76,13 +76,13 @@ An informative latent space is pivotal as it simplifies data analysis by providi
 Our approach strategically **leverages the inevitable pose assignment errors introduced during consensus refinement/template matching, while concurrently mitigating their impact on the quality of 3D reconstructions**. Although it might seem paradoxical to exploit errors while minimizing their effects, our method has proven effective in achieving this delicate balance.
 
 The workflow of OPUS-TOMO is demonstrated as follows:
-<img width="763" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/ac975578-97c9-45cb-b909-e3fc275ff815">
+<img width="653" height="301" alt="image" src="https://github.com/user-attachments/assets/9a20e483-6f9e-48b8-9ac9-b18c8ae1d289" />
 
 
 Note that all input and output of this method are in real space! 
 The architecture of encoder is (Encoder class in cryodrgn/models.py):
-<img width="653" height="301" alt="image" src="https://github.com/user-attachments/assets/9a20e483-6f9e-48b8-9ac9-b18c8ae1d289" />
 
+<img width="2056" height="314" alt="image" src="https://github.com/user-attachments/assets/641c9cb1-4c8e-4eb2-a2e2-a2b9cb3e4875" />
 
 
 The architecture of decoder is (ConvTemplate class in cryodrgn/models.py. In this version, the default size of output volume is set to 192^3, I downsampled the intermediate activations to save some gpu memories. You can tune it as you wish, happy training!):
