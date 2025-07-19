@@ -81,7 +81,7 @@ The workflow of OPUS-TOMO is demonstrated as follows:
 
 Note that all input and output of this method are in real space! 
 The architecture of encoder is (Encoder class in cryodrgn/models.py):
-<img width="999" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/1d09533d-7265-4913-b140-d9c9c2e5b25b">
+<img width="653" height="301" alt="image" src="https://github.com/user-attachments/assets/9a20e483-6f9e-48b8-9ac9-b18c8ae1d289" />
 
 
 
@@ -90,9 +90,9 @@ The architecture of decoder is (ConvTemplate class in cryodrgn/models.py. In thi
 <img width="964" alt="image" src="https://github.com/user-attachments/assets/ed448e4a-3097-473c-8d2a-d50725e1c735">
 
 
-The architecture of pose corrector is:
+The architecture of dynamics decoder is:
 
-<img width="409" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/7f0eac9a-ecc2-47b8-ad43-81674b62c326">
+<img width="354" height="106" alt="image" src="https://github.com/user-attachments/assets/dbbe08df-210f-465d-a3e6-94dac417f815" />
 
 
 
