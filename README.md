@@ -67,6 +67,9 @@ The architecture of dynamics decoder is:
 
 OPUS-TOMO takes the **3D subtomograms** as input directly. The capacity of OPUS-TOMO is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/, this implementation is GPU-accelerated with a user-friendly GUI!). OPUS-TOMO also enables the structural heterogeneity anlaysis using **the simplest statistic methods, PCA and KMeans clustering**. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules. Specifically, **PCA** in learned latent space allows decomposing structural variations of macromolecules in cryo-ET dataset into dinstinct modes that greatly facilitate reserchers' understandings. This is in a similar spirit to the Normal Mode Analysis (NMA) for macromolecules which investigates their movement modes.
 
+## C.reinhardtii ATP synthase <a name="atp"></a>
+The C. reinhardtii dataset is publicly available at EMPIAR-11830. OPUS-TOMO resolved the rotary substates of ATP synthase in situ.
+<img width="1009" height="514" alt="image" src="https://github.com/user-attachments/assets/82b8f8b2-4931-4922-ab6f-3f972ea83052" />
 
 ## S.pombe 80S Ribosome <a name="80s"></a>
 The S.pombe dataset is publicly available at EMPIAR-10988 (https://www.ebi.ac.uk/empiar/EMPIAR-10988/).
@@ -77,7 +80,7 @@ functionally important subpopulations. The results are deposited in https://zeno
 
 
 
-## FAS <a name="fas"></a>
+## S. pombe FAS <a name="fas"></a>
 
 It can even reconstruct higher resolution structure for FAS in EMPIAR-10988 by clustering 221 particles from 4800 noisy subtomograms picked by template matching!
 The template matching and subtomogram averaging results are in the folder https://drive.google.com/drive/folders/1OijHVrCu3M-OgqvNu_YZ4jW8OWn6OwaV?usp=drive_link, fasp_expanded.star stores the subtomogram averaging results after D3 symmetry expansion.
