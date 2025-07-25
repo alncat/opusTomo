@@ -11,59 +11,43 @@
 # Opus-TOMO <div id="opustomo">
 This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei (Benedict，本笃) Luo at the group of
 Prof. Jianpeng Ma at Fudan University. OPUS-TOMO works with **WARP/M** pipeline in a seamless way to facilitate high-resolution cryo-ET structure determination and reveal dynamic process for macromolecule in situ! Specifically, it can **filter template matching result to obtain highly homogeneous subtomogram set that achieves sub-nanometer resolution**. Secondly, it can **reconstruct dynamics in various scales from subtomogram averaging (STA) results** from **M**! OPUS-TOMO can even work with tomogram reconstructed by **AreTOMO**. The tutorials are in https://github.com/alncat/opusTomo/wiki!
-The preprint of OPUS-TOMO is available at https://www.biorxiv.org/content/10.1101/2024.06.30.601442 or https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.  Exemplar movies of the OPUS-TOMO is shown below:
+The preprint of OPUS-TOMO is available at https://www.biorxiv.org/content/10.1101/2024.06.30.601442 or https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.
+
+Structural heterogeneity is a central problem for cryo-ET which occurs at many stage of tomography processing. Specifically, at the very first stage, after reconstructing a tomogram, you then encounter the problem to pick subtomograms corresponding to macromolecule of interest from the tomogram. Given the abundance of different molecules inside the
+cell sample, subtomogram picking faces large challenges from structural heterogeneity. At a later stage, when you have obtained a purer set of subtomograms for the molecule of interest, you may still encounter the structural heterogeneity problem as the molecule is in constant dynamics in cell environment. 
+The vitrified samples then preserves lots of different conformations and compositions of the molecule of interest.
+
+The main functionality of OPUS-TOMO is reconstructing conformational and compositonal changes at all kinds of stages from cryo-ET data end-to-end! OPUS-TOMO can be applied to data analysis at any stage, even when you are just picking particles. Using the template matching result with determined pose from **pyTOM**, 
+OPUS-TOMO can be used to filter picked particles! At later stage, OPUS-TOMO can not only disentangle 3D structural information by reconstructing different compositions, but also reconstruct continous conformational dynamics for the macromolecules in cellular environment. 
+
+Exemplar dynamics resolved by OPUS-TOMO is shown below:
+The elementary step of ATP synthesis by 120 degrees rotation of the central stalk and the 30 degrees rotation of the F_1 Head,
+
+https://github.com/user-attachments/assets/4cbb29f6-f1fa-48bb-a555-50845fe1b50e
+
+For S. pombe 80S ribosome, a part of translocation dynamics resolved by traversing PC3, which shows the translocation of A/T- and P- site tRNAs to A/P- and P/E- site tRNAs.
+A superb reference for the translation elongation cycle can be found in Ranjan's work, https://www.embopress.org/doi/full/10.15252/embj.2020106449 .
+
+https://github.com/user-attachments/assets/231ac7b9-0f43-4234-8617-49c3f3e30aee
+
+
 A part of translation elongation cycle resolved by traversing PC9, which shows the translocation of A/T- tRNAs to A-site and the exit of E-site tRNA for Cm-treated M. pneumoniae 70S ribosome.
 The model is trained using M refined subtomograms.
 
 https://github.com/user-attachments/assets/ea9d12d1-29f0-4572-b1d4-3c22d1c77d89
 
-The movie without cropping
 
+Another important function of OPUS-TOMO is clustering the template matching result and achiving high-resolution reconstruction! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
+<img width="1045" height="612" alt="image" src="https://github.com/user-attachments/assets/b09ccb2d-8931-4119-b185-a571b06c0571" />
 
-https://github.com/user-attachments/assets/6e04a762-9bbb-4a69-a485-6803a39a6b4b
+<img width="778" height="573" alt="image" src="https://github.com/user-attachments/assets/4ef8ed14-26ea-435d-86a5-85ef0e860dbf" />
 
-Clustering the template matching result and achiving high-resolution reconstruction in one shot! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
-
-<img width="700" alt="image" src="https://github.com/user-attachments/assets/dc31b7c1-bc67-4ee6-82c6-de6ee4941868" />
-
-<img width="1225" alt="image" src="https://github.com/user-attachments/assets/15281466-a07e-40df-a860-d20487fadeaa" />
-
-<img width="416" alt="image" src="https://github.com/user-attachments/assets/32bb10fd-ecec-47ff-b5f3-ca70611cfc1f" />
-
-<img width="810" alt="image" src="https://github.com/user-attachments/assets/859013af-5713-4f21-99af-0a3a1957fca3" />
 
 The histograms shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
 TM Overlapping With DeePiCt refers to the number of subtomograms from Template Mathching that overlap with DeePiCt's result, and OPUS-TOMO
 refers to the number of subtomograms in classes 12-17 that overlaps with DeePiCt's result. TM Overlapping Ratio refers to the ratio of subtomograms that overlaps with 
 DeePiCt's result in each tilt series, and OPUS-TOMO refers to the ratio of subtomograms in classes 12-17 that overlaps with DeePiCt's result in each tilt series. It is worth noting that OPUS-TOMO is trained by using the subtomograms with their 
 orientation determined by template matching in pyTOM directly without any other processing. The template matching results for this case are in the folder https://drive.google.com/drive/folders/1xR_zD_nF9Hvw9S3nsjxxPR2DQmod3Fmu?usp=drive_link .
-
-The results for M. pneumoniae 70S ribosome,
-
-<img width="604" alt="image" src="https://github.com/user-attachments/assets/d3d02cfc-d2bd-4913-946c-40c82970cdfd" />
-
-For S. pombe 80S ribosome, a part of translation elongation cycle resolved by traversing PC8, which shows the translocation of A/T- and P- site tRNAs to A/P- and P/E- site tRNAs.
-A superb reference for the translation elongation cycle can be found in Ranjan's work, https://www.embopress.org/doi/full/10.15252/embj.2020106449 .
-
-https://github.com/alncat/opusTomo/assets/3967300/4fb1a46c-97bf-45ba-868d-b108cc2862f8
-
-The binding and disassociation of different cofactors resolved by traversing PC8
-
-https://github.com/alncat/opusTomo/assets/3967300/96d3bd65-26d0-4299-81a2-f1a72d88b1c2
-
-
-The movement of L1 stalk resolved by traversing PC12
-
-https://github.com/alncat/opusTomo/assets/3967300/d324098d-3cf8-407d-8091-ab738b7ae343
-
-Structural heterogeneity is a central problem for cryo-ET which occurs at many stage of tomography processing. Specifically, at the very first stage, after reconstructing a tomogram, you then encounter the problem to pick subtomograms corresponding to macromolecule of interest from the tomogram. Given the abundance of different molecules inside the
-cell sample, subtomogram picking faces large challenges from structural heterogeneity. At a later stage, when you have obtained a purer set of subtomograms for the molecule of interest, you may still encounter the structural heterogeneity problem as the molecule is in constant dynamics in cell environment. 
-The vitrified samples then preserves lots of different conformations and compositions of the molecule of interest.
-
-The main functionality of OPUS-TOMO is reconstructing conformational and compositonal changes at all kinds of stages from cryo-ET data end-to-end! OPUS-TOMO can be applied to data analysis at any stage, even when you are just picking particles. Using the template matching result with determined pose from pyTOM, 
-OPUS-TOMO can be used to filter picked particles! At later stage, OPUS-TOMO can not only disentangle 3D structural information by reconstructing different compositions, but also reconstruct continous conformational dynamics for the macromolecules in cellular environment. 
-
-OPUS-TOMO takes the **3D subtomograms** as input directly. The capacity of OPUS-TOMO is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/, this implementation is GPU-accelerated with a user-friendly GUI!). OPUS-TOMO also enables the structural heterogeneity anlaysis using **the simplest statistic methods, PCA and KMeans clustering**. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules. Specifically, **PCA** in learned latent space allows decomposing structural variations of macromolecules in cryo-ET dataset into dinstinct modes that greatly facilitate reserchers' understandings. This is in a similar spirit to the Normal Mode Analysis (NMA) for macromolecules which investigates their movement modes.
 
 The workflow of OPUS-TOMO is demonstrated as follows:
 <img width="653" height="301" alt="image" src="https://github.com/user-attachments/assets/9a20e483-6f9e-48b8-9ac9-b18c8ae1d289" />
@@ -81,13 +65,15 @@ The architecture of dynamics decoder is:
 
 <img width="354" height="106" alt="image" src="https://github.com/user-attachments/assets/dbbe08df-210f-465d-a3e6-94dac417f815" />
 
+OPUS-TOMO takes the **3D subtomograms** as input directly. The capacity of OPUS-TOMO is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/, this implementation is GPU-accelerated with a user-friendly GUI!). OPUS-TOMO also enables the structural heterogeneity anlaysis using **the simplest statistic methods, PCA and KMeans clustering**. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules. Specifically, **PCA** in learned latent space allows decomposing structural variations of macromolecules in cryo-ET dataset into dinstinct modes that greatly facilitate reserchers' understandings. This is in a similar spirit to the Normal Mode Analysis (NMA) for macromolecules which investigates their movement modes.
+
 
 ## S.pombe 80S Ribosome <a name="80s"></a>
 The S.pombe dataset is publicly available at EMPIAR-10988 (https://www.ebi.ac.uk/empiar/EMPIAR-10988/).
 In this dataset, OPUS-TOMO has shown superior structural disentanglement ability to capture continous structral changes into PCs of the composition latent space, and characterizes 
-structurally heterogeneous subpopulations. The results are deposited in https://zenodo.org/records/12631920.
+functionally important subpopulations. The results are deposited in https://zenodo.org/records/12631920.
 
-<img width="781" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/b2211c66-28f3-4562-a1f5-de77444aff04">
+<img width="1079" height="617" alt="image" src="https://github.com/user-attachments/assets/f329eefb-fe80-40a6-a98c-8b6f797eeb9b" />
 
 
 
