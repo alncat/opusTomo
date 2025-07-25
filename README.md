@@ -40,7 +40,7 @@ https://github.com/user-attachments/assets/ea9d12d1-29f0-4572-b1d4-3c22d1c77d89
 Another important function of OPUS-TOMO is clustering the template matching result and achiving high-resolution reconstruction! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
 <img width="1045" height="612" alt="image" src="https://github.com/user-attachments/assets/b09ccb2d-8931-4119-b185-a571b06c0571" />
 
-<img width="778" height="573" alt="image" src="https://github.com/user-attachments/assets/4ef8ed14-26ea-435d-86a5-85ef0e860dbf" />
+<img width="682" height="505" alt="image" src="https://github.com/user-attachments/assets/6b00e00a-f25e-4936-b928-73038caa45c9" />
 
 
 The histograms shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
