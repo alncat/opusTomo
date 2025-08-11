@@ -211,8 +211,8 @@ class Starfile():
             mrcs.append(mrc_i)
         #mrcs = [[x for x in part] for part in particles]
 
-        #if datadir is not None:
-        #    mrcs = [prefix_paths(mrcs, datadir) for mrc in mrcs]
+        if datadir is not None:
+            mrcs = [prefix_paths(x, datadir) for x in mrcs]
         #for path in set(mrcs):
         #    assert os.path.exists(path), f'{path} not found'
         header = mrc.parse_header(mrcs[0][0])
@@ -245,7 +245,7 @@ class Starfile():
             dataset = np.array([[x.get() for x in d] for d in dataset])
         return dataset
 
-    def get_drgn3dctfs(self, datadir=None, lazy=True):
+    def get_drgn3dctfs(self, datadir=None, lazy=True, tilt_step=3., tilt_range=60):
         '''
         Return ctfs of particles of the starfile
 
@@ -269,6 +269,7 @@ class Starfile():
         directory = Path("./subtomos")
         # check directory
         directory.mkdir(parents=True, exist_ok=True)
+        len_tilt = ((tilt_range*2)//tilt_step+1)
         for name, df in particles:
             #print(headers)
             #tilt = df['_rlnAngleTilt'].astype(float).to_numpy()
@@ -306,7 +307,7 @@ class Starfile():
             df['_rlnAngleRot'] = euler_i[:, 0]
             df['_rlnAngleTilt'] = euler_i[:, 1]
             df['_rlnAnglePsi'] = euler_i[:, 2]
-            df['_rlnCtfBfactor'] = -bfactor/4.
+            df['_rlnCtfBfactor'] = np.abs(bfactor)/4.
             #print(tilt_angle)
             #print(euler_i)
             #print(torch.max(torch.acos(axis_i[1][1:, 1].abs()))*180/np.pi)
@@ -315,11 +316,35 @@ class Starfile():
             df_subtomos.loc[len(df_subtomos)] = subtomo
             self.write_df(df, './subtomos/'+name+'_subtomo.star')
 
-            def_tlt = np.stack([tilt_angle.cpu().numpy(), defocusu, defocusv, defocusangle, voltage, cs, w, bfactor, scale], axis=1)
+            dummy_tlt = np.zeros((len_tilt, 9))
+            dummy_tlt[:, 0] = np.linspace(-tilt_range, tilt_range, len_tilt)
+            dummy_tlt[:, 1] = 2e4 #dfu
+            dummy_tlt[:, 2] = 2e4 #dfv
+            dummy_tlt[:, 4] = 300 #volt
+            dummy_tlt[:, 5] = 2.7 #cs
+
+
+            def_tlt = np.stack([tilt_angle.cpu().numpy(), defocusu, defocusv, defocusangle, voltage, cs, w, np.abs(bfactor)/4., scale], axis=1)
+            #sorted_def_tlt = def_tlt[def_tlt[:, 0].argsort()]
             df['_rlnAngleRot'] = 0.
             df['_rlnAngleTilt'] = tilt_angle
             df['_rlnAnglePsi'] = 0.
-            self.write_df(df, './subtomos/'+name+'_ctf.star')
+            dummy_tlt[:len(def_tlt)] = def_tlt
+
+            #mask = np.isclose(sorted_def_tlt[:, 0, None], dummy_tlt[:, 0], atol=tilt_step/2.-0.1)
+            ##print(def_tlt[:, 0], dummy_tlt[np.where(mask)[1]][:, 0],)
+            #print(sorted_def_tlt, dummy_tlt, mask)
+            #mask_indices = np.where(mask)[1]
+            #dummy_tlt[mask_indices] = sorted_def_tlt
+            #if dummy_tlt[dummy_tlt[:, -1] != 0.].shape[0] != def_tlt.shape[0]:
+            #    print(mask_indices, dummy_tlt, def_tlt)
+            #assert np.sum(np.abs(dummy_tlt[dummy_tlt[:, -1] != 0.] - sorted_def_tlt)) == 0.
+
+            dummy_tlt = pd.DataFrame(dummy_tlt)
+            dummy_tlt.columns = ['_rlnAngleTilt', '_rlnDefocusU', '_rlnDefocusV', '_rlnDefocusAngle', '_rlnVoltage', '_rlnSphericalAberration',
+                                 '_rlnAmplitudeContrast', '_rlnCtfBfactor', '_rlnCtfScalefactor']
+            #self.write_df(df, './subtomos/'+name+'_ctf.star')
+            self.write_df(dummy_tlt, './subtomos/'+name+'_ctf.star')
             #save as starfile
             #print(axis_i)
             #print(def_tlt.shape)

@@ -88,7 +88,7 @@ def load_warp_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False, 
         try:
             star = starfile.Starfile.load(mrcs_txt_star, relion31=relion31)
             particles = star.get_subtomos(datadir=datadir, lazy=lazy,)# key='_rlnCtfImage')
-            ctfs, ctf_files, ctf_params = star.get_warp3dctfs(datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range)
+            warp_ctfs, ctf_files, ctf_params = star.get_warp3dctfs(datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range)
         except Exception as e:
             if datadir is None:
                 datadir = os.path.dirname(mrcs_txt_star) # assume .mrcs files are in the same director as the starfile
@@ -97,9 +97,9 @@ def load_warp_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False, 
             else: raise RuntimeError(e)
     else:
         raise NotImplementedError
-    return particles, ctf_params, ctf_files
+    return particles, ctf_params, ctf_files, warp_ctfs
 
-def load_drgn_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
+def load_drgn_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False, tilt_step=3, tilt_range=60):
     '''
     Load particle stack from either a .mrcs file, a .star file, a .txt file containing paths to .mrcs files, or a cryosparc particles.cs file
 
@@ -111,12 +111,12 @@ def load_drgn_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
         try:
             star = starfile.Starfile.load(mrcs_txt_star, relion31=relion31)
             particles = star.get_drgn_subtomos(datadir=datadir, lazy=lazy,)# key='_rlnCtfImage')
-            ctfs, rots, rots0 = star.get_drgn3dctfs(datadir=datadir, lazy=lazy)
+            ctfs, rots, rots0 = star.get_drgn3dctfs(datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range)
         except Exception as e:
             if datadir is None:
                 datadir = os.path.dirname(mrcs_txt_star) # assume .mrcs files are in the same director as the starfile
                 particles = starfile.Starfile.load(mrcs_txt_star, relion31=relion31).get_particles(datadir=datadir, lazy=lazy)
-                ctfs, rots, rots0 = star.get_drgn3dctfs(datadir=datadir, lazy=lazy)
+                ctfs, rots, rots0 = star.get_drgn3dctfs(datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range)
             else: raise RuntimeError(e)
     else:
         raise NotImplementedError
@@ -341,10 +341,10 @@ class LazyTomoDRGNMRCData(data.Dataset):
     Class representing an .mrcs stack file -- images loaded on the fly
     '''
     def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
-                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75):
+                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75, tilt_step=3, tilt_range=60):
         #assert not keepreal, 'Not implemented error'
         assert mrcfile.endswith('.star')
-        particles, ctfs, rots, rots0 = load_drgn_subtomos(mrcfile, True, datadir=datadir, relion31=relion31)
+        particles, ctfs, rots, rots0 = load_drgn_subtomos(mrcfile, True, datadir=datadir, relion31=relion31, tilt_step=tilt_step, tilt_range=60)
         assert len(particles) == len(ctfs)
         N = len(particles)
         ny, nx = particles[0][0].get().shape
@@ -403,11 +403,11 @@ class LazyTomoWARPMRCData(data.Dataset):
     '''
     def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
                  window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75,
-                 tilt_step=2, tilt_range=50):
+                 tilt_step=2, tilt_range=50, read_ctf=False):
         #assert not keepreal, 'Not implemented error'
         assert mrcfile.endswith('.star')
         print(f"tilt_range is {tilt_range}, tilt_step is {tilt_step}")
-        particles, ctfs, ctf_files = load_warp_subtomos(mrcfile, True, datadir=datadir, relion31=relion31,
+        particles, ctfs, ctf_files, warp_ctfs = load_warp_subtomos(mrcfile, True, datadir=datadir, relion31=relion31,
                                                         tilt_step=tilt_step, tilt_range=tilt_range)
         self.tilt_step = tilt_step
         self.tilt_range = tilt_range
@@ -430,6 +430,8 @@ class LazyTomoWARPMRCData(data.Dataset):
         self.in_mem = in_mem
         self.ctfs = np.stack(ctfs, axis=0)
         self.ctf_files = ctf_files
+        self.warp_ctfs = warp_ctfs
+        self.read_ctf = read_ctf
         print("ctf is of shape: ", self.ctfs.shape)
         print("first ctf is: ", self.ctfs[0])
 
@@ -450,6 +452,8 @@ class LazyTomoWARPMRCData(data.Dataset):
         #standardize it
         part = (part - self.norm[0])/self.norm[1]
         ctf = self.ctfs[i]
+        if self.read_ctf:
+            ctf = self.warp_ctfs[i].get()
         return part, ctf, self.ctf_files[i]
 
     def __len__(self):

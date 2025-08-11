@@ -1826,7 +1826,7 @@ class VanillaDecoder(nn.Module):
 
             #image_fft: 8, D, H, W; c: 1, D, H, W; ref: 1, crop_D, crop_H, crop_W
             image_fft = image_fft*c[i:i+1].abs().pow(self.ctf_beta)
-            image_fft = self.bfactor_blurring(image_fft, bfactor/self.Apix**2)
+            image_fft = self.bfactor_blurring(image_fft, bfactor/2./self.Apix**2)
             image_fft = self.tilt_blurring(image_fft, bfactor/2./self.Apix**2)
             image_fft = fft.torch_irfft3_center(image_fft, center=True)
             image_fft = utils.crop_vol(image_fft, self.crop_vol_size)

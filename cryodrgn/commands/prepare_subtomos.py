@@ -97,6 +97,8 @@ def add_args(parser):
     group.add_argument('--plot', action='store_true', help='plot intermediate result')
     group.add_argument('--estpose', default=False, action='store_true', help='estimate pose')
     group.add_argument('--warp', default=False, action='store_true', help='using subtomograms from warp')
+    group.add_argument('--tilt-step', type=int, default=2, help='the interval between successive tilts (default: %(default)s)')
+    group.add_argument('--tilt-range', type=int, default=50, help='the range of tilt angles (default: %(default)s)')
 
     group = parser.add_argument_group('Encoder Network')
     group.add_argument('--enc-layers', dest='qlayers', type=int, default=3, help='Number of hidden layers (default: %(default)s)')
@@ -178,7 +180,8 @@ def main(args):
             data = dataset.LazyTomoDRGNMRCData(args.particles, norm=args.norm,
                                        real_data=args.real_data, invert_data=args.invert_data,
                                        ind=ind, keepreal=args.use_real, window=False,
-                                       datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac)
+                                       datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
+                                       tilt_step=args.tilt_step, tilt_range=args.tilt_range)
         else:
             raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
 
