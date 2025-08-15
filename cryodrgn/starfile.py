@@ -482,7 +482,6 @@ class Starfile():
 
         return dataset, mrc_files, ctfs
 
-
     def get_3dctfs(self, datadir=None, lazy=True):
         '''
         Return ctfs of particles of the starfile

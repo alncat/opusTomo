@@ -104,6 +104,7 @@ def add_args(parser):
     group.add_argument('--tilt-range', type=int, default=50, help='the range of tilt angles (default: %(default)s)')
     group.add_argument('--ctfalpha', type=float, default=0, help='the degree of ctf correction to experimental subtomogram (default: %(default)s)')
     group.add_argument('--ctfbeta', type=float, default=1, help='the degree of ctf correction to reconstruction of decoder (default: %(default)s)')
+    group.add_argument('--normalizectf', action='store_true', help='normalize ctf using backprojected grid weights (default: %(default)s)')
 
     group = parser.add_argument_group('Encoder Network')
     group.add_argument('--enc-layers', dest='qlayers', type=int, default=3, help='Number of hidden layers (default: %(default)s)')
@@ -287,9 +288,10 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         z_mu, z_logvar, z = 0., 0., 0.
 
     # add bfactors to ctf_params, the second from last column stores bfactor, the last column stores scale
+    random_b = (np.random.rand() - 0.5)*args.angpix
     #random_b = (np.random.normal())/3.
     #random_b = np.random.gamma(1., 0.6)
-    random_b = torch.randn_like(c[..., 0, -2])/3.
+    #random_b = torch.randn_like(c[..., 0, -2])/3.
     #c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
 
     plot = args.plot and it % (args.log_interval) == B
@@ -340,7 +342,8 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         # decode latents
         decout = model.vanilla_decode(rot, trans, z=z, save_mrc=save_image, eulers=euler,
                                       ref_fft=y, ctf_param=c, encout=encout, mask=mask_real, body_poses=body_poses,
-                                      ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename, write_ctf=args.write_ctf, bfactor=args.bfactor)
+                                      ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename,
+                                      write_ctf=args.write_ctf, bfactor=np.abs(args.bfactor + random_b), snr2=snr2)
 
         if decout["affine"] is not None:
             posetracker.set_pose(decout["affine"][0].detach(), decout["affine"][1].detach(), ind)
@@ -816,7 +819,8 @@ def main(args):
                 masks_params=masks_params,
                 z_affine_dim=args.zaffinedim,
                 ctf_alpha=args.ctfalpha,
-                ctf_beta=args.ctfbeta)
+                ctf_beta=args.ctfbeta,
+                normalize_ctf=args.normalizectf)
 
     # use downsampled ctf grid
     ctf_grid = CTFGrid(model.render_size+1, device)

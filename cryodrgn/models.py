@@ -52,7 +52,8 @@ class HetOnlyVAE(nn.Module):
             num_bodies=0,
             z_affine_dim=4,
             ctf_alpha=0.,
-            ctf_beta=1.):
+            ctf_beta=1.,
+            normalize_ctf=False):
         super(HetOnlyVAE, self).__init__()
         self.lattice = lattice
         self.zdim = zdim
@@ -67,6 +68,7 @@ class HetOnlyVAE(nn.Module):
         self.z_affine_dim = z_affine_dim
         self.ctf_alpha = ctf_alpha
         self.ctf_beta = ctf_beta
+        self.normalize_ctf = normalize_ctf
         if ref_vol is not None:
             in_vol_nonzeros = torch.nonzero(ref_vol)
             in_vol_mins, _ = in_vol_nonzeros.min(dim=0)
@@ -132,7 +134,8 @@ class HetOnlyVAE(nn.Module):
                                    symm=self.symm, ctf_grid=ctf_grid,
                                    fixed_deform=self.fixed_deform, deform_emb_size=self.deform_emb_size,
                                    render_size=self.encoder_image_size, down_vol_size=self.down_vol_size, tmp_prefix=tmp_prefix,
-                                   masks_params=self.masks_params, num_bodies=self.num_bodies, ctf_alpha=self.ctf_alpha, ctf_beta=self.ctf_beta)
+                                   masks_params=self.masks_params, num_bodies=self.num_bodies, affine_dim=self.z_affine_dim,
+                                   ctf_alpha=self.ctf_alpha, ctf_beta=self.ctf_beta, normalize_ctf=self.normalize_ctf)
 
     @classmethod
     def load(self, config, weights=None, device=None):
@@ -244,7 +247,8 @@ class HetOnlyVAE(nn.Module):
 
     def vanilla_decode(self, rots, trans, z=None, save_mrc=False, eulers=None,
                        ref_fft=None, ctf_param=None, encout=None, mask=None,
-                       body_poses=(None, None), ctf_grid=None, estpose=False, ctf_filename=None, write_ctf=False, bfactor=4.):
+                       body_poses=(None, None), ctf_grid=None, estpose=False,
+                       ctf_filename=None, write_ctf=False, bfactor=4., snr2=1.):
         in_template = None
         if self.encode_mode != 'deform':
             #randomly perturb rotation
@@ -255,10 +259,12 @@ class HetOnlyVAE(nn.Module):
         else:
             #for deform embdding, the encoding will come from z
             encout = {'encoding': None}
+
+        snr = np.sqrt(np.abs(snr2))
         decout = self.decoder(rots, trans, z=z, in_template=in_template, save_mrc=save_mrc,
                         euler=eulers, ref_fft=ref_fft, ctf_param=ctf_param,
                         body_euler=body_poses[0], body_trans=body_poses[1], ctf_grid=ctf_grid,
-                        estimate_pose=estpose, ctf_filename=ctf_filename, bfactor=bfactor)
+                        estimate_pose=estpose, ctf_filename=ctf_filename, bfactor=bfactor, snr=snr)
         #decout["y_recon_ori"] = y_recon_ori = decout["y_recon"]
         y_recon_ori = decout["y_recon_ori"]
         pad_size = (self.render_size - self.down_vol_size)//2
@@ -344,7 +350,8 @@ def load_decoder(config, weights=None, device=None):
 def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activation=nn.ReLU, templateres=128,
                 ref_vol=None, Apix=1., template_type=None, warp_type=None,
                 symm=None, ctf_grid=None, fixed_deform=False, deform_emb_size=2, render_size=140,
-                down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4, ctf_alpha=0, ctf_beta=1):
+                down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4,
+                ctf_alpha=0, ctf_beta=1, normalize_ctf=False):
     if enc_type == 'none':
         if domain == 'hartley':
             model = ResidLinearMLP(in_dim, layers, dim, 1, activation)
@@ -359,7 +366,7 @@ def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activati
                               deform_emb_size=deform_emb_size,
                               zdim=in_dim - 3, render_size=render_size,
                               down_vol_size=down_vol_size, tmp_prefix=tmp_prefix, masks_params=masks_params, num_bodies=num_bodies,
-                              affine_dim=affine_dim, ctf_alpha=ctf_alpha, ctf_beta=ctf_beta)
+                              affine_dim=affine_dim, ctf_alpha=ctf_alpha, ctf_beta=ctf_beta, normalize_ctf=normalize_ctf)
     else:
         model = PositionalDecoder if domain == 'hartley' else FTPositionalDecoder
         return model(in_dim, D, layers, dim, activation, enc_type=enc_type, enc_dim=enc_dim)
@@ -1084,7 +1091,7 @@ class VanillaDecoder(nn.Module):
     def __init__(self, D, in_vol=None, Apix=1., template_type=None, templateres=256, warp_type=None, symm_group=None,
                  ctf_grid=None, fixed_deform=False, deform_emb_size=2, zdim=8, render_size=140,
                  use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4,
-                 ctf_alpha=0., ctf_beta=1.):
+                 ctf_alpha=0., ctf_beta=1., normalize_ctf=False):
         super(VanillaDecoder, self).__init__()
         self.D = D
         self.vol_size = (D - 1)
@@ -1100,7 +1107,8 @@ class VanillaDecoder(nn.Module):
         self.tmp_prefix = tmp_prefix
         self.ctf_alpha = ctf_alpha
         self.ctf_beta = ctf_beta
-        log("decoder: correct ctf using alpha {}, beta {}".format(self.ctf_alpha, self.ctf_beta))
+        self.normalize_ctf = normalize_ctf
+        log("decoder: correct ctf using alpha {}, beta {}, and normalize ctf {}".format(self.ctf_alpha, self.ctf_beta, self.normalize_ctf))
 
         if symm_group is not None:
             self.symm_group = symm_groups.SymmGroup(symm_group)
@@ -1508,7 +1516,7 @@ class VanillaDecoder(nn.Module):
 
     def forward(self, rots, trans, z=None, in_template=None, euler=None, ref_fft=None, ctf_param=None,
                 save_mrc=False, refine_pose=True, body_euler=None, body_trans=None, ctf_grid=None, estimate_pose=False,
-                ctf_filename=None, write_ctf=False, bfactor=2.):
+                ctf_filename=None, write_ctf=False, bfactor=2., snr=1.):
         #generate a projection
         if self.use_conv_template:
             #print((z[0] == z[1]).sum())
@@ -1572,9 +1580,9 @@ class VanillaDecoder(nn.Module):
         #ctf_param[:, :, 0] += rand_tilt
 
         if ctf_param.shape[-1] == 9:
-            c = ctf.compute_3dctfaniso(ref_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False,)
+            c = ctf.compute_3dctfaniso(ref_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False, use_warp=self.normalize_ctf)
         else:
-            c = ctf.compute_3dctf(ref_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False, use_warp=False)
+            c = ctf.compute_3dctf(ref_fft, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1), Apix=self.Apix, plot=False, use_warp=self.normalize_ctf)
 
 
 
@@ -1785,7 +1793,7 @@ class VanillaDecoder(nn.Module):
                         #print(ref_i_ft.shape, c.shape)
                         #ref_i_ft *= torch.sign(c[i:i+1])
                         ref_i_ft *= c[i:i+1].abs().pow(self.ctf_alpha)*torch.sign(c[i:i+1]) # 1, Z, Y, X, * 1, Z, Y, X
-                        ref_i_ft = self.bfactor_blurring(ref_i_ft, -(bfactor)/self.Apix**2)
+                        ref_i_ft = self.bfactor_blurring(ref_i_ft, -(bfactor)/self.Apix**2)/np.exp(bfactor*np.pi**2/(10.)**2)
                         ref_i = fft.torch_irfft3_center(ref_i_ft, center=True)
                         ref_i = utils.crop_vol(ref_i, self.crop_vol_size)
 
@@ -1794,6 +1802,8 @@ class VanillaDecoder(nn.Module):
                         #applying 3d mask to reference here
                         ref = ref_i*(valid>0)
                         ref = ref.squeeze(1)
+                        #randomly change contrast
+                        ref *= (1. + (np.random.rand() - 0.5)*snr)
                         # if you want to translate the 2d experimental image
                         #ref = self.transformer.translate_2d(ref_i, -t_i/self.vol_size*2.).squeeze(1)
                     else:
@@ -1826,7 +1836,7 @@ class VanillaDecoder(nn.Module):
 
             #image_fft: 8, D, H, W; c: 1, D, H, W; ref: 1, crop_D, crop_H, crop_W
             image_fft = image_fft*c[i:i+1].abs().pow(self.ctf_beta)
-            image_fft = self.bfactor_blurring(image_fft, bfactor/2./self.Apix**2)
+            image_fft = self.bfactor_blurring(image_fft, bfactor/2./self.Apix**2)*max(np.sqrt(bfactor/2./self.Apix**2)**3, 0.4)*self.ctf_beta*2.
             image_fft = self.tilt_blurring(image_fft, bfactor/2./self.Apix**2)
             image_fft = fft.torch_irfft3_center(image_fft, center=True)
             image_fft = utils.crop_vol(image_fft, self.crop_vol_size)

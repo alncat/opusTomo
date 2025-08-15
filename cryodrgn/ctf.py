@@ -137,7 +137,7 @@ def compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift=0, bfactor=None
     return -ctf
 
 def compute_3dctfaniso(y, centered_freqs, freqs, tilts, dfu, dfv, dfang, volt, cs, w, bfactor=None, scale=None,
-                       phase_shift=0, Apix=1., plot=True, phaseflipped=False):
+                       phase_shift=0, Apix=1., plot=True, use_warp=False):
     # compute a ctf in 3d volume
     # compute a stack of ctfs
     #print(freqs.shape, tilts.shape, dfu.shape, bfactor.shape)
@@ -185,7 +185,11 @@ def compute_3dctfaniso(y, centered_freqs, freqs, tilts, dfu, dfv, dfang, volt, c
     pad_size = Y//2
     # tensor is ordered as, after padding the zero frequency is centered at Y//2
     ctfs = F.pad(ctfs, (0, 0, pad_size, pad_size-1)) #N, T, H, D, W
-    ctfs /= scale.sum(dim=1, keepdim=True).unsqueeze(-1) #normalize ctf by number of tilts
+    if use_warp:
+        #print(scale.shape, ctfs.shape)
+        gridweight = torch.ones_like(ctfs)*scale.unsqueeze(-1)
+    else:
+        ctfs /= scale.sum(dim=1, keepdim=True).unsqueeze(-1) #normalize ctf by number of tilts
     if plot:
         fig, axes = plt.subplots(nrows=1, ncols=2)
         #print(ctfs.shape,)
@@ -210,14 +214,24 @@ def compute_3dctfaniso(y, centered_freqs, freqs, tilts, dfu, dfv, dfang, volt, c
     grid_rotated = grid_rotated.view(N*T, Y, X, 2)
     #sampling ctfs
     ctfs_3d = F.grid_sample(ctfs, grid_rotated, mode='bicubic', align_corners=True)
+    if use_warp:
+        gridweight = gridweight.view(N*T, Y, Y, X)
+        gridweight = F.grid_sample(gridweight, grid_rotated, mode='bilinear', align_corners=True)
 
     #print the some ctfs
     #summing along the tilt channel to obtain 3d ctf
     ctfs_3d = ctfs_3d.view(N, T, Y, Y, X)#.sum(dim=1) #(N, Y, Z, X)
+    if use_warp:
+        gridweight = gridweight.view(N, T, Y, Y, X)
+
     if plot:
         axes[1].imshow(ctfs_3d[0, -1, 0].cpu().numpy(), cmap=cmap)
         plt.show()
     ctfs_3d = ctfs_3d.sum(dim=1)
+    if use_warp:
+        gridweight = gridweight.abs().sum(dim=1) + 1e-3
+        ctfs_3d /= (gridweight)
+
     #rearrange ctf from x, z, y to x, y, z order, n y z x -> n z y x
     ctfs_3d = torch.permute(ctfs_3d, [0, 2, 1, 3])
     #print(ctfs_3d[0, Y//2-1, Y//2-1, 0])
@@ -240,7 +254,8 @@ def compute_3dctfaniso(y, centered_freqs, freqs, tilts, dfu, dfv, dfang, volt, c
     # if the input subtomograms are phaseflipped, then ctf should have no phase information
     return ctfs_3d
 
-def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=None, scale=None, phase_shift=0, Apix=1., plot=True, use_warp=True):
+def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=None, scale=None,
+                  phase_shift=0, Apix=1., plot=True, use_warp=True):
     # compute a ctf in 3d volume
     # compute a stack of ctfs
     #print(freqs.shape, tilts.shape, dfu.shape, bfactor.shape)
@@ -329,7 +344,7 @@ def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=Non
         plt.show()
     ctfs_3d = ctfs_3d.sum(dim=1) #(N, Y, Z, X)
     if use_warp:
-        ctfsweight = ctfsweight.sum(dim=1) + 1e-3
+        ctfsweight = ctfsweight.abs().sum(dim=1) + 1e-3
         #print(ctfsweight.min(), ctfsweight.max())
         ctfs_3d /= (ctfsweight)
     #rearrange ctf from x, z, y to x, y, z order
