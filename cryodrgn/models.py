@@ -235,7 +235,7 @@ class HetOnlyVAE(nn.Module):
             logstd = encout["z_logstd"]
             z      = encout["z"]
             encout["encoding"] = z
-            x3d_center = encout["rotated_x"]
+            #x3d_center = encout["rotated_x"]
             #diff = (x3d_center.unsqueeze(1) - x3d_center.unsqueeze(0)).pow(2).sum(dim=(-1,-2))
             diff = (z.unsqueeze(1) - z.unsqueeze(0)).pow(2).sum(dim=(-1))
             top = torch.topk(diff, k=3, dim=-1, largest=False, sorted=True)
@@ -672,7 +672,12 @@ class Encoder(nn.Module):
         return (img*phase_shift)
 
     def forward(self, x, rots, trans, losslist=[], eulers=None, snr=1., body_euler=None, body_trans=None, ctf_embedding=None):
-        #2d to 3d suppose x is (N, 1, D, H, W)
+        #3d to 3d suppose x is list of (N, 1, D, H, W)
+        #print(len(x), eulers.get_device())
+        #get x for corresponding device
+        #x = torch.stack([torch.from_numpy(arr).float() for arr in x[eulers.get_device()]])
+        #x = x.to(eulers.get_device(), non_blocking=True)
+        x = x.unsqueeze(1)
         B = x.shape[0]
         #print(x.shape)
         if ctf_embedding is not None:
@@ -724,9 +729,9 @@ class Encoder(nn.Module):
                 x_fft = utils.crop_fft3d(x_fft, self.render_size)*(self.render_size/self.vol_size)**3
                 x_fft = self.translate_ft3d(x_fft, -trans[i:i+1]*self.render_size/self.vol_size)
                 # x_i_ori is the original image after shifting
-                x_i_ori = fft.torch_irfft3_center(x_fft, center=True)
-                x_i_ori = utils.crop_vol(x_i_ori, self.crop_vol_size)
-                x3d_center.append(x_i_ori.squeeze(1))
+                #x_i_ori = fft.torch_irfft3_center(x_fft, center=True)
+                #x_i_ori = utils.crop_vol(x_i_ori, self.crop_vol_size)
+                #x3d_center.append(x_i_ori.squeeze(1))
                 b_factor = 0.5*np.random.rand() - 0.125
                 x_fft_b = self.bfactor_blurring(x_fft, b_factor)
                 # x_i is randomly blurred
@@ -773,7 +778,8 @@ class Encoder(nn.Module):
             #print((x3d_down - x3d_downp).abs().mean()/((x3d_down).abs()+(x3d_downp).abs()).mean())
             #pass through convolution nn
         x3d_downs = torch.cat(x3d_downs, dim=0)
-        x3d_center = torch.cat(x3d_center, dim=0)
+        #x3d_center = torch.cat(x3d_center, dim=0)
+
         #print(x3d_downs.shape)
         # mask input
         if self.use_mask:
@@ -810,7 +816,7 @@ class Encoder(nn.Module):
             #losses["kldiv"] = torch.mean(- logstd + 0.5 * mu ** 2 + 0.5 * torch.exp(2 * logstd), dim=-1)
             losses["kldiv"] = torch.sum(-logstd, dim=-1) + 0.5*losses["std2"] + 0.5*losses["mu2"]
 
-        return {"z":z, "z_mu": mu, "losses": losses, "z_logstd": logstd, "rotated_x": x3d_center, "skip": enc2}
+        return {"z":z, "z_mu": mu, "losses": losses, "z_logstd": logstd, "rotated_x": None, "skip": None}
 
 
 class SpatialTransformer(nn.Module):
@@ -1239,6 +1245,28 @@ class VanillaDecoder(nn.Module):
         img = img*torch.exp(-s2*bfactor*np.pi**2*tilt_angle.abs())
         return img
 
+    def translate_ft3d(self, img, t):
+        '''
+        Inputs:
+            img: FT of image (B x img_dims x 3)
+            t: shift in pixels (B x T x 3)
+        Returns:
+            Shifted images (B x T x img_dims x 2)
+        '''
+        # F'(k) = exp(-2*pi*k*x0)*F(k)
+        coords = self.freqs3d #(D, H, W, 3)
+        t = t.unsqueeze(-2).unsqueeze(-1) # BxCx1x3x1 to be able to do bmm
+        #print(t.shape)
+        tfilt = coords @ t * 2 * np.pi # BxCxHxWx1
+        tfilt = tfilt.squeeze(-1) # BxCxHxW
+        #print(coords.shape, t.shape, tfilt.shape)
+        c = torch.cos(tfilt) # BxHxW
+        s = torch.sin(tfilt) # BxHxN
+        phase_shift = torch.view_as_complex(torch.stack([c, s], -1))#.unsqueeze(1)
+        #phase_shift = phase_shift.to(img.get_device())
+        #print(t.shape, img.shape, phase_shift.shape)
+        return (img*phase_shift)
+
     def symmetrise_template(self, template, grid):
         B = template.shape[0]
         symm_template = template
@@ -1517,6 +1545,12 @@ class VanillaDecoder(nn.Module):
     def forward(self, rots, trans, z=None, in_template=None, euler=None, ref_fft=None, ctf_param=None,
                 save_mrc=False, refine_pose=True, body_euler=None, body_trans=None, ctf_grid=None, estimate_pose=False,
                 ctf_filename=None, write_ctf=False, bfactor=2., snr=1.):
+
+        #ref_fft = torch.stack([torch.from_numpy(arr).float() for arr in ref_fft[euler.get_device()]])
+        #ref_fft = ref_fft.to(euler.get_device(), non_blocking=True)
+        #ctf_param = torch.stack([torch.from_numpy(arr).float() for arr in ctf_param[euler.get_device()]])
+        #ctf_param = ctf_param.to(euler.get_device(), non_blocking=True)
+
         #generate a projection
         if self.use_conv_template:
             #print((z[0] == z[1]).sum())
@@ -1786,14 +1820,17 @@ class VanillaDecoder(nn.Module):
                         ##so if the ref is rotated by rand_tilt using rotate_2d, the 3dctf should be rotated by tilt + rand_tilt
                         #ref_i = self.transformer.rotate_2d(ref_i, rand_tilt, mode='bicubic')
                         #ref_i = torch.permute(ref_i, [0, 2, 1, 3])
+                        #down sample and shift image
+                        x_fft = fft.torch_rfft3_center(ref_i, center=True)
+                        x_fft = utils.crop_fft3d(x_fft, self.render_size)*(self.render_size/self.vol_size)**3
+                        ref_i_ft = self.translate_ft3d(x_fft, -trans[i:i+1]*self.render_size/self.vol_size)
 
-                        ref_i = self.transformer.pad3d(ref_i, self.render_size)
-                        ref_i_ft = fft.torch_rfft3_center(ref_i, center=True)
                         #ctf correction by phase flipping and sqrt of ctf, sqrt(ctf)*ctf.sign()
                         #print(ref_i_ft.shape, c.shape)
                         #ref_i_ft *= torch.sign(c[i:i+1])
                         ref_i_ft *= c[i:i+1].abs().pow(self.ctf_alpha)*torch.sign(c[i:i+1]) # 1, Z, Y, X, * 1, Z, Y, X
-                        ref_i_ft = self.bfactor_blurring(ref_i_ft, -(bfactor)/self.Apix**2)/np.exp(bfactor*np.pi**2/(10.)**2)
+                        bfactor_shift = np.random.rand()*bfactor*0.2
+                        ref_i_ft = self.bfactor_blurring(ref_i_ft, -(bfactor-bfactor_shift)/self.Apix**2)/np.exp((bfactor-bfactor_shift)*np.pi**2/(10.)**2)
                         ref_i = fft.torch_irfft3_center(ref_i_ft, center=True)
                         ref_i = utils.crop_vol(ref_i, self.crop_vol_size)
 
@@ -1835,9 +1872,10 @@ class VanillaDecoder(nn.Module):
             #print(image_fft.shape, c.shape, ref.shape)
 
             #image_fft: 8, D, H, W; c: 1, D, H, W; ref: 1, crop_D, crop_H, crop_W
-            image_fft = image_fft*c[i:i+1].abs().pow(self.ctf_beta)
-            image_fft = self.bfactor_blurring(image_fft, bfactor/2./self.Apix**2)*max(np.sqrt(bfactor/2./self.Apix**2)**3, 0.4)*self.ctf_beta*2.
-            image_fft = self.tilt_blurring(image_fft, bfactor/2./self.Apix**2)
+            ctf_beta = self.ctf_beta
+            image_fft = image_fft*c[i:i+1].abs().pow(ctf_beta)
+            image_fft = self.bfactor_blurring(image_fft, (bfactor+bfactor_shift)/2./self.Apix**2)*max(np.sqrt((bfactor+bfactor_shift)/2./self.Apix**2)**3, 0.4)*ctf_beta*2.
+            image_fft = self.tilt_blurring(image_fft, (bfactor+bfactor_shift)/2./self.Apix**2)
             image_fft = fft.torch_irfft3_center(image_fft, center=True)
             image_fft = utils.crop_vol(image_fft, self.crop_vol_size)
             image = utils.crop_vol(image, self.crop_vol_size)

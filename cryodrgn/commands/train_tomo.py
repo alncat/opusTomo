@@ -68,8 +68,13 @@ def add_args(parser):
     group.add_argument('--max-threads', type=int, default=16, help='Maximum number of CPU cores for FFT parallelization (default: %(default)s)')
 
     group = parser.add_argument_group('Tilt series')
-    group.add_argument('--tilt', help='Particles (.mrcs)')
-    group.add_argument('--tilt-deg', type=float, default=45, help='X-axis tilt offset in degrees (default: %(default)s)')
+    group.add_argument('--warp', default=False, action='store_true', help='using subtomograms from warp')
+    group.add_argument('--readctf', default=False, action='store_true', help='Reading ctfs from warp')
+    group.add_argument('--tilt-step', type=int, default=2, help='the interval between successive tilts (default: %(default)s)')
+    group.add_argument('--tilt-range', type=int, default=50, help='the range of tilt angles (default: %(default)s)')
+    group.add_argument('--ctfalpha', type=float, default=0, help='the degree of ctf correction to experimental subtomogram (default: %(default)s)')
+    group.add_argument('--ctfbeta', type=float, default=1, help='the degree of ctf correction to reconstruction of decoder (default: %(default)s)')
+    group.add_argument('--normalizectf', action='store_true', help='normalize ctf using backprojected grid weights (default: %(default)s)')
 
     group = parser.add_argument_group('Training parameters')
     group.add_argument('-n', '--num-epochs', type=int, default=20, help='Number of training epochs (default: %(default)s)')
@@ -98,13 +103,6 @@ def add_args(parser):
     group.add_argument('--pose-only', action='store_true', help='train pose encoder only')
     group.add_argument('--plot', action='store_true', help='plot intermediate result')
     group.add_argument('--estpose', default=False, action='store_true', help='estimate pose')
-    group.add_argument('--warp', default=False, action='store_true', help='using subtomograms from warp')
-    group.add_argument('--readctf', default=False, action='store_true', help='Reading ctfs from warp')
-    group.add_argument('--tilt-step', type=int, default=2, help='the interval between successive tilts (default: %(default)s)')
-    group.add_argument('--tilt-range', type=int, default=50, help='the range of tilt angles (default: %(default)s)')
-    group.add_argument('--ctfalpha', type=float, default=0, help='the degree of ctf correction to experimental subtomogram (default: %(default)s)')
-    group.add_argument('--ctfbeta', type=float, default=1, help='the degree of ctf correction to reconstruction of decoder (default: %(default)s)')
-    group.add_argument('--normalizectf', action='store_true', help='normalize ctf using backprojected grid weights (default: %(default)s)')
 
     group = parser.add_argument_group('Encoder Network')
     group.add_argument('--enc-layers', dest='qlayers', type=int, default=3, help='Number of hidden layers (default: %(default)s)')
@@ -142,8 +140,8 @@ def train_batch(model, lattice, y, yt, rot, trans, optim, beta,
         model.train()
     else:
         model.eval()
-    if trans is not None:
-        y, yt = preprocess_input(y, yt, lattice, trans, vanilla=vanilla)
+    #if trans is not None:
+    #    y, yt = preprocess_input(y, yt, lattice, trans, vanilla=vanilla)
     z_mu, z_logstd, z, y_recon, y_recon_tilt, losses, y, mus, \
         euler_samples, y_recon_ori, neg_mus, mask_sum, body_poses_pred = run_batch(
                                                                  model, lattice, y, yt, rot,
@@ -269,9 +267,9 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
               args=None, euler=None, posetracker=None, data=None, snr2=1., body_poses=None, ctf_filename=None):
     use_tilt = yt is not None
     use_ctf = ctf_params is not None
-    B = y.size(0)
+    B = len(ind)
     D = lattice.D
-    W = y.size(-1)
+    W = y[0][0].shape[-1]
     out_size = D - 1
     # get real mask
     mask_real = None
@@ -288,7 +286,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         z_mu, z_logvar, z = 0., 0., 0.
 
     # add bfactors to ctf_params, the second from last column stores bfactor, the last column stores scale
-    random_b = (np.random.rand() - 0.5)*args.angpix
+    #random_b = (np.random.rand() - 0.5)*args.angpix
     #random_b = (np.random.normal())/3.
     #random_b = np.random.gamma(1., 0.6)
     #random_b = torch.randn_like(c[..., 0, -2])/3.
@@ -310,7 +308,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
                 #assert diff.shape[-1] == model.encoder_image_size, "y shape {y.shape[-1]} should equal with {model.encoder_image_size}"
 
             if plot:
-                print(f"ctf {c.shape}, y {y.shape}")
+                print(f"ctf {c[0][0].shape}, y {y[0][0].shape}")
                 #print(c[...,-1])
                 #utils.plot_image(axes, exp_fac.detach().cpu().numpy(), 0)
                 #utils.plot_image(axes, i_c[d_i,d_i,...].detach().cpu().numpy(), d_i, 0, log=True)
@@ -325,9 +323,10 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         z, encout = model.vanilla_encode(diff, rot, trans, eulers=euler, num_gpus=args.num_gpus, snr2=snr2,
                                          body_poses=body_poses,)
                                          #ctf_param=torch.cat((ctf_param[:,1:], random_b.unsqueeze(-1).to(ctf_param.get_device())), dim=-1))
-        # set y to centered one
-        if args.encode_mode in ["grad"]:
-            y = encout['rotated_x']
+        ## set y to centered one
+        #if args.encode_mode in ["grad"]:
+        #    y = encout['rotated_x']
+        #    #print(len(y), len(y[0]))
         #print(z - encout['z_mu'])
         # sample nearest neighbors
         #posetracker.set_emb(encout["z_mu"][:, :args.zdim], ind)
@@ -343,7 +342,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         decout = model.vanilla_decode(rot, trans, z=z, save_mrc=save_image, eulers=euler,
                                       ref_fft=y, ctf_param=c, encout=encout, mask=mask_real, body_poses=body_poses,
                                       ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename,
-                                      write_ctf=args.write_ctf, bfactor=np.abs(args.bfactor + random_b), snr2=snr2)
+                                      write_ctf=args.write_ctf, bfactor=np.abs(args.bfactor), snr2=snr2)
 
         if decout["affine"] is not None:
             posetracker.set_pose(decout["affine"][0].detach(), decout["affine"][1].detach(), ind)
@@ -391,6 +390,8 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
                 #utils.plot_image(axes, encout["rotated_x"][d_i,...].detach().cpu().numpy(), d_j, 0, log=True, log_msg="rotated_x")
                 utils.plot_image(axes, diff[0,0,...].detach().cpu().numpy(), 0, 0, log=True, log_msg="y0")
                 utils.plot_image(axes, diff[d_j,0,...].detach().cpu().numpy(), d_j, 0, log=True, log_msg="y1")
+                #utils.plot_image(axes, diff[0][0], 0, 0, log=True, log_msg="y0")
+                #utils.plot_image(axes, diff[d_j][0], d_j, 0, log=True, log_msg="y1")
                 #utils.plot_image(axes, y_ref[d_i,d_k,...].detach().cpu().numpy(), d_j, 2, log=True, log_msg="y_ref")
                 #utils.plot_image(axes, y[d_i,...].detach().numpy(), 1)
                 #log("correlations w.o. mask: {}".format(correlations.detach().cpu().numpy()))
@@ -424,9 +425,9 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
                   neg_mus=None, y_recon_ori=None, euler_samples=None, snr2=None,
                   body_poses=None, body_poses_pred=None):
     # reconstruction error
-    B = y.size(0)
+    B = len(z_mu)
     C = losses["y_recon2"].size(1)
-    W = y.size(-1)
+    W = y[0][0].shape[-1]
     mask_sum = mask_sum.float()
     #print(B, W, C, mask_sum, W**3*np.pi*0.05)
     mask_sum = torch.maximum(mask_sum, torch.ones_like(mask_sum)*W**3*np.pi*0.05)
@@ -627,8 +628,6 @@ def save_config(args, dataset, lattice, model, out_config):
                         do_pose_sgd=args.do_pose_sgd,
                         real_data=args.real_data,
                         downfrac=args.downfrac)
-    if args.tilt is not None:
-        dataset_args['particles_tilt'] = args.tilt
     lattice_args = dict(D=lattice.D,
                         extent=lattice.extent,
                         ignore_DC=lattice.ignore_DC)
@@ -719,24 +718,23 @@ def main(args):
     else:
         ref_vol = None
     flog(f'Loading dataset from {args.particles}')
-    if args.tilt is None:
-        tilt = None
-        args.use_real = args.encode_mode == 'conv'
-        args.real_data = args.pe_type == 'vanilla'
+    tilt = None
+    args.use_real = args.encode_mode == 'conv'
+    args.real_data = args.pe_type == 'vanilla'
 
-        if args.lazy_single and not args.warp:
-            data = dataset.LazyTomoMRCData(args.particles, norm=args.norm,
-                                       real_data=args.real_data, invert_data=args.invert_data,
-                                       ind=ind, keepreal=args.use_real, window=False,
-                                       datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac)
-        elif args.lazy_single and args.warp:
-            data = dataset.LazyTomoWARPMRCData(args.particles, norm=args.norm,
-                                       real_data=args.real_data, invert_data=args.invert_data,
-                                       ind=ind, keepreal=args.use_real, window=False,
-                                       datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
-                                       tilt_step=args.tilt_step, tilt_range=args.tilt_range, read_ctf=args.readctf)
-        else:
-            raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
+    if args.lazy_single and not args.warp:
+        data = dataset.LazyTomoMRCData(args.particles, norm=args.norm,
+                                   real_data=args.real_data, invert_data=args.invert_data,
+                                   ind=ind, keepreal=args.use_real, window=False,
+                                   datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac)
+    elif args.lazy_single and args.warp:
+        data = dataset.LazyTomoWARPMRCData(args.particles, norm=args.norm,
+                                   real_data=args.real_data, invert_data=args.invert_data,
+                                   ind=ind, keepreal=args.use_real, window=False,
+                                   datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
+                                   tilt_step=args.tilt_step, tilt_range=args.tilt_range, read_ctf=args.readctf)
+    else:
+        raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
 
     Nimg = data.N
     D = data.D #data dimension
@@ -948,8 +946,38 @@ def main(args):
     train_sampler = dataset.ClassSplitBatchSampler(args.batch_size, posetracker.poses_ind, train_split)
     val_sampler = dataset.ClassSplitBatchSampler(args.batch_size, posetracker.poses_ind, val_split)
     print("Nimg_train: ", Nimg_train, len(train_split))
-    data_generator = DataLoader(data, batch_sampler=train_sampler, pin_memory=True, num_workers=16)
-    val_data_generator = DataLoader(data, batch_sampler=val_sampler, pin_memory=True, num_workers=16)
+    # Custom collate function to load directly to target GPU
+    def collate_to_gpus(batch):
+        # Split data immediately to different GPUs
+        batch_per_gpu = args.batch_size//num_gpus
+        vols = []
+        ctfs = []
+        ctf_files = []
+        indices = []
+        for i in range(num_gpus):
+            vol = []
+            ctf = []
+            ctf_file = []
+            for x in batch[i*batch_per_gpu:(i+1)*batch_per_gpu]:
+                #vol.append(torch.from_numpy(x[0][0]).float())
+                #ctf.append(torch.from_numpy(x[0][1]).float())
+                vol.append(x[0][0])
+                ctf.append(x[0][1])
+                ctf_file.append(x[0][2])
+                indices.append(x[1])
+            #vol = torch.stack(vol)
+            #ctf = torch.stack(ctf)
+            vols.append(vol)
+            ctfs.append(ctf)
+            ctf_files.append(ctf_file)
+        indices = torch.stack(indices)
+        #print(vols, ctfs, ctf_files, indices)
+        chunks = ((vols, ctfs, ctf_files), indices)
+        return chunks
+    #data_generator = DataLoader(data, batch_sampler=train_sampler, collate_fn=collate_to_gpus, pin_memory=True, num_workers=16)#, persistent_workers=True)
+    #val_data_generator = DataLoader(data, batch_sampler=val_sampler, collate_fn=collate_to_gpus, pin_memory=True, num_workers=16)#, persistent_workers=True)
+    data_generator = DataLoader(data, batch_sampler=train_sampler, pin_memory=True, num_workers=16)#, persistent_workers=True)
+    val_data_generator = DataLoader(data, batch_sampler=val_sampler, pin_memory=True, num_workers=16)#, persistent_workers=True)
 
     #assert args.downfrac*(D-1) >= 128
     log(f'image will be downsampled to {args.downfrac} of original size {D-1}')
@@ -965,7 +993,7 @@ def main(args):
     bfactor = args.bfactor
     lamb = args.lamb
     if args.log_interval % args.batch_size != 0:
-        args.log_interval = args.batch_size*16
+        args.log_interval = args.batch_size*24
     assert args.accum_step >= 1
 
     for epoch in range(start_epoch, num_epochs):
@@ -997,6 +1025,7 @@ def main(args):
         for batch_idx, minibatch in loop:
         #for minibatch in data_generator:
             ind = minibatch[-1]#.to(device)
+
             y = minibatch[0][0].to(device, non_blocking=True)
             ctf_param = minibatch[0][1].float().to(device, non_blocking=True)
             ctf_filename = minibatch[0][2]
@@ -1119,6 +1148,7 @@ def main(args):
         #for minibatch in val_data_generator:
             ind = minibatch[-1]
             yt = None
+
             y = minibatch[0][0].to(device, non_blocking=True)
             ctf_param = minibatch[0][1].float().to(device, non_blocking=True)
             ctf_filename = minibatch[0][2]
