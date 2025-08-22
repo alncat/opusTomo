@@ -265,7 +265,7 @@ dsdsh analyze /work/sp 16 4 16
 - $3 is the number of PCs you would like to sample for traversal
 - $4 is the number of clusters for kmeans clustering.
 
-The analysis result will be stored in /work/ribo/analyze.16, i.e., the output directory plus the epoch number you analyzed, using the above command. You can find the UMAP with the labeled kmeans centers in /work/ribo/analyze.16/kmeans16/umap.png and the umap with particles colored by their projection parameter in /work/ribo/analyze.16/umap.png .
+The analysis result will be stored in /work/ribo/analyze.16 and /work/ribo/defanalyze.16, i.e., the output directory plus the epoch number you analyzed, using the above command, and ```defanalyze``` stands for the anlysis result for dynamics latent space. You can find the UMAP with the labeled kmeans centers in /work/ribo/analyze.16/kmeans16/umap.png and the umap with particles colored by their projection parameter in /work/ribo/analyze.16/umap.png .
 
 ## reconstruct volumes <div id="reconstruct">
 After executing the above command once, you may skip the lengthy umap embedding laterly by appending ```--skip-umap``` to the command in analyze.sh. Our analysis script will read the pickled umap embeddings directly.
@@ -299,6 +299,12 @@ dsdsh eval_vol /work/sp 16 pc 1 2.2
 to generate volumes along pc1. You can check volumes in ```/work/sp/analyze.16/pc1```. You can make a movie using chimerax's ```vseries``` feature. An example script for visualizing movie is in ```analysis_scripts/movie.py```. You can show the movie of the volumes by ```ChimeraX --script "./analysis_scripts/movie.py reference 0.985```.
 **PCs are great for visualizing the main motions and compositional changes of marcomolecules, while KMeans reveals representative conformations in higher qualities.**
 To invert the handness of the reconstrution, you can include ```--flip``` to the above commands.
+
+You can use
+```
+ dsdsh eval_vol . 16 dpc 1 2.2 --kmeans 16 --dfk 2 --masks ../mask2new.pkl
+```
+to generate volumes along dpc1, i.e., the first principal component of dynamics latent space, and use the class 2 in kmeans16 for epoch 16 as template. You can check volumes in ```/work/sp/defanalyze.16/pc1```.
 
 ## select particles <div id="select">
 Finally, you can also retrieve the star files for subtomograms in each kmeans cluster using
