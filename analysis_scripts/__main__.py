@@ -26,6 +26,30 @@ def main():
     parser_command2.set_defaults(func=wrapper.parse_pose.main)
 
     # Subparser for command2
+    parser_command2 = subparsers.add_parser('combine_star')
+    # Add arguments for command2 if needed
+    wrapper.combine_star.add_args(parser_command2)
+    parser_command2.set_defaults(func=wrapper.combine_star.main)
+
+    # Subparser for command2
+    parser_command2 = subparsers.add_parser('convert_warp')
+    # Add arguments for command2 if needed
+    wrapper.convert_warp.add_args(parser_command2)
+    parser_command2.set_defaults(func=wrapper.convert_warp.main)
+
+    # Subparser for command2
+    parser_command2 = subparsers.add_parser('convert_pytom')
+    # Add arguments for command2 if needed
+    wrapper.convert_pytom.add_args(parser_command2)
+    parser_command2.set_defaults(func=wrapper.convert_pytom.main)
+
+    # Subparser for command2
+    parser_command2 = subparsers.add_parser('convert_star')
+    # Add arguments for command2 if needed
+    wrapper.convert_star.add_args(parser_command2)
+    parser_command2.set_defaults(func=wrapper.convert_star.main)
+
+    # Subparser for command2
     parser_command2 = subparsers.add_parser('prepare')
     # Add arguments for command2 if needed
     wrapper.prepare.add_args(parser_command2)

@@ -755,7 +755,7 @@ def main(args):
     do_deform   = args.warp_type == 'deform' or args.encode_mode == 'grad'
     # use D-1 instead of D
     posetracker = PoseTracker.load(args.poses, Nimg, D-1, 's2s2' if do_pose_sgd else None, ind,
-                                   deform=do_deform, deform_emb_size=args.zdim, latents=args.latents, batch_size=args.batch_size)
+                                   deform=do_deform, deform_emb_size=args.zdim, latents=args.latents, batch_size=args.batch_size, affine_dim=args.zaffinedim)
     posetracker.to(device)
     pose_optimizer = torch.optim.SparseAdam(list(posetracker.parameters()), lr=args.pose_lr) if do_pose_sgd else None
 

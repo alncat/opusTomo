@@ -66,6 +66,51 @@ class parse_pose:
         else:
             subprocess.call(['bash', script_path, args.starfile, str(args.D), str(args.apix), args.resdir, str(args.N), str(args.kmeans),])
 
+class combine_star:
+    @classmethod
+    def add_args(cls, parser):
+        parser.add_argument('starfile1', type=os.path.abspath, help='starfile for first set')
+        parser.add_argument('starfile2', type=os.path.abspath, help='starfile for second set')
+        parser.add_argument('starfileout', type=os.path.abspath, help='filename for the output')
+
+    @classmethod
+    def main(cls, args):
+        script_path = os.path.join(os.path.dirname(__file__), 'union_star.py')
+        subprocess.call(['python', script_path, args.starfile1, args.starfile2, args.starfileout])
+
+class convert_warp:
+    @classmethod
+    def add_args(cls, parser):
+        parser.add_argument('starfile', type=os.path.abspath, help='starfile in WARP format')
+        parser.add_argument('angpix', type=float, help='angstrom per pixel of the tilt series')
+
+    @classmethod
+    def main(cls, args):
+        script_path = os.path.join(os.path.dirname(__file__), 'convert_warp.py')
+        subprocess.call(['python', script_path, args.starfile, str(args.angpix)])
+
+class convert_pytom:
+    @classmethod
+    def add_args(cls, parser):
+        parser.add_argument('starfile', type=os.path.abspath, help='starfile in WARP format')
+        parser.add_argument('mic', type=str, help='the name of selected micrograph')
+
+    @classmethod
+    def main(cls, args):
+        script_path = os.path.join(os.path.dirname(__file__), 'convert_pytom.py')
+        subprocess.call(['python', script_path, args.starfile, str(args.mic)])
+
+class convert_star:
+    @classmethod
+    def add_args(cls, parser):
+        parser.add_argument('starfile', type=os.path.abspath, help='input starfile')
+        parser.add_argument('angpix', type=float, help='angstrom per pixel of the tilt series')
+
+    @classmethod
+    def main(cls, args):
+        script_path = os.path.join(os.path.dirname(__file__), 'convert_star.py')
+        subprocess.call(['python', script_path, args.starfile, str(args.angpix)])
+
 class prepare:
     @classmethod
     def add_args(cls, parser):

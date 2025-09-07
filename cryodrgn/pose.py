@@ -11,7 +11,7 @@ log = utils.log
 
 class PoseTracker(nn.Module):
     def __init__(self, rots_np, trans_np=None, D=None, emb_type=None, deform=False, deform_emb_size=2, eulers_np=None,
-                 latents=None, batch_size=None, body_eulers_np=None, body_trans_np=None):
+                 latents=None, batch_size=None, body_eulers_np=None, body_trans_np=None, affine_dim=4):
         super(PoseTracker, self).__init__()
         rots = torch.tensor(rots_np).float()
         trans = torch.tensor(trans_np).float() if trans_np is not None else None
@@ -96,11 +96,11 @@ class PoseTracker(nn.Module):
                 if "multi_mu" in latents:
                     self.multi_mu = latents["multi_mu"]
                 else:
-                    self.multi_mu = torch.randn(rots.shape[0], 4)#None
+                    self.multi_mu = torch.randn(rots.shape[0], affine_dim)#None
             else:
                 self.mu = torch.randn(rots.shape[0], self.deform_emb_size)
                 self.nearest_poses = [np.array([], dtype=np.int64) for i in range(len(euler_pixs))]
-                self.multi_mu = torch.randn(rots.shape[0], 4)
+                self.multi_mu = torch.randn(rots.shape[0], affine_dim)
             self.batch_size = batch_size
             print("nn: ", len(self.nearest_poses), "batch_size: ", self.batch_size)
             self.ns = [(len(x) // self.batch_size)*self.batch_size for x in self.poses_ind]
@@ -284,7 +284,7 @@ class PoseTracker(nn.Module):
         torch.save({"mu": self.mu, "nn": self.nearest_poses, "multi_mu": self.multi_mu}, filename)
 
     @classmethod
-    def load(cls, infile, Nimg, D, emb_type=None, ind=None, deform=False, deform_emb_size=2, latents=None, batch_size=None, decoder_infile=None):
+    def load(cls, infile, Nimg, D, emb_type=None, ind=None, deform=False, deform_emb_size=2, latents=None, batch_size=None, affine_dim=4, decoder_infile=None):
         '''
         Return an instance of PoseTracker
 
@@ -372,7 +372,7 @@ class PoseTracker(nn.Module):
 
         if latents is not None:
             latents = torch.load(latents)
-        return cls(rots, trans, D, emb_type, deform, deform_emb_size, eulers, latents, batch_size, body_eulers_np=body_eulers, body_trans_np=body_trans)
+        return cls(rots, trans, D, emb_type, deform, deform_emb_size, eulers, latents, batch_size, body_eulers_np=body_eulers, body_trans_np=body_trans, affine_dim=affine_dim)
 
     def save_decoder_pose(self, out_pkl):
         r = self.rots.cpu().numpy()

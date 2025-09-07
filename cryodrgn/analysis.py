@@ -11,6 +11,7 @@ from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
+from adjustText import adjust_text
 
 from . import utils
 log = utils.log
@@ -225,7 +226,7 @@ def scatter_annotate(x, y, centers=None, centers_ind=None, annotate=True, labels
         assert centers is None
         centers = np.array([[x[i],y[i]] for i in centers_ind])
     if centers is not None:
-        plt.scatter(centers[:,0], centers[:,1], c='k')
+        plt.scatter(centers[:,0], centers[:,1], c='k', s=3)
     if annotate:
         assert centers is not None
         if labels is None:
@@ -234,8 +235,16 @@ def scatter_annotate(x, y, centers=None, centers_ind=None, annotate=True, labels
         #centers_an[10] += np.array([0.3, -0.1])
         #centers_an[1] += np.array([0.1, -0.2])
         #centers_an[8] += np.array([-0.3, 0.])
-        for i in labels:
-            ax.annotate(str(i), centers_an[i], fontsize=14, weight="bold")
+        #for i in labels:
+        #    ax.annotate(str(i), centers_an[i], fontsize=14, weight="bold")
+        texts = [plt.text(x=float(centers[i, 0]),
+                          y=float(centers[i, 1]),
+                          s=str(label),
+                          ha='center',
+                          va='center', fontsize=10, weight="bold")
+                 for i, label in enumerate(labels)]
+        adjust_text(texts=texts)
+
     return fig, ax
 
 def scatter_annotate_hex(x, y, centers=None, centers_ind=None, annotate=True, labels=None):
