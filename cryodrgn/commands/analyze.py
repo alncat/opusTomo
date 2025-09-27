@@ -107,10 +107,16 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     _, centers_ind = analysis.get_nearest_point(z, centers)
     if not os.path.exists(f'{outdir}/kmeans{K}'):
         os.mkdir(f'{outdir}/kmeans{K}')
-    utils.save_pkl(kmeans_labels, f'{outdir}/kmeans{K}/labels.pkl')
-    utils.save_pkl(centers, f'{outdir}/kmeans{K}/centers.pkl')
-    np.savetxt(f'{outdir}/kmeans{K}/centers.txt', centers)
-    np.savetxt(f'{outdir}/kmeans{K}/centers_ind.txt', centers_ind, fmt='%d')
+    if not os.path.exists(f'{outdir}/kmeans{K}') or not skip_umap:
+        utils.save_pkl(kmeans_labels, f'{outdir}/kmeans{K}/labels.pkl')
+        utils.save_pkl(centers, f'{outdir}/kmeans{K}/centers.pkl')
+        np.savetxt(f'{outdir}/kmeans{K}/centers.txt', centers)
+        np.savetxt(f'{outdir}/kmeans{K}/centers_ind.txt', centers_ind, fmt='%d')
+    elif skip_umap:
+        log('loading kmeans clustering')
+        kmeans_labels = utils.load_pkl(f'{outdir}/kmeans{K}/labels.pkl')
+        centers = utils.load_pkl(f'{outdir}/kmeans{K}/centers.pkl')
+        centers_ind = np.loadtxt(f'{outdir}/kmeans{K}/centers_ind.txt', dtype=np.int64)
     log('Generating volumes...')
     vg.gen_volumes(f'{outdir}/kmeans{K}', centers)
     log(f'{np.bincount(kmeans_labels)}')
@@ -201,8 +207,8 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
         analysis.scatter_annotate(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True,
                                   xlim=(xmin, xmax), ylim=(ymin, ymax),
                                   alpha=.15, s=0.5)
-        plt.xlabel('UMAP1', fontsize=14, weight='bold')
-        plt.ylabel('UMAP2', fontsize=14, weight='bold')
+        plt.xlabel('UMAP1', fontsize=12, weight='bold')
+        plt.ylabel('UMAP2', fontsize=12, weight='bold')
         plt.savefig(f'{outdir}/kmeans{K}/umap.png')
 
         g = analysis.scatter_annotate_hex(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True)
