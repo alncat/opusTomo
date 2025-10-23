@@ -1874,7 +1874,7 @@ class VanillaDecoder(nn.Module):
             #image_fft: 8, D, H, W; c: 1, D, H, W; ref: 1, crop_D, crop_H, crop_W
             ctf_beta_rand = (np.random.randn()/4.)*0.1
             image_fft = image_fft*c[i:i+1].abs().pow(self.ctf_beta + ctf_beta_rand)
-            image_fft = self.bfactor_blurring(image_fft, (bfactor+bfactor_shift)/2./self.Apix**2)*max(np.sqrt((bfactor+bfactor_shift)/2./self.Apix**2)**3, 0.4)/np.power(0.5, ctf_beta_rand)
+            image_fft = self.bfactor_blurring(image_fft, (bfactor+bfactor_shift)/2./self.Apix**2)*max(np.sqrt((bfactor+bfactor_shift)/2./self.Apix**2)**3, 0.6)/np.power(0.5, ctf_beta_rand)
             #*ctf_beta*2.
             image_fft = self.tilt_blurring(image_fft, (bfactor+bfactor_shift)/2./self.Apix**2)
             image_fft = fft.torch_irfft3_center(image_fft, center=True)
