@@ -40,13 +40,6 @@ Another important function of OPUS-TOMO is clustering the template matching resu
 
 <img width="839" height="662" alt="image" src="https://github.com/user-attachments/assets/c736789a-795c-4d4b-af41-885651d7b454" />
 
-
-The histograms shows that OPUS-TOMO can retrieve subtomograms from Template Matching result that overlap with the ground-truth results from DeePiCt.
-TM Overlapping With DeePiCt refers to the number of subtomograms from Template Mathching that overlap with DeePiCt's result, and OPUS-TOMO
-refers to the number of subtomograms in classes 12-17 that overlaps with DeePiCt's result. TM Overlapping Ratio refers to the ratio of subtomograms that overlaps with 
-DeePiCt's result in each tilt series, and OPUS-TOMO refers to the ratio of subtomograms in classes 12-17 that overlaps with DeePiCt's result in each tilt series. It is worth noting that OPUS-TOMO is trained by using the subtomograms with their 
-orientation determined by template matching in pyTOM directly without any other processing. The template matching results for this case are in the folder https://drive.google.com/drive/folders/1xR_zD_nF9Hvw9S3nsjxxPR2DQmod3Fmu?usp=drive_link .
-
 The workflow of OPUS-TOMO is demonstrated as follows:
 
 <img width="815" height="337" alt="image" src="https://github.com/user-attachments/assets/555db7df-45d6-4223-95b9-8a51a3b6a717" />
