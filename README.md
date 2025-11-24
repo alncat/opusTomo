@@ -15,7 +15,7 @@ This repository contains the implementation of OPUS-Electron Tomography (OPUS-ET
 OPUS-ET is designed to work seamlessly with the WARP/M pipeline to facilitate high-resolution cryo-electron tomography (cryo-ET) structure determination and to reveal in situ macromolecular dynamics.
 
 ▶ Tutorials: see the OPUS-ET wiki:
-https://github.com/alncat/opusTomo/wiki￼
+https://github.com/alncat/opusTomo/wiki
 
 ▶ Preprint:
 https://www.biorxiv.org/content/10.1101/2025.11.21.688990v1￼
