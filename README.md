@@ -85,7 +85,9 @@ The architecture of dynamics decoder is:
 
 <img width="457" height="144" alt="image" src="https://github.com/user-attachments/assets/a34ab59d-fb4e-47c6-9aa7-bd0138661bdb" />
 
-OPUS-ET takes the **3D subtomograms** as input directly. The capacity of OPUS-ET is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/, this implementation is GPU-accelerated with a user-friendly GUI!). OPUS-ET also enables the structural heterogeneity anlaysis using **the simplest statistic methods, PCA and KMeans clustering**. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules. Specifically, **PCA** in learned latent space allows decomposing structural variations of macromolecules in cryo-ET dataset into dinstinct modes that greatly facilitate reserchers' understandings. This is in a similar spirit to the Normal Mode Analysis (NMA) for macromolecules which investigates their movement modes.
+OPUS-ET directly takes 3D subtomograms as input. Its performance is robust across subtomograms obtained from a wide range of particle localization methods, including neural network–based approaches such as DeePiCt (https://github.com/ZauggGroup/DeePiCt￼) and more classical, template-based methods such as PyTom (https://github.com/SBC-Utrecht/PyTom/￼, which provides GPU-accelerated template matching with a user-friendly GUI).
+
+For structural heterogeneity analysis, OPUS-ET supports simple yet powerful statistical tools, namely PCA and k-means clustering. In practice, these two approaches already enable rich insights into both conformational and compositional changes of macromolecular complexes. In particular, performing PCA in the learned latent space allows OPUS-ET to decompose structural variations in cryo-ET datasets into distinct modes of motion, greatly facilitating interpretation. Conceptually, this is analogous to normal mode analysis (NMA) for macromolecules, which characterizes their intrinsic modes of movement.
 
 ## C. reinhardtii ATP synthase <a name="atp"></a>
 The C. reinhardtii dataset is publicly available at EMPIAR-11830. OPUS-ET resolved the rotary substates of ATP synthase in situ.
@@ -113,10 +115,10 @@ After cloning the repository, to run this program, you need to have an environme
 You can create the conda environment for OPUS-ET using one of the environment files in the folder by executing
 
 ```
-conda env create --name opuset -f environmentcu11torch11.yml
+conda env create --name opuset -f environment.yml
 ```
 
-This environment primarily contains cuda 11.3 and pytorch 1.11.0. To create an environment with cuda 11.3 and pytorch 1.10.1, you can choose ```environmentcu11.yml```. Lastly, ```environment.yml``` contains cuda 10.2 and pytorch 1.11.0. On V100 GPU, OPUS-ET with cuda 11.3 is 20% faster than OPUS-ET with cuda 10.2. However, it's worth noting that OPUS-ET **has not been tested on Pytorch version higher than 1.11.0**. We recommend using pytorch version 1.10.1 or 1.11.0. After the environment is sucessfully created, you can then activate it and execute our program within this environement.
+This environment primarily contains cuda 11.3 and pytorch 1.11.0. There are also other environment files for choosing. After the environment is sucessfully created, you can then activate it and execute our program within this environement.
 
 ```
 conda activate opuset
@@ -131,8 +133,6 @@ OPUS-ET can be kept up to date by
 ```
 git pull
 ```
-
-The inference pipeline of our program can run on any GPU which supports cuda 10.2 or 11.3 and is fast to generate a 3D volume. However, the training of our program takes larger amount memory, we recommend using V100 GPUs at least.
 
 **Usage Example:**
 
@@ -157,15 +157,14 @@ dsdsh commandx -h
 
 **Data Preparation for OPUS-ET Using ```dsdsh prepare```:**
 
-There is a command ```dsdsh prepare``` for data preparation. Under the hood, ```dsdsh prepare``` points to the prepare.sh inside analysis_scripts. Suppose **the version of star file is 3.1**, the above process can be simplified as,
+There is a command ```dsdsh prepare``` for data preparation. Under the hood, ```dsdsh prepare``` points to the prepare.sh inside analysis_scripts. Suppose **the version of Relion star file below 3.0**, the data preparation can be done by,
 ```
-dsdsh prepare /work/consensus_data.star 236 2.1 --relion31
-                $1                      $2    $3    $4
+dsdsh prepare /work/consensus_data.star 236 2.1
+                $1                      $2    $3
 ```
  - $1 specifies the path of the starfile,
  - $2 specifies the dimension of subtomogram
  - $3 specifies the angstrom per pixel of subtomogram
- - $4 indicates the version of starfile, only include --relion31 if the file version is higher than 3.0
 
 **The pose pkl can be found in the same directory of the starfile, in this case, the pose pkl is /work/consensus_data_pose_euler.pkl.**
 
