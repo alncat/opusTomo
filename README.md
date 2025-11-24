@@ -65,11 +65,11 @@ https://github.com/user-attachments/assets/9d5a52f7-95dd-4c30-b5bd-938dbfaa5d69
 
 Another important function of OPUS-ET is clustering the template matching result and achiving high-resolution reconstruction! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
 
-<img width="839" height="662" alt="image" src="https://github.com/user-attachments/assets/c736789a-795c-4d4b-af41-885651d7b454" />
+<img width="859" height="664" alt="image" src="https://github.com/user-attachments/assets/9f49fb93-e19e-4162-9af4-a198e1e7c9a7" />
 
 The workflow of OPUS-ET is demonstrated as follows:
 
-<img width="815" height="337" alt="image" src="https://github.com/user-attachments/assets/555db7df-45d6-4223-95b9-8a51a3b6a717" />
+<img width="838" height="334" alt="image" src="https://github.com/user-attachments/assets/97a52494-18fc-4e12-9314-9fd23a9bd6e8" />
 
 
 Note that all input and output of this method are in real space! 
@@ -81,7 +81,7 @@ The architecture of decoder is (ConvTemplate class in cryodrgn/models.py. In thi
 
 <img width="964" alt="image" src="https://github.com/user-attachments/assets/ed448e4a-3097-473c-8d2a-d50725e1c735">
 
-The architecture of dynamics decoder is:
+The architecture of conformation decoder is:
 
 <img width="457" height="144" alt="image" src="https://github.com/user-attachments/assets/a34ab59d-fb4e-47c6-9aa7-bd0138661bdb" />
 
@@ -91,10 +91,10 @@ For structural heterogeneity analysis, OPUS-ET supports simple yet powerful stat
 
 ## C. reinhardtii ATP synthase <a name="atp"></a>
 The C. reinhardtii dataset is publicly available at EMPIAR-11830. OPUS-ET resolved the rotary substates of ATP synthase in situ.
-<img width="800" height="685" alt="image" src="https://github.com/user-attachments/assets/6fcbc79f-60e1-4663-a612-d2684054700f" />
+<img width="792" height="711" alt="image" src="https://github.com/user-attachments/assets/9f5b9e9d-269e-441b-84b9-2c02a76e9e87" />
 
-## S.pombe 80S Ribosome <a name="80s"></a>
-The S.pombe dataset is publicly available at EMPIAR-10988 (https://www.ebi.ac.uk/empiar/EMPIAR-10988/).
+## S. pombe 80S Ribosome <a name="80s"></a>
+The S. pombe dataset is publicly available at EMPIAR-10988 (https://www.ebi.ac.uk/empiar/EMPIAR-10988/).
 In this dataset, OPUS-ET has shown superior structural disentanglement ability to capture continous structral changes into PCs of the composition latent space, and characterizes 
 functionally important subpopulations. The results are deposited in https://zenodo.org/records/12631920.
 
@@ -363,7 +363,7 @@ The content below is just for backup purpose, which may not be compitable with t
 # prepare data <a name="preparation"></a>
 
 **Data Preparation Guidelines:**
-1. **Cryo-ET Dataset:** The form of inputs of OPUS-ET is similar to the inputs required for subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.) We also have a script adapted from Relion for preparing the subtomograms and ctf starfiles. It is named as *relion_ctf_prepare.py* in the root folder of this repository or in the google drive https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing. You can follow the detailed data preparation process in this paper: https://www.nature.com/articles/nprot.2016.124 or the instruction below.
+1. **Cryo-ET Dataset:** The form of inputs of OPUS-ET is similar to the inputs required for subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S. pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.) We also have a script adapted from Relion for preparing the subtomograms and ctf starfiles. It is named as *relion_ctf_prepare.py* in the root folder of this repository or in the google drive https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing. You can follow the detailed data preparation process in this paper: https://www.nature.com/articles/nprot.2016.124 or the instruction below.
 
 2. **Subtomogram averaging/Template matching Result:** The program requires a subtomogram averaging or template matching results, where the pose of subtomogram is determined, which should not apply any symmetry and must be stored as a Relion STAR file.
 
@@ -535,7 +535,7 @@ Lastly, the correctness of 3DCTF can be checked by saving the 3DCTF reconstructi
 
 <img width="450" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/70c7703b-6676-44fc-9b6c-5ccdac7736f5">
 
-This is the fourier transform of a subtomogram and the corresponding 3DCTF for TS_041 in S.pombe dataset. You can see that the missing wedges of these two match. 
+This is the fourier transform of a subtomogram and the corresponding 3DCTF for TS_041 in S. pombe dataset. You can see that the missing wedges of these two match. 
 
 The per-particle 3DCTF correction implemented in relion_ctf_prepare.py is very rudimentary. I am preparing a more accurate per-particle 3DCTF correction now.
 
