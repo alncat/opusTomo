@@ -1,5 +1,5 @@
 # Table of contents
-1. [Opus-ET](#opustomo)
+1. [OPUS-ET](#opustomo)
 2. [setup environment](#setup)
 3. [training](#training)
    1. [train_tomo](#train_tomo)
@@ -8,20 +8,47 @@
    2. [reconstruct volumes](#reconstruct)
    3. [select particles](#select)
 
-# Opus-ET <div id="opustomo">
-This repository contains the implementation of opus-electron tomography (OPUS-ET), which is developed by Zhenwei (Benedict，本笃) Luo at the group of
-Prof. Jianpeng Ma at Fudan University. OPUS-ET works with **WARP/M** pipeline in a seamless way to facilitate high-resolution cryo-ET structure determination and reveal dynamic process for macromolecule in situ! Specifically, it can **filter template matching result to obtain highly homogeneous subtomogram set that achieves sub-nanometer resolution**. Secondly, it can **reconstruct dynamics in various scales from subtomogram averaging (STA) results** from **M**! OPUS-ET can even work with tomogram reconstructed by **AreTOMO**. The tutorials are in https://github.com/alncat/opusTomo/wiki!
-The preprint of OPUS-ET is available at https://www.biorxiv.org/content/10.1101/2024.06.30.601442 or https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.
+# OPUS-ET <div id="opustomo">
 
-Structural heterogeneity is a central problem for cryo-ET which occurs at many stage of tomography processing. Specifically, at the very first stage, after reconstructing a tomogram, you then encounter the problem to pick subtomograms corresponding to macromolecule of interest from the tomogram. Given the abundance of different molecules inside the
-cell sample, subtomogram picking faces large challenges from structural heterogeneity. At a later stage, when you have obtained a purer set of subtomograms for the molecule of interest, you may still encounter the structural heterogeneity problem as the molecule is in constant dynamics in cell environment. 
-The vitrified samples then preserves lots of different conformations and compositions of the molecule of interest.
+This repository contains the implementation of OPUS-Electron Tomography (OPUS-ET), developed by Zhenwei (Benedict, 本笃) Luo in the group of Prof. Jianpeng Ma at Fudan University.
 
-The main functionality of OPUS-ET is reconstructing conformational and compositonal changes at all kinds of stages from cryo-ET data end-to-end! OPUS-ET can be applied to data analysis at any stage, even when you are just picking particles. Using the template matching result with determined pose from **pyTOM**, 
-OPUS-ET can be used to filter picked particles! At later stage, OPUS-ET can not only disentangle 3D structural information by reconstructing different compositions, but also reconstruct continous conformational dynamics for the macromolecules in cellular environment. 
+OPUS-ET is designed to work seamlessly with the WARP/M pipeline to facilitate high-resolution cryo-electron tomography (cryo-ET) structure determination and to reveal in situ macromolecular dynamics.
+
+▶ Tutorials: see the OPUS-ET wiki:
+https://github.com/alncat/opusTomo/wiki￼
+
+▶ Preprint:
+https://www.biorxiv.org/content/10.1101/2025.11.21.688990v1￼
+
+## Overview
+
+Structural heterogeneity is a central challenge in cryo-ET and arises at multiple stages of the processing pipeline:
+
+1.	Subtomogram picking:
+   
+After tomogram reconstruction, you need to pick subtomograms corresponding to the macromolecule of interest. Because cells contain a large variety of different molecular species, template matching and subtomogram picking are heavily affected by structural and compositional heterogeneity.
+
+2.	Downstream analysis:
+   
+Even after obtaining a relatively “pure” set of subtomograms for a target complex, structural heterogeneity persists. Macromolecules in the cellular environment are dynamic and can adopt multiple conformations and compositions. The vitrified samples therefore preserve a rich ensemble of states rather than a single static structure.
+
+OPUS-ET is designed to tackle this structural heterogeneity end-to-end, from the earliest picking stages through to detailed conformational landscape analysis.
+
+## Key Features
+
+1. Filtering template matching results
+
+OPUS-ET can filter template matching outputs (PyTOM) to obtain highly homogeneous subtomogram sets that are suitable for sub-nanometer resolution reconstruction.
+
+2. Multi-scale heterogeneity analysis
+
+OPUS-ET can be applied to STA results (e.g., from M): disentangle compositional heterogeneity, reconstructing different subcomplexes or binding states; reconstruct continuous conformational dynamics, providing a low-dimensional representation of in situ flexibility.
+
+In short, OPUS-ET aims to reconstruct both compositional and conformational changes across the entire cryo-ET processing pipeline, from raw picking to high-resolution structural and dynamical analysis.
+
 
 Exemplar dynamics resolved by OPUS-ET is shown below:
-The flexible coupling between F0 and F1 subcomplexes
+The flexible coupling between F0 and F1 subcomplexes in ATP synthase
 
 https://github.com/user-attachments/assets/aeb06e40-02f5-4683-9659-9c0438d91f78
 
@@ -86,13 +113,13 @@ After cloning the repository, to run this program, you need to have an environme
 You can create the conda environment for OPUS-ET using one of the environment files in the folder by executing
 
 ```
-conda env create --name opustomo -f environmentcu11torch11.yml
+conda env create --name opuset -f environmentcu11torch11.yml
 ```
 
 This environment primarily contains cuda 11.3 and pytorch 1.11.0. To create an environment with cuda 11.3 and pytorch 1.10.1, you can choose ```environmentcu11.yml```. Lastly, ```environment.yml``` contains cuda 10.2 and pytorch 1.11.0. On V100 GPU, OPUS-ET with cuda 11.3 is 20% faster than OPUS-ET with cuda 10.2. However, it's worth noting that OPUS-ET **has not been tested on Pytorch version higher than 1.11.0**. We recommend using pytorch version 1.10.1 or 1.11.0. After the environment is sucessfully created, you can then activate it and execute our program within this environement.
 
 ```
-conda activate opustomo
+conda activate opuset
 ```
 
 You can then install OPUS-ET by changing to the directory with cloned repository, and execute
@@ -166,11 +193,18 @@ dsd parse_pose_star /work/consensus_data.star -D 236 --Apix 2.1 -o ribo-pose-eul
 
 ## train_tomo for OPUS-ET <div id="train_tomo">
 
-When the inputs are available, you can train the vae for structural disentanglement proposed in OPUS-ET's paper using
+When the subtomograms and ctfs exported by WARP are available, you can train OPUS-ET using
 
 ```
-dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 8 --zdim 12 --lr 5.e-5 --num-gpus 4 --multigpu --beta-control 0.8 --beta cos -o /work/ribo -r ./mask.mrc --downfrac 0.65 --valfrac 0.1 --lamb 0.8 --split ribo-split.pkl --bfactor 4. --templateres 160 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/
+dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3. --templateres 128 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1.
 ```
+
+If you have installed horovod according to tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation, you can train OPUS-ET using
+
+```
+horovodrun -np 4 dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 1 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3. --templateres 128 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. 
+```
+The above command will spawn 4 processes to train OPUS-ET. Using horovod can greatly reduce the overhead of IO compared to data parallel in pytorch.
 
 The argument following train_tomo specifies the starfile for subtomograms. In contrast to OPUS-DSD, we no longer need to specify ctf since they are read from the subtomogram starfile.
 Moreover, OPUS-ET needs to specify the angpix of the subtomogram by ```--angpix```, and also the prefix directory before the filename for subtomogram in starfile by ```--datadir```.
@@ -221,7 +255,7 @@ Happy Training! **Open an issue when running into any troubles.**
 To restart execution from a checkpoint, you can use
 
 ```
-dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl --lazy-single -n 20 --pe-type vanilla --encode-mode grad --template-type conv -b 12 --zdim 12 --lr 1.e-4  --num-gpus 4 --multigpu --beta-control 2. --beta cos -o /work/ribo -r ./mask.mrc --downfrac 0.75 --lamb 1. --valfrac 0.25 --load /work/ribo/weights.0.pkl --latents /work/sp/z.0.pkl --split ribo-split.pkl --bfactor 4. --templateres 160
+horovodrun -np 4 dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 1 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3. --templateres 128 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --load weights.9.pkl --latents z.9.pkl
 ```
 | argument |  explanation |
 | --- | --- |
