@@ -377,7 +377,7 @@ class LazyTomoDRGNMRCData(data.Dataset):
                 imgs.extend([self.particles[i][j].get() for j in range(len(self.particles[i]))])
             imgs = np.asarray(imgs)
         #if self.invert_data: imgs *= -1
-        log('first image: {}'.format(imgs[0]))
+        #log('first image: {}'.format(imgs[0]))
         norm = [np.mean(imgs), np.std(imgs)]
         norm[0] = 0
         return norm
@@ -441,7 +441,7 @@ class LazyTomoWARPMRCData(data.Dataset):
         if self.real_data:
             imgs = np.asarray([self.particles[i].get() for i in range(0,self.N, self.N//n)])
         #if self.invert_data: imgs *= -1
-        log('first image: {}'.format(imgs[0]))
+        #log('first image: {}'.format(imgs[0]))
         imgs = np.nan_to_num(imgs[:, :self.D//4, :, :])
         norm = [np.mean(imgs), np.std(imgs)]
         norm[0] = 0
@@ -500,7 +500,7 @@ class LazyTomoMRCData(data.Dataset):
         if self.real_data:
             imgs = np.asarray([self.particles[i].get() for i in range(0,self.N, self.N//n)])
         #if self.invert_data: imgs *= -1
-        log('first image: {}'.format(imgs[0]))
+        #log('first image: {}'.format(imgs[0]))
         imgs = imgs[:, :self.D//4, :, :]
         norm = [np.mean(imgs), np.std(imgs)]
         norm[0] = 0

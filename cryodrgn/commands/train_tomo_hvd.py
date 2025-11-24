@@ -14,7 +14,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-torch.backends.cudnn.benchmark = True
 
 import cryodrgn
 from cryodrgn import mrc
@@ -42,6 +41,7 @@ def add_args(parser):
     parser.add_argument('-o', '--outdir', type=os.path.abspath, required=True, help='Output directory to save model')
     parser.add_argument('-r', '--ref_vol', type=os.path.abspath, help='Input volume (.mrcs)')
     parser.add_argument('--zdim', type=int, required=False, help='Dimension of latent variable')
+    parser.add_argument('--zaffinedim', type=int, default=4, required=False, help='Dimension of latent variable')
     parser.add_argument('--poses', type=os.path.abspath, required=True, help='Image poses (.pkl)')
     parser.add_argument('--masks', type=os.path.abspath, required=False, help='Masks related parameters (.pkl)')
     parser.add_argument('--symm', type=os.path.abspath, required=False, help='Symmetric Operators (.pkl)')
@@ -78,6 +78,7 @@ def add_args(parser):
     group.add_argument('-b','--batch-size', type=int, default=20, help='Minibatch size (default: %(default)s)')
     group.add_argument('--wd', type=float, default=0, help='Weight decay in Adam optimizer (default: %(default)s)')
     group.add_argument('--lr', type=float, default=5e-5, help='Learning rate in Adam optimizer (default: %(default)s)')
+    group.add_argument('--accum-step', type=int, default=2, help='gradient accumulation step for optimizer (default: %(default)s)')
     group.add_argument('--lamb', type=float, default=0.5, help='restraint strength for umap prior (default: %(default)s)')
     group.add_argument('--downfrac', type=float, default=0.5, help='downsample to (default: %(default)s) of original size')
     group.add_argument('--templateres', type=int, default=192, help='define the output size of 3d volume (default: %(default)s)')
@@ -98,10 +99,14 @@ def add_args(parser):
     group.add_argument('--pose-enc', action='store_true', help='predict pose parameter using encoder')
     group.add_argument('--pose-only', action='store_true', help='train pose encoder only')
     group.add_argument('--plot', action='store_true', help='plot intermediate result')
-    group.add_argument('--estpose', default=True, action='store_true', help='estimate pose')
+    group.add_argument('--estpose', default=False, action='store_true', help='estimate pose')
     group.add_argument('--warp', default=False, action='store_true', help='using subtomograms from warp')
+    group.add_argument('--readctf', default=False, action='store_true', help='Reading ctfs from warp')
     group.add_argument('--tilt-step', type=int, default=2, help='the interval between successive tilts (default: %(default)s)')
     group.add_argument('--tilt-range', type=int, default=50, help='the range of tilt angles (default: %(default)s)')
+    group.add_argument('--ctfalpha', type=float, default=0.5, help='the degree of ctf correction to experimental subtomogram (default: %(default)s)')
+    group.add_argument('--ctfbeta', type=float, default=0.5, help='the degree of ctf correction to reconstruction of decoder (default: %(default)s)')
+    group.add_argument('--normalizectf', action='store_true', help='normalize ctf using backprojected grid weights (default: %(default)s)')
 
     group = parser.add_argument_group('Encoder Network')
     group.add_argument('--enc-layers', dest='qlayers', type=int, default=3, help='Number of hidden layers (default: %(default)s)')
@@ -139,8 +144,8 @@ def train_batch(model, lattice, y, yt, rot, trans, optim, beta,
         model.train()
     else:
         model.eval()
-    if trans is not None:
-        y, yt = preprocess_input(y, yt, lattice, trans, vanilla=vanilla)
+    #if trans is not None:
+    #    y, yt = preprocess_input(y, yt, lattice, trans, vanilla=vanilla)
     z_mu, z_logstd, z, y_recon, y_recon_tilt, losses, y, mus, \
         euler_samples, y_recon_ori, neg_mus, mask_sum, body_poses_pred, c_m = run_batch(
                                                                  model, lattice, y, yt, rot,
@@ -173,7 +178,6 @@ def train_batch(model, lattice, y, yt, rot, trans, optim, beta,
     if update_params:
         optim.step()
         optim.zero_grad()
-
     return z_mu, loss.item(), gen_loss.item(), snr.item(), losses['l2'].mean().item(), losses['tvl2'].mean().item(), \
             mu2.item()/args.zdim, std2.item()/args.zdim, mmd.item(), c_mmd.item(), mse.item(), body_poses_pred, c_m
 
@@ -267,9 +271,9 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
               args=None, euler=None, posetracker=None, data=None, snr2=1., body_poses=None, ctf_filename=None):
     use_tilt = yt is not None
     use_ctf = ctf_params is not None
-    B = y.size(0)
+    B = len(ind) # y.size(0)
     D = lattice.D
-    W = y.size(-1)
+    W = y[0][0].shape[-1] #y.size(-1)
     out_size = D - 1
     # get real mask
     mask_real = None
@@ -288,8 +292,8 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
     # add bfactors to ctf_params, the second from last column stores bfactor, the last column stores scale
     #random_b = np.random.rand()*1.5
     #random_b = np.random.gamma(1., 0.6)
-    random_b = torch.randn_like(c[..., 0, -2])/3.
-    c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
+    #random_b = torch.randn_like(c[..., 0, -2])/3.
+    #c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
 
     plot = args.plot and it % (args.log_interval) == B
     if plot:
@@ -322,9 +326,9 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         z, encout = model.vanilla_encode(diff, rot, trans, eulers=euler, num_gpus=args.num_gpus, snr2=snr2,
                                          body_poses=body_poses,)
                                          #ctf_param=torch.cat((ctf_param[:,1:], random_b.unsqueeze(-1).to(ctf_param.get_device())), dim=-1))
-        # set y to centered one
-        if args.encode_mode in ["grad"]:
-            y = encout['rotated_x']
+        ## set y to centered one
+        #if args.encode_mode in ["grad"]:
+        #    y = encout['rotated_x']
         #print(z - encout['z_mu'])
         # sample nearest neighbors
         #posetracker.set_emb(encout["z_mu"][:, :args.zdim], ind)
@@ -339,7 +343,8 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         # decode latents
         decout = model.vanilla_decode(rot, trans, z=z, save_mrc=save_image, eulers=euler,
                                       ref_fft=y, ctf_param=c, encout=encout, mask=mask_real, body_poses=body_poses,
-                                      ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename, write_ctf=args.write_ctf)
+                                      ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename,
+                                      write_ctf=args.write_ctf, bfactor=np.abs(args.bfactor), snr2=snr2)
 
         #print(decout["affine"][0].shape)
         z_local = encout["z_mu"]
@@ -438,9 +443,9 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
                   neg_mus=None, y_recon_ori=None, euler_samples=None, snr2=None,
                   body_poses=None, body_poses_pred=None):
     # reconstruction error
-    B = y.size(0)
+    B = len(z_mu) #y.size(0)
     C = losses["y_recon2"].size(1)
-    W = y.size(-1)
+    W = y[0][0].shape[-1] #y.size(-1)
     mask_sum = mask_sum.float()
     #print(B, W, C, mask_sum, W**3*np.pi*0.05)
     mask_sum = torch.maximum(mask_sum, torch.ones_like(mask_sum)*W**3*np.pi*0.05)
@@ -645,8 +650,6 @@ def save_config(args, dataset, lattice, model, out_config):
                         do_pose_sgd=args.do_pose_sgd,
                         real_data=args.real_data,
                         downfrac=args.downfrac)
-    if args.tilt is not None:
-        dataset_args['particles_tilt'] = args.tilt
     lattice_args = dict(D=lattice.D,
                         extent=lattice.extent,
                         ignore_DC=lattice.ignore_DC)
@@ -737,24 +740,23 @@ def main(args):
     else:
         ref_vol = None
     flog(f'Loading dataset from {args.particles}')
-    if args.tilt is None:
-        tilt = None
-        args.use_real = args.encode_mode == 'conv'
-        args.real_data = args.pe_type == 'vanilla'
+    tilt = None
+    args.use_real = args.encode_mode == 'conv'
+    args.real_data = args.pe_type == 'vanilla'
 
-        if args.lazy_single and not args.warp:
-            data = dataset.LazyTomoMRCData(args.particles, norm=args.norm,
-                                       real_data=args.real_data, invert_data=args.invert_data,
-                                       ind=ind, keepreal=args.use_real, window=False,
-                                       datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac)
-        elif args.lazy_single and args.warp:
-            data = dataset.LazyTomoWARPMRCData(args.particles, norm=args.norm,
-                                       real_data=args.real_data, invert_data=args.invert_data,
-                                       ind=ind, keepreal=args.use_real, window=False,
-                                       datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
-                                       tilt_step=args.tilt_step, tilt_range=args.tilt_range)
-        else:
-            raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
+    if args.lazy_single and not args.warp:
+        data = dataset.LazyTomoMRCData(args.particles, norm=args.norm,
+                                   real_data=args.real_data, invert_data=args.invert_data,
+                                   ind=ind, keepreal=args.use_real, window=False,
+                                   datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac)
+    elif args.lazy_single and args.warp:
+        data = dataset.LazyTomoWARPMRCData(args.particles, norm=args.norm,
+                                   real_data=args.real_data, invert_data=args.invert_data,
+                                   ind=ind, keepreal=args.use_real, window=False,
+                                   datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
+                                   tilt_step=args.tilt_step, tilt_range=args.tilt_range)
+    else:
+        raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
 
     Nimg = data.N
     D = data.D #data dimension
@@ -778,7 +780,7 @@ def main(args):
     do_deform   = args.warp_type == 'deform' or args.encode_mode == 'grad'
     # use D-1 instead of D
     posetracker = PoseTracker.load(args.poses, Nimg, D-1, 's2s2' if do_pose_sgd else None, ind,
-                                   deform=do_deform, deform_emb_size=args.zdim, latents=args.latents, batch_size=args.batch_size)
+                                   deform=do_deform, deform_emb_size=args.zdim, latents=args.latents, batch_size=args.batch_size, affine_dim=args.zaffinedim)
     posetracker.to(device)
     pose_optimizer = torch.optim.SparseAdam(list(posetracker.parameters()), lr=args.pose_lr) if do_pose_sgd else None
 
@@ -839,7 +841,10 @@ def main(args):
                 downfrac=args.downfrac,
                 templateres=args.templateres,
                 tmp_prefix=args.tmp_prefix,
-                masks_params=masks_params)
+                masks_params=masks_params,
+                z_affine_dim=args.zaffinedim,
+                ctf_alpha=args.ctfalpha,
+                ctf_beta=args.ctfbeta,)
 
     # use downsampled ctf grid
     ctf_grid = CTFGrid(model.render_size+1, device)
@@ -851,14 +856,14 @@ def main(args):
         flog('{} parameters in encoder'.format(sum(p.numel() for p in model.encoder.parameters() if p.requires_grad)))
         flog('{} parameters in decoder'.format(sum(p.numel() for p in model.decoder.parameters() if p.requires_grad)))
         if args.estpose:
-            flog('OPUS-TOMO will estimate pose using neural network')
+            flog('OPUS-ET will estimate pose using neural network')
 
     # save configuration
     out_config = '{}/config.pkl'.format(args.outdir)
     save_config(args, data, lattice, model, out_config)
     # move model to gpu
     model = model.to(device)
-    Backward_passes_per_step = 2
+    Backward_passes_per_step = args.accum_step
 
     # set model parameters to be encoder and decoder
     #model_parameters = list(model.parameters())+list(group_stat.parameters())
@@ -957,7 +962,8 @@ def main(args):
         else:
             num_gpus = torch.cuda.device_count()
         device_ids = [x for x in range(num_gpus)]
-        log(f'Using {num_gpus} GPUs!')
+        if hvd.rank() == 0:
+            log(f'OPUS-ET using {num_gpus} GPUs!')
         #model = nn.DataParallel(model, device_ids=device_ids)
         #model.encoder = nn.DataParallel(model.encoder, device_ids=device_ids)
         #model.decoder = nn.DataParallel(model.decoder, device_ids=device_ids)
@@ -979,11 +985,10 @@ def main(args):
     Nimg_train = int(Nimg*(1. - args.valfrac))
     Nimg_test = int(Nimg*args.valfrac)
     train_split, val_split = rand_split[:Nimg_train], rand_split[Nimg_train:]
-
     train_sampler = dataset.ClassSplitBatchHvdSampler(args.batch_size, posetracker.poses_ind, train_split, rank=hvd.rank(), size=hvd.size())
     val_sampler = dataset.ClassSplitBatchHvdSampler(args.batch_size, posetracker.poses_ind, val_split, rank=hvd.rank(), size=hvd.size())
 
-    print("Nimg_train: ", Nimg_train, len(train_split))
+    log(f"Nimg_train: {Nimg_train}, {len(train_split)}")
     data_generator = DataLoader(data, batch_sampler=train_sampler, pin_memory=True, num_workers=16)
     val_data_generator = DataLoader(data, batch_sampler=val_sampler, pin_memory=True, num_workers=16)
 
@@ -1037,7 +1042,7 @@ def main(args):
         update_it = 0
         beta_control = args.beta_control
         #increasing bfactor slowly
-        args.bfactor = bfactor*(1. + 0.5/(1. + 3.*math.exp(-0.1*epoch)))
+        args.bfactor = bfactor*(1. + 0.05/(1. + 3.*math.exp(-0.1*epoch)))
         beta_max    = 1. #0.98 ** (epoch)
         log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
                         lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))

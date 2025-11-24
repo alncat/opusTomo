@@ -18,6 +18,7 @@ def main():
     import cryodrgn.commands.train_cv
     import cryodrgn.commands.train_multi
     import cryodrgn.commands.train_tomo
+    import cryodrgn.commands.train_tomo_hvd
     import cryodrgn.commands.prepare_subtomos
     import cryodrgn.commands.eval_vol
     import cryodrgn.commands.eval_images
@@ -39,6 +40,7 @@ def main():
         cryodrgn.commands.train_cv,
         cryodrgn.commands.train_multi,
         cryodrgn.commands.train_tomo,
+        cryodrgn.commands.train_tomo_hvd,
         cryodrgn.commands.eval_vol,
         cryodrgn.commands.prepare_subtomos,
         #cryodrgn.commands.eval_images,
