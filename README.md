@@ -18,7 +18,7 @@ OPUS-ET is designed to work seamlessly with the WARP/M pipeline to facilitate hi
 https://github.com/alncat/opusTomo/wiki
 
 ▶ Preprint:
-https://www.biorxiv.org/content/10.1101/2025.11.21.688990v1￼
+https://www.biorxiv.org/content/10.1101/2025.11.21.688990v1
 
 ## Overview
 
@@ -540,7 +540,7 @@ This is the fourier transform of a subtomogram and the corresponding 3DCTF for T
 
 The per-particle 3DCTF correction implemented in relion_ctf_prepare.py is very rudimentary. I am preparing a more accurate per-particle 3DCTF correction now.
 
-To perform subtomogram averaging using RELION 3.0.8, you should also reconstruct the CTF volume (though this is not required for training opusTOMO). The python script relion_ctf_prepare.py will output a script name ```do_all_reconstruct_ctfs.sh```, you can reconstruct ctfs using
+To perform subtomogram averaging using RELION 3.0.8, you should also reconstruct the CTF volume (though this is not required for training OPUS-ET). The python script relion_ctf_prepare.py will output a script name ```do_all_reconstruct_ctfs.sh```, you can reconstruct ctfs using
 
 ```
 sh do_all_reconstruct_ctfs.sh 128
