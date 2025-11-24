@@ -1,5 +1,5 @@
 # Table of contents
-1. [Opus-TOMO](#opustomo)
+1. [Opus-ET](#opustomo)
 2. [setup environment](#setup)
 3. [training](#training)
    1. [train_tomo](#train_tomo)
@@ -8,19 +8,19 @@
    2. [reconstruct volumes](#reconstruct)
    3. [select particles](#select)
 
-# Opus-TOMO <div id="opustomo">
-This repository contains the implementation of opus-tomography (OPUS-TOMO), which is developed by Zhenwei (Benedict，本笃) Luo at the group of
-Prof. Jianpeng Ma at Fudan University. OPUS-TOMO works with **WARP/M** pipeline in a seamless way to facilitate high-resolution cryo-ET structure determination and reveal dynamic process for macromolecule in situ! Specifically, it can **filter template matching result to obtain highly homogeneous subtomogram set that achieves sub-nanometer resolution**. Secondly, it can **reconstruct dynamics in various scales from subtomogram averaging (STA) results** from **M**! OPUS-TOMO can even work with tomogram reconstructed by **AreTOMO**. The tutorials are in https://github.com/alncat/opusTomo/wiki!
-The preprint of OPUS-TOMO is available at https://www.biorxiv.org/content/10.1101/2024.06.30.601442 or https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.
+# Opus-ET <div id="opustomo">
+This repository contains the implementation of opus-electron tomography (OPUS-ET), which is developed by Zhenwei (Benedict，本笃) Luo at the group of
+Prof. Jianpeng Ma at Fudan University. OPUS-ET works with **WARP/M** pipeline in a seamless way to facilitate high-resolution cryo-ET structure determination and reveal dynamic process for macromolecule in situ! Specifically, it can **filter template matching result to obtain highly homogeneous subtomogram set that achieves sub-nanometer resolution**. Secondly, it can **reconstruct dynamics in various scales from subtomogram averaging (STA) results** from **M**! OPUS-ET can even work with tomogram reconstructed by **AreTOMO**. The tutorials are in https://github.com/alncat/opusTomo/wiki!
+The preprint of OPUS-ET is available at https://www.biorxiv.org/content/10.1101/2024.06.30.601442 or https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing.
 
 Structural heterogeneity is a central problem for cryo-ET which occurs at many stage of tomography processing. Specifically, at the very first stage, after reconstructing a tomogram, you then encounter the problem to pick subtomograms corresponding to macromolecule of interest from the tomogram. Given the abundance of different molecules inside the
 cell sample, subtomogram picking faces large challenges from structural heterogeneity. At a later stage, when you have obtained a purer set of subtomograms for the molecule of interest, you may still encounter the structural heterogeneity problem as the molecule is in constant dynamics in cell environment. 
 The vitrified samples then preserves lots of different conformations and compositions of the molecule of interest.
 
-The main functionality of OPUS-TOMO is reconstructing conformational and compositonal changes at all kinds of stages from cryo-ET data end-to-end! OPUS-TOMO can be applied to data analysis at any stage, even when you are just picking particles. Using the template matching result with determined pose from **pyTOM**, 
-OPUS-TOMO can be used to filter picked particles! At later stage, OPUS-TOMO can not only disentangle 3D structural information by reconstructing different compositions, but also reconstruct continous conformational dynamics for the macromolecules in cellular environment. 
+The main functionality of OPUS-ET is reconstructing conformational and compositonal changes at all kinds of stages from cryo-ET data end-to-end! OPUS-ET can be applied to data analysis at any stage, even when you are just picking particles. Using the template matching result with determined pose from **pyTOM**, 
+OPUS-ET can be used to filter picked particles! At later stage, OPUS-ET can not only disentangle 3D structural information by reconstructing different compositions, but also reconstruct continous conformational dynamics for the macromolecules in cellular environment. 
 
-Exemplar dynamics resolved by OPUS-TOMO is shown below:
+Exemplar dynamics resolved by OPUS-ET is shown below:
 The flexible coupling between F0 and F1 subcomplexes
 
 https://github.com/user-attachments/assets/aeb06e40-02f5-4683-9659-9c0438d91f78
@@ -36,11 +36,11 @@ The model is trained using M refined subtomograms.
 
 https://github.com/user-attachments/assets/9d5a52f7-95dd-4c30-b5bd-938dbfaa5d69
 
-Another important function of OPUS-TOMO is clustering the template matching result and achiving high-resolution reconstruction! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
+Another important function of OPUS-ET is clustering the template matching result and achiving high-resolution reconstruction! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
 
 <img width="839" height="662" alt="image" src="https://github.com/user-attachments/assets/c736789a-795c-4d4b-af41-885651d7b454" />
 
-The workflow of OPUS-TOMO is demonstrated as follows:
+The workflow of OPUS-ET is demonstrated as follows:
 
 <img width="815" height="337" alt="image" src="https://github.com/user-attachments/assets/555db7df-45d6-4223-95b9-8a51a3b6a717" />
 
@@ -58,15 +58,15 @@ The architecture of dynamics decoder is:
 
 <img width="457" height="144" alt="image" src="https://github.com/user-attachments/assets/a34ab59d-fb4e-47c6-9aa7-bd0138661bdb" />
 
-OPUS-TOMO takes the **3D subtomograms** as input directly. The capacity of OPUS-TOMO is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/, this implementation is GPU-accelerated with a user-friendly GUI!). OPUS-TOMO also enables the structural heterogeneity anlaysis using **the simplest statistic methods, PCA and KMeans clustering**. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules. Specifically, **PCA** in learned latent space allows decomposing structural variations of macromolecules in cryo-ET dataset into dinstinct modes that greatly facilitate reserchers' understandings. This is in a similar spirit to the Normal Mode Analysis (NMA) for macromolecules which investigates their movement modes.
+OPUS-ET takes the **3D subtomograms** as input directly. The capacity of OPUS-ET is **robust against subtomograms from all kinds of particle localization methods**, such as neural-network based DeePiCt (https://github.com/ZauggGroup/DeePiCt), and the most crude templated matching in PyTom (https://github.com/SBC-Utrecht/PyTom/, this implementation is GPU-accelerated with a user-friendly GUI!). OPUS-ET also enables the structural heterogeneity anlaysis using **the simplest statistic methods, PCA and KMeans clustering**. These two approaches can lead to sufficiently rich discovery about the conformational and compositional changes of macromolecules. Specifically, **PCA** in learned latent space allows decomposing structural variations of macromolecules in cryo-ET dataset into dinstinct modes that greatly facilitate reserchers' understandings. This is in a similar spirit to the Normal Mode Analysis (NMA) for macromolecules which investigates their movement modes.
 
 ## C. reinhardtii ATP synthase <a name="atp"></a>
-The C. reinhardtii dataset is publicly available at EMPIAR-11830. OPUS-TOMO resolved the rotary substates of ATP synthase in situ.
+The C. reinhardtii dataset is publicly available at EMPIAR-11830. OPUS-ET resolved the rotary substates of ATP synthase in situ.
 <img width="800" height="685" alt="image" src="https://github.com/user-attachments/assets/6fcbc79f-60e1-4663-a612-d2684054700f" />
 
 ## S.pombe 80S Ribosome <a name="80s"></a>
 The S.pombe dataset is publicly available at EMPIAR-10988 (https://www.ebi.ac.uk/empiar/EMPIAR-10988/).
-In this dataset, OPUS-TOMO has shown superior structural disentanglement ability to capture continous structral changes into PCs of the composition latent space, and characterizes 
+In this dataset, OPUS-ET has shown superior structural disentanglement ability to capture continous structral changes into PCs of the composition latent space, and characterizes 
 functionally important subpopulations. The results are deposited in https://zenodo.org/records/12631920.
 
 <img width="860" height="662" alt="image" src="https://github.com/user-attachments/assets/a13ee6d1-f614-43fb-96b6-6d53f0612e6d" />
@@ -83,24 +83,24 @@ https://github.com/user-attachments/assets/806c518c-427d-41c9-905d-17b18fba8922
 # set up environment <a name="setup"></a>
 
 After cloning the repository, to run this program, you need to have an environment with pytorch and a machine with GPUs. The recommended configuration is a machine with 4 V100 GPUs.
-You can create the conda environment for OPUS-TOMO using one of the environment files in the folder by executing
+You can create the conda environment for OPUS-ET using one of the environment files in the folder by executing
 
 ```
 conda env create --name opustomo -f environmentcu11torch11.yml
 ```
 
-This environment primarily contains cuda 11.3 and pytorch 1.11.0. To create an environment with cuda 11.3 and pytorch 1.10.1, you can choose ```environmentcu11.yml```. Lastly, ```environment.yml``` contains cuda 10.2 and pytorch 1.11.0. On V100 GPU, OPUS-TOMO with cuda 11.3 is 20% faster than OPUS-TOMO with cuda 10.2. However, it's worth noting that OPUS-TOMO **has not been tested on Pytorch version higher than 1.11.0**. We recommend using pytorch version 1.10.1 or 1.11.0. After the environment is sucessfully created, you can then activate it and execute our program within this environement.
+This environment primarily contains cuda 11.3 and pytorch 1.11.0. To create an environment with cuda 11.3 and pytorch 1.10.1, you can choose ```environmentcu11.yml```. Lastly, ```environment.yml``` contains cuda 10.2 and pytorch 1.11.0. On V100 GPU, OPUS-ET with cuda 11.3 is 20% faster than OPUS-ET with cuda 10.2. However, it's worth noting that OPUS-ET **has not been tested on Pytorch version higher than 1.11.0**. We recommend using pytorch version 1.10.1 or 1.11.0. After the environment is sucessfully created, you can then activate it and execute our program within this environement.
 
 ```
 conda activate opustomo
 ```
 
-You can then install OPUS-TOMO by changing to the directory with cloned repository, and execute
+You can then install OPUS-ET by changing to the directory with cloned repository, and execute
 ```
 pip install -e .
 ```
 
-OPUS-TOMO can be kept up to date by 
+OPUS-ET can be kept up to date by 
 ```
 git pull
 ```
@@ -109,7 +109,7 @@ The inference pipeline of our program can run on any GPU which supports cuda 10.
 
 **Usage Example:**
 
-In overall, the commands for training in OPUS-TOMO can be invoked by calling
+In overall, the commands for training in OPUS-ET can be invoked by calling
 ```
 dsd commandx ...
 ```
@@ -128,7 +128,7 @@ or
 dsdsh commandx -h
 ```
 
-**Data Preparation for OPUS-TOMO Using ```dsdsh prepare```:**
+**Data Preparation for OPUS-ET Using ```dsdsh prepare```:**
 
 There is a command ```dsdsh prepare``` for data preparation. Under the hood, ```dsdsh prepare``` points to the prepare.sh inside analysis_scripts. Suppose **the version of star file is 3.1**, the above process can be simplified as,
 ```
@@ -164,16 +164,16 @@ dsd parse_pose_star /work/consensus_data.star -D 236 --Apix 2.1 -o ribo-pose-eul
 
 # training <a name="training"></a>
 
-## train_tomo for OPUS-TOMO <div id="train_tomo">
+## train_tomo for OPUS-ET <div id="train_tomo">
 
-When the inputs are available, you can train the vae for structural disentanglement proposed in OPUS-TOMO's paper using
+When the inputs are available, you can train the vae for structural disentanglement proposed in OPUS-ET's paper using
 
 ```
 dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 8 --zdim 12 --lr 5.e-5 --num-gpus 4 --multigpu --beta-control 0.8 --beta cos -o /work/ribo -r ./mask.mrc --downfrac 0.65 --valfrac 0.1 --lamb 0.8 --split ribo-split.pkl --bfactor 4. --templateres 160 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/
 ```
 
 The argument following train_tomo specifies the starfile for subtomograms. In contrast to OPUS-DSD, we no longer need to specify ctf since they are read from the subtomogram starfile.
-Moreover, OPUS-TOMO needs to specify the angpix of the subtomogram by ```--angpix```, and also the prefix directory before the filename for subtomogram in starfile by ```--datadir```.
+Moreover, OPUS-ET needs to specify the angpix of the subtomogram by ```--angpix```, and also the prefix directory before the filename for subtomogram in starfile by ```--datadir```.
 
 The functionality of each argument is explained in the table:
 | argument |  explanation |
@@ -197,7 +197,7 @@ The functionality of each argument is explained in the table:
 | --bfactor | will apply exp(-bfactor/4 * s^2 * 4*pi^2/ angpix**2 ) decaying to the FT of reconstruction, s is the magnitude of frequency, increase it leads to sharper reconstruction, but takes longer to reveal the part of model with weak density since it actually dampens learning rate, possible ranges are [3, 5]. Consider using higher values for more dynamic structures.  |
 | --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to subtomograms. The default value is 192. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
 | --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the Z-projection of subtomograms and experimental subtomograms after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_tomo```|
-| --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-TOMO will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
+| --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-ET will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
 | --angpix | the angstrom per pixel for the input subtomogram |
 | --datadir | the root directory before the filename of subtomogram in input starfile |
 | --estpose | estimate a pose correction for each subtomogram during training |
@@ -230,7 +230,7 @@ dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl --lazy-single -n 20
 
 both are in the output directory
 
-During training, opus-TOMO will output temporary volumes called ```tmp*.mrc``` (or the prefix you specified), you can check the intermediate results by viewing them in Chimera. By default, opus-TOMO reads subotomograms from disk as needed during training.
+During training, OPUS-ET will output temporary volumes called ```tmp*.mrc``` (or the prefix you specified), you can check the intermediate results by viewing them in Chimera. By default, OPUS-ET reads subotomograms from disk as needed during training.
 
 # analyze result <a name="analysis"></a>
 You can use the analysis scripts in ```dsdsh``` to visualize the learned latent space! The analysis procedure is detailed as following and the same as OPUS-DSD!
@@ -326,11 +326,11 @@ This program is built upon a set of great works:
 - [UMAP](https://umap-learn.readthedocs.io/en/latest/)
 - [Healpy](https://healpy.readthedocs.io/en/latest/)
 
-The content below is just for backup purpose, which may not be compitable with the latest version of OPUS-TOMO.
+The content below is just for backup purpose, which may not be compitable with the latest version of OPUS-ET.
 # prepare data <a name="preparation"></a>
 
 **Data Preparation Guidelines:**
-1. **Cryo-ET Dataset:** The form of inputs of OPUS-TOMO is similar to the inputs required for subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.) We also have a script adapted from Relion for preparing the subtomograms and ctf starfiles. It is named as *relion_ctf_prepare.py* in the root folder of this repository or in the google drive https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing. You can follow the detailed data preparation process in this paper: https://www.nature.com/articles/nprot.2016.124 or the instruction below.
+1. **Cryo-ET Dataset:** The form of inputs of OPUS-ET is similar to the inputs required for subtomogram averaging in Relion 3.0.8, which consists of subtomograms and the CTF parameters of tilts for each subtomogram in a starfile. Ensure that the cryo-ET dataset is stored as separate subtomograms in directory. A good dataset for tutorial is the S.pombe which is available at https://empiar.pdbj.org/entry/10180/ (It contains the coordinates for subtomograms and tilt alignment parameters for reconstructing tomograms.) We also have a script adapted from Relion for preparing the subtomograms and ctf starfiles. It is named as *relion_ctf_prepare.py* in the root folder of this repository or in the google drive https://drive.google.com/drive/folders/1FcF1PC-0lY2C6DP0zP7K7qhcz_ltn5t-?usp=sharing. You can follow the detailed data preparation process in this paper: https://www.nature.com/articles/nprot.2016.124 or the instruction below.
 
 2. **Subtomogram averaging/Template matching Result:** The program requires a subtomogram averaging or template matching results, where the pose of subtomogram is determined, which should not apply any symmetry and must be stored as a Relion STAR file.
 
@@ -390,7 +390,7 @@ TS_026_st.order records the tilt angle and its corresponding exposure dose (You 
 ```
 TS_026_st.coords records the coordinate of subtomograms (which is picked by DeePiCt or PyTOM). PyTOM features a user-friendly GUI! 
 For PyTOM template matching result, you need to first convert the particle picking result in xml file to star file using ```conv.sh``` in the shared google drive folder.
-The starfile then contains the orientation of each subtomogram, which allows further filtering using OPUS-TOMO. An example starfile is of the form,
+The starfile then contains the orientation of each subtomogram, which allows further filtering using OPUS-ET. An example starfile is of the form,
 ```
 data_
 
@@ -468,7 +468,7 @@ This script will output the starfiles for the CTFs of subtomograms, and the star
 **For template matching result from PyTOM, you need to combine the starfile generated by ```relion_ctf_prepare.py``` and the starfile converted by pyTOM which 
 contains subtomogram ortientations.** You can do this by assigning the ```rlnAngleRot, rlnAngleTilt, rlnAnglePsi``` columns in the starfile for template matching result
 to the starfile generated by ```relion_ctf_prepare.py```. The operations on starfile can be conveniently handled by starpy at https://github.com/fuzikt/starpy. This starfile with 
-all orientation information can be used to train OPUS-TOMO! The block below shows the necessary columns in the combined starfile.
+all orientation information can be used to train OPUS-ET! The block below shows the necessary columns in the combined starfile.
 ```
 data_
 
@@ -488,7 +488,7 @@ _rlnAnglePsi #11
 
 **Correctness check**:
 
-Opus-TOMO mainly assumes the tomogram is reconstructed by the weighted backprojection (WBP) algorithm in Aretomo. The underlying principle for WBP can be referred to the note (https://static1.squarespace.com/static/56b6357e01dbaea0266fe701/t/56edae5237013bc012524a8d/1458417249296/Tomography+Interpreted+as+a+Filtered+Back+Projection+-+Martin+Nilsson.pdf#page=17.19), which gives the detailed mathamtical derivation for inverse Radon transform. 
+OPUS-ET mainly assumes the tomogram is reconstructed by the weighted backprojection (WBP) algorithm in Aretomo. The underlying principle for WBP can be referred to the note (https://static1.squarespace.com/static/56b6357e01dbaea0266fe701/t/56edae5237013bc012524a8d/1458417249296/Tomography+Interpreted+as+a+Filtered+Back+Projection+-+Martin+Nilsson.pdf#page=17.19), which gives the detailed mathamtical derivation for inverse Radon transform. 
 The tilt image will be first multiplied with $`cos(\theta)`$, where $`\theta`$ is the tilt angle, to account the tilt-dependent effective sample thickness.
 The fourier transform of tilt image will be multiplied with R-weight (r or $`r*(0.55 + 0.45 cos(2\pi r)`$) in Aretomo, where r is the modulus of frequency vector), then performed an inverse fourier transform and backproject according to its tilt angle. Aretomo's output has the same convention as IMOD's though Aretomo goes through a series of transformations.
 It is worthing noting that the tilt angle for CTF is inverted in ```relion_ctf_prepare.ctf``` to accommodate Relion's backprojection convention. Aretomo's backprojection convention can be checked in their source code here: https://github.com/czimaginginstitute/AreTomo2/blob/e9f89413352511f6cac0974a93fd6ff21b9c4129/Recon/GBackProj.cu#L31). 
@@ -496,8 +496,8 @@ This convention will make negative tilt angle locate at positive z axis.
 Aretomo reconstruct tomogram in real space. Moreover, it flipped z axis after backprojection to make the tomogram match with IMOD's convention. Check
 https://github.com/czimaginginstitute/AreTomo2/blob/e9f89413352511f6cac0974a93fd6ff21b9c4129/Recon/CDoWbpRecon.cpp#L130
 
-The 3DCTF reconstruction is performed by compute_3dctf in ```ctf.py``` in opus-TOMO. You can check the rot_2d in ```lie_tools.py``` to learn the notation of rotation in opus-TOMO. 
-OPUS-TOMO make positive x axis rotate to negative z axis under negative tilt angle, which can be expressed as $`x' = R(\theta_{Imod})x`$, where x' is the coordinate after tilting, R is the rotation matrix using normal definition as in ```lie_tools.rot_2d```, and x is the original coordinate in tomogram. (the tilt angle is inverted once again in ```ctf.py```, so it revert to the original tilt angle in IMOD's convention). However, the defocus gradient, i.e., which part of x axis has higher underfocus with negative tilt angle, might be trickier! (You can check whether the negtive x axis or positive x axis swings to higher underfocus under negative tilt angle by estimating the defoci of left or right part. If the negative x axis swings to higher underfocus, then positive z axis has larger underfocus, vice versa. I am preparing a script for checking this!) 
+The 3DCTF reconstruction is performed by compute_3dctf in ```ctf.py``` in OPUS-ET. You can check the rot_2d in ```lie_tools.py``` to learn the notation of rotation in OPUS-ET. 
+OPUS-ET make positive x axis rotate to negative z axis under negative tilt angle, which can be expressed as $`x' = R(\theta_{Imod})x`$, where x' is the coordinate after tilting, R is the rotation matrix using normal definition as in ```lie_tools.rot_2d```, and x is the original coordinate in tomogram. (the tilt angle is inverted once again in ```ctf.py```, so it revert to the original tilt angle in IMOD's convention). However, the defocus gradient, i.e., which part of x axis has higher underfocus with negative tilt angle, might be trickier! (You can check whether the negtive x axis or positive x axis swings to higher underfocus under negative tilt angle by estimating the defoci of left or right part. If the negative x axis swings to higher underfocus, then positive z axis has larger underfocus, vice versa. I am preparing a script for checking this!) 
 Lastly, the correctness of 3DCTF can be checked by saving the 3DCTF reconstruction, and compare its missing wedge w.r.t the missing wedge of extracted subtomograms. Make sure they look similar! Uncomment these lines https://github.com/alncat/opusTomo/blob/3a6b4efb51d57aa8e8108a729c87f8a2e0555526/cryodrgn/models.py#L707 https://github.com/alncat/opusTomo/blob/77c91475ade5e828b07646ae8fdcdee151572314/cryodrgn/models.py#L1816 to write out fourier transform of subtomogram and CTF reconstructions.
 
 <img width="450" alt="image" src="https://github.com/alncat/opusTomo/assets/3967300/70c7703b-6676-44fc-9b6c-5ccdac7736f5">
@@ -519,5 +519,5 @@ Finally, you can perform subtomogram averaging using RELION and the following co
 ```
 mpirun -n 7  --oversubscribe  --bind-to none --mca btl '^openib' relion_refine_mpi --o Refine3D/jobdeep/run --auto_refine --split_random_halves --i all_subtomo.star --ref Refine3D/job002/run_class001.mrc --ini_high 40 --dont_combine_weights_via_disc --pool 3 --pad 2  --ctf --particle_diameter 337 --flatten_solvent --zero_mask --oversampling 1 --healpix_order 2 --auto_local_healpix_order 4 --offset_range 6 --offset_step 2 --sym C1 --low_resol_join_halves 40 --norm --scale  --j 4 --firstiter_cc --free_gpu_memory 256 --gpu 0,1,2,3
 ```
-Now, you should have all necessary files for structural heterogeneity analysis in OPUS-TOMO! Congratulations!
+Now, you should have all necessary files for structural heterogeneity analysis in OPUS-ET! Congratulations!
 
