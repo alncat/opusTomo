@@ -50,13 +50,12 @@ In short, OPUS-ET aims to reconstruct both compositional and conformational chan
 Exemplar dynamics resolved by OPUS-ET is shown below:
 The flexible coupling between F0 and F1 subcomplexes in ATP synthase
 
-https://github.com/user-attachments/assets/aeb06e40-02f5-4683-9659-9c0438d91f78
+https://github.com/user-attachments/assets/0a743ce3-e09c-4610-a9b4-c355154f856f
 
 For S. pombe 80S ribosome, a part of translocation dynamics resolved by traversing PC3, which shows the translocation of A/T- and P- site tRNAs to A/P- and P/E- site tRNAs.
 A superb reference for the translation elongation cycle can be found in Ranjan's work, https://www.embopress.org/doi/full/10.15252/embj.2020106449 .
 
 https://github.com/user-attachments/assets/19db80d0-7de6-4ae6-9549-ead16f61915a
-
 
 A part of translation elongation cycle resolved by traversing PC9, which shows the translocation of A/T- tRNAs to A-site and the exit of E-site tRNA for Cm-treated M. pneumoniae 70S ribosome.
 The model is trained using M refined subtomograms.
