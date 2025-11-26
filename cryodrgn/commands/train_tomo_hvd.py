@@ -29,7 +29,12 @@ from cryodrgn.lattice import Lattice, Grid, CTFGrid
 from cryodrgn.group_stat import GroupStat
 from cryodrgn.beta_schedule import get_beta_schedule, LinearSchedule
 from cryodrgn.pose_encoder import PoseEncoder
-import horovod.torch as hvd
+try:
+    import horovod.torch as hvd
+    HOROVOD_AVAILABLE = True
+except ImportError:
+    HOROVOD_AVAILABLE = False
+
 torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True  # PyTorch 1.7+
 
@@ -694,6 +699,14 @@ def get_latest(args):
     return args
 
 def main(args):
+    if not HOROVOD_AVAILABLE:
+        raise RuntimeError(
+                        "Horovod is not installed, but train_tomo_hvd was called.\n"
+                        "Either install horovod (pip install 'horovod[torch]') "
+                        "or use the non-Horovod command train_tomo instead."
+
+        )
+
     t1 = dt.now()
     if args.outdir is not None and not os.path.exists(args.outdir):
         os.makedirs(args.outdir)
@@ -844,7 +857,8 @@ def main(args):
                 masks_params=masks_params,
                 z_affine_dim=args.zaffinedim,
                 ctf_alpha=args.ctfalpha,
-                ctf_beta=args.ctfbeta,)
+                ctf_beta=args.ctfbeta,
+                normalize_ctf=args.normalizectf)
 
     # use downsampled ctf grid
     ctf_grid = CTFGrid(model.render_size+1, device)
