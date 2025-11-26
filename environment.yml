@@ -30,4 +30,3 @@ dependencies:
   - pytorch-mutex=1.0=cuda
   - pip:
     - -r requirements.txt
-prefix: /work/home/nifengyun/.conda/envs/opuset_env
