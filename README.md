@@ -194,13 +194,13 @@ dsd parse_pose_star /work/consensus_data.star -D 236 --Apix 2.1 -o ribo-pose-eul
 When the subtomograms and ctfs exported by WARP are available, you can train OPUS-ET using
 
 ```
-dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3. --templateres 128 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1.
+dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3.5 --templateres 128 --angpix 3.37 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1.
 ```
 
 If you have installed horovod according to tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation, you can train OPUS-ET using
 
 ```
-horovodrun -np 4 dsd train_tomo_hvd /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 1 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3. --templateres 128 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. 
+horovodrun -np 4 dsd train_tomo_hvd /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 1 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3.5 --templateres 128 --angpix 3.37 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. 
 ```
 The above command will spawn 4 processes to train OPUS-ET. Using horovod can greatly reduce the overhead of IO compared to data parallel in pytorch.
 
@@ -253,9 +253,12 @@ You can use ```nohup``` to let the above command execute in background and use r
 Happy Training! **Open an issue when running into any troubles.**
 
 To restart execution from a checkpoint, you can use
-
 ```
-horovodrun -np 4 dsd train_tomo_hvd /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 1 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3. --templateres 128 --angpix 2.1 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --load weights.9.pkl --latents z.9.pkl
+dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3.5 --templateres 128 --angpix 3.37 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --load weights.9.pkl --latents z.9.pkl
+```
+or
+```
+horovodrun -np 4 dsd train_tomo_hvd /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 1 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3.5 --templateres 128 --angpix 3.37 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --load weights.9.pkl --latents z.9.pkl
 ```
 
 | argument |  explanation |
