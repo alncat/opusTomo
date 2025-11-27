@@ -48,7 +48,7 @@ In short, OPUS-ET aims to reconstruct both compositional and conformational chan
 
 
 Exemplar dynamics resolved by OPUS-ET is shown below:
-The flexible coupling between F0 and F1 subcomplexes in ATP synthase
+The counter rotation between F0 and F1 subcomplexes in ATP synthase when switching primary states (3C->1A),
 
 https://github.com/user-attachments/assets/0a743ce3-e09c-4610-a9b4-c355154f856f
 
@@ -76,7 +76,7 @@ The architecture of encoder is (Encoder class in cryodrgn/models.py):
 
 <img width="2056" height="314" alt="image" src="https://github.com/user-attachments/assets/641c9cb1-4c8e-4eb2-a2e2-a2b9cb3e4875" />
 
-The architecture of decoder is (ConvTemplate class in cryodrgn/models.py. In this version, the default size of output volume is set to 192^3, I downsampled the intermediate activations to save some gpu memories. You can tune it as you wish, happy training!):
+The architecture of composition decoder is (ConvTemplate class in cryodrgn/models.py. In this version, the default size of output volume is set to 192^3, I downsampled the intermediate activations to save some gpu memories. You can tune it as you wish, happy training!):
 
 <img width="964" alt="image" src="https://github.com/user-attachments/assets/ed448e4a-3097-473c-8d2a-d50725e1c735">
 
@@ -110,14 +110,14 @@ https://github.com/user-attachments/assets/806c518c-427d-41c9-905d-17b18fba8922
 
 # set up environment <a name="setup"></a>
 
-After cloning the repository, to run OPUS-ET, you need to have an environment with pytorch installed and a machine with GPUs. The recommended configuration is a machine with 4 V100 GPUs.
-You can create the conda environment for OPUS-ET using one of the environment files in the folder by executing
+After cloning the repository, to run OPUS-ET, you need to have an environment with pytorch installed and a machine with GPUs. The recommended hardware configuration is a machine with 4 V100 GPUs.
+You can create the conda environment for OPUS-ET using the environment file in the source folder by executing
 
 ```
 conda env create --name opuset -f environment.yml
 ```
 
-This environment primarily contains cuda 11.3 and pytorch 1.11.0. There are also other environment files for choosing. Additionally, you can install horovod according to the tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation, which enables distributed data parallel for training OPUS-ET. After the environment is sucessfully created, you can then activate it and install OPUS-ET within the environment.
+This will create an environment with cuda 11.3 and pytorch 1.11.0. There are also other environment files for choosing. Additionally, you can install horovod according to the tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation, which enables distributed data parallel for training OPUS-ET. After the environment is sucessfully created, you can then activate it and install OPUS-ET within the environment.
 
 ```
 conda activate opuset
@@ -213,8 +213,8 @@ The functionality of each argument is explained in the table:
 | --poses | pose parameters of the subtomograms in starfile |
 | -n     | the number of training epoches, each training epoch loops through all subtomograms in the training set |
 | -b     | the number of subtomograms for each batch on each gpu, depends on the size of available gpu memory|
-| --zdim  | the dimension of latent encodings, increase the zdim will improve the fitting capacity of neural network, but may risk of overfitting |
-| --zaffinedim | the dimension of dynamics latent encodings, default is 4 |
+| --zdim  | the dimension of composition latent encodings, increase the zdim will improve the fitting capacity of neural network, but may risk of overfitting |
+| --zaffinedim | the dimension of conformation latent encodings, default is 4 |
 | --lr    | the initial learning rate for adam optimizer, 5.e-5 should work fine. |
 | --num-gpus | the number of gpus used for training, note that the total number of subtomograms in the total batch will be n*num-gpus |
 | --multigpu |toggle on the data parallel version |
@@ -222,23 +222,24 @@ The functionality of each argument is explained in the table:
 | --beta |the schedule for restraint stengths, ```cos``` implements the [cyclic annealing schedule](https://www.microsoft.com/en-us/research/blog/less-pain-more-gain-a-simple-method-for-vae-training-with-less-of-that-kl-vanishing-agony/) and is the default option|
 | -o | the directory name for storing results, such as model weights, latent encodings |
 | -r | ***the solvent mask created from consensus model***, our program will focus on fitting the contents inside the mask. Since the majority part of subtomogram doesn't contain electron density, using the original subtomogram size is wasteful, by specifying a mask, our program will automatically determine a suitable crop rate to keep only the region with densities. |
-| --downfrac | the downsampling fraction of input subtomogram, the input to network will be downsampled to size of D\*downfrac, where D is the original size of subtomogram. You can set it according to resolution of consensus model and the ***templateres*** you set. |
-| --lamb | the restraint strength of structural disentanglement prior proposed in OPUS-DSD, set it according to the SNR of your dataset, for dataset with high SNR such as ribosome, splicesome, you can set it to 1. or higher, for dataset with lower SNR, consider lowering it. Possible ranges are [0.1, 3.]. If you find **the UMAP of embeedings is exaggeratedly stretched into a ribbon**, then the lamb you used during training is too high! |
+| --downfrac | the downsampling fraction of input subtomogram, the input to network will be downsampled to size of D\*downfrac, where D is the original size of subtomogram. You can set it according to resolution of consensus model and the ***templateres*** you set. If you are using warp, the subtomogram is often exported as desired size, and this value can be set to 1. |
+| --lamb | the restraint strength of structural disentanglement prior proposed in OPUS-DSD, set it according to the SNR of your dataset, for dataset with high SNR such as ribosome, splicesome, you can set it to 1., for dataset with lower SNR, consider lowering it. Possible ranges are [0.1, 2.]. If you find **the UMAP of embeedings is exaggeratedly stretched into a ribbon**, then the lamb you used during training is too high! |
 | --split | the filename for storing the train-validation split of subtomograms |
 | --valfrac | the fraction of subtomograms in the validation set, default is 0.1 |
 | --bfactor | will apply exp(-bfactor/4 * s^2 * 4*pi^2/ angpix**2 ) decaying to the FT of reconstruction, s is the magnitude of frequency, increase it leads to sharper reconstruction, but takes longer to reveal the part of model with weak density since it actually dampens learning rate, possible ranges are [3, 5]. Consider using higher values for more dynamic structures.  |
-| --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to subtomograms. The default value is 192. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
+| --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to subtomograms. The default value is 160. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
 | --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the Z-projection of subtomograms and experimental subtomograms after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_tomo```|
 | --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-ET will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
 | --angpix | the angstrom per pixel for the input subtomogram |
 | --datadir | the root directory before the filename of subtomogram in input starfile |
 | --estpose | estimate a pose correction for each subtomogram during training |
 | --masks | the mask parameters for defining the rigid-body dynamics |
-| --ctfalpha | the degree of ctf correction to experimental subtomogram, the default value is 0, which is equivalent to phase flipping. You can also try value like 0.5, which will further correct the amplitude of FT of subtomogram by the square root of the ctf function|
-| --ctfbeta | the degree of ctf correction to the reconstruction output by decoder, the default value is 1. You can also try value like 0.5, which will make the voxel values output by decoder smaller since the ctf correction is weaker.|
+| --ctfalpha | the degree of ctf correction on the experimental subtomogram, the default value is 0, which is equivalent to phase flipping. You can also try value like 0.5, which will further correct the amplitude of FT of subtomogram by the square root of the ctf function|
+| --ctfbeta | the degree of ctf correction on the reconstruction output by decoder, the default value is 1. You can also try value like 0.5, which will make the voxel values output by decoder smaller since the ctf correction is weaker.|
 | --tilt-step | the interval between successive tilts, default is 2, you need to change it according to your experimental settings when training subtomograms from WARP|
 | --tilt-range | the range of tilt angles, default is 50, change it to your range when training subtomograms from WARP|
 | --warp | include this argument if the subtomograms are generated by WARP|
+| --accum-step | the gradient accumulation step, default value is 1. If you set it to be n, the gradient will be accumulated over n steps.|
 
 The plot mode will ouput the following images in the directory where you issued the training command, the fllowing images are for ATP synthase dimer:
 
