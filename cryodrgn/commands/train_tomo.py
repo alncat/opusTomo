@@ -69,6 +69,7 @@ def add_args(parser):
 
     group = parser.add_argument_group('Tilt series')
     group.add_argument('--warp', default=False, action='store_true', help='using subtomograms from warp')
+    group.add_argument('--float16', action='store_true', help='converting subtomograms to 16bit float for distributing')
     group.add_argument('--readctf', default=False, action='store_true', help='Reading ctfs from warp')
     group.add_argument('--tilt-step', type=int, default=2, help='the interval between successive tilts (default: %(default)s)')
     group.add_argument('--tilt-range', type=int, default=50, help='the range of tilt angles (default: %(default)s)')
@@ -726,13 +727,13 @@ def main(args):
         data = dataset.LazyTomoMRCData(args.particles, norm=args.norm,
                                    real_data=args.real_data, invert_data=args.invert_data,
                                    ind=ind, keepreal=args.use_real, window=False,
-                                   datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac)
+                                   datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac, use_float16=args.float16)
     elif args.lazy_single and args.warp:
         data = dataset.LazyTomoWARPMRCData(args.particles, norm=args.norm,
                                    real_data=args.real_data, invert_data=args.invert_data,
                                    ind=ind, keepreal=args.use_real, window=False,
                                    datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
-                                   tilt_step=args.tilt_step, tilt_range=args.tilt_range, read_ctf=args.readctf)
+                                   tilt_step=args.tilt_step, tilt_range=args.tilt_range, read_ctf=args.readctf, use_float16=args.float16)
     else:
         raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
 

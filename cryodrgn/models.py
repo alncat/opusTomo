@@ -718,7 +718,7 @@ class Encoder(nn.Module):
             # if using hopf angles, use positive angle, if using euler, use negative
             #x_i = self.transformer_e.rotate_2d(x[i], -euler2, mode='bicubic') #(1, 1, H, W)
 
-            x_i = x[i:i+1]
+            x_i = x[i:i+1].float()
             # downsample volume if render_size < vol_size
             if self.render_size <= self.vol_size:
                 x_fft = fft.torch_rfft3_center(x_i, center=True)
@@ -1821,7 +1821,7 @@ class VanillaDecoder(nn.Module):
                         #ref_i = self.transformer.rotate_2d(ref_i, rand_tilt, mode='bicubic')
                         #ref_i = torch.permute(ref_i, [0, 2, 1, 3])
                         #down sample and shift image
-                        x_fft = fft.torch_rfft3_center(ref_i, center=True)
+                        x_fft = fft.torch_rfft3_center(ref_i.float(), center=True)
                         x_fft = utils.crop_fft3d(x_fft, self.render_size)*(self.render_size/self.vol_size)**3
                         ref_i_ft = self.translate_ft3d(x_fft, -trans[i:i+1]*self.render_size/self.vol_size)
 

@@ -403,7 +403,7 @@ class LazyTomoWARPMRCData(data.Dataset):
     '''
     def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
                  window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75,
-                 tilt_step=2, tilt_range=50, read_ctf=False):
+                 tilt_step=2, tilt_range=50, read_ctf=False, use_float16=False):
         #assert not keepreal, 'Not implemented error'
         assert mrcfile.endswith('.star')
         print(f"tilt_range is {tilt_range}, tilt_step is {tilt_step}")
@@ -416,7 +416,7 @@ class LazyTomoWARPMRCData(data.Dataset):
         ny, nx, nz = particles[0].get().shape
         assert ny == nx == nz, "Images must be cubic"
         assert ny % 2 == 0, "Image size must be even"
-        log('Loaded {} {}x{}x{} images'.format(N, ny, nx, nz))
+        log('Loaded {} {}x{}x{} images, float16: {}'.format(N, ny, nx, nz, use_float16))
         self.particles = particles
         self.N = N
         self.D = ny + 1 # after symmetrizing HT
@@ -432,6 +432,7 @@ class LazyTomoWARPMRCData(data.Dataset):
         self.ctf_files = ctf_files
         self.warp_ctfs = warp_ctfs
         self.read_ctf = read_ctf
+        self.use_float16 = use_float16
         print("ctf is of shape: ", self.ctfs.shape)
         print("first ctf is: ", self.ctfs[0])
 
@@ -450,7 +451,10 @@ class LazyTomoWARPMRCData(data.Dataset):
     def get(self, i):
         part = np.nan_to_num(self.particles[i].get())
         #standardize it
-        part = (part - self.norm[0])/self.norm[1]
+        if self.use_float16:
+            part = (part.astype(np.float16) - self.norm[0])/self.norm[1]
+        else:
+            part = (part - self.norm[0])/self.norm[1]
         ctf = self.ctfs[i]
         if self.read_ctf:
             ctf = self.warp_ctfs[i].get()
@@ -469,7 +473,7 @@ class LazyTomoMRCData(data.Dataset):
     Class representing an .mrcs stack file -- images loaded on the fly
     '''
     def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
-                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75):
+                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75, use_float16=False):
         #assert not keepreal, 'Not implemented error'
         assert mrcfile.endswith('.star')
         particles, ctfs, ctf_files = load_subtomos(mrcfile, True, datadir=datadir, relion31=relion31)
@@ -478,7 +482,7 @@ class LazyTomoMRCData(data.Dataset):
         ny, nx, nz = particles[0].get().shape
         assert ny == nx == nz, "Images must be cubic"
         assert ny % 2 == 0, "Image size must be even"
-        log('Loaded {} {}x{}x{} images'.format(N, ny, nx, nz))
+        log('Loaded {} {}x{}x{} images, float16: {}'.format(N, ny, nx, nz, use_float16))
         self.particles = particles
         self.N = N
         self.D = ny + 1 # after symmetrizing HT
@@ -492,6 +496,7 @@ class LazyTomoMRCData(data.Dataset):
         self.in_mem = in_mem
         self.ctfs = np.stack(ctfs, axis=0)
         self.ctf_files = ctf_files
+        self.use_float16 = use_float16
         print("ctf is of shape: ", self.ctfs.shape)
 
     def estimate_normalization(self, n=100):
@@ -509,7 +514,11 @@ class LazyTomoMRCData(data.Dataset):
     def get(self, i):
         part = self.particles[i].get()
         #standardize it
-        part = (part - self.norm[0])/self.norm[1]
+        if self.use_float16:
+            part = (part.astype(np.float16) - self.norm[0])/self.norm[1]
+        else:
+            part = (part - self.norm[0])/self.norm[1]
+
         #part *= -1/self.norm[1]
         ctf = self.ctfs[i]
         return part, ctf, self.ctf_files[i]
