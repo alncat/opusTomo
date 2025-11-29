@@ -12,7 +12,7 @@
 
 This repository contains the implementation of OPUS-Electron Tomography (OPUS-ET), developed by Zhenwei (Benedict, 本笃) Luo in the group of Prof. Jianpeng Ma at Fudan University.
 
-OPUS-ET is designed to work seamlessly with the WARP/M pipeline to facilitate high-resolution cryo-electron tomography (cryo-ET) structure determination and to reveal in situ macromolecular dynamics.
+OPUS-ET is designed to work seamlessly with the WARP/M pipeline (through a modified WARP which can export subtomogram without CTF correction and CTF parameters as csv, https://github.com/alncat/warp/tree/alncat) to facilitate high-resolution cryo-electron tomography (cryo-ET) structure determination and to reveal in situ macromolecular dynamics.
 
 ▶ Tutorials: see the OPUS-ET wiki:
 https://github.com/alncat/opusTomo/wiki
@@ -196,6 +196,7 @@ When the subtomograms and ctfs exported by WARP are available, you can train OPU
 ```
 dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3.5 --templateres 128 --angpix 3.37 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1.
 ```
+OPUS-ET provides a ```--float16``` option, which converts input subtomograms to 16-bit floating point (float16) before transferring them to the GPU. Enabling this option can reduce data transfer overhead and improve training efficiency, especially for large input subtomograms when I/O or communication is a bottleneck.
 
 If you have installed horovod according to tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation, you can train OPUS-ET using
 
@@ -242,7 +243,7 @@ The functionality of each argument is explained in the table:
 | --accum-step | the gradient accumulation step, default value is 1. If you set it to be n, the gradient will be accumulated over n steps.|
 | --float16 | load subtomogram in float16, which might reduce the io overhead when distributing subtomograms to different GPUs.|
 
-The plot mode will ouput the following images in the directory where you issued the training command, the fllowing images are for ATP synthase dimer:
+Using the plot mode will ouput the following images in the directory where you issued the training command, the fllowing images are for ATP synthase dimer:
 
 <img width="441" height="331" alt="image" src="https://github.com/user-attachments/assets/e19105e7-34fa-409b-8cbc-2abf2e870e87" />
 
