@@ -440,7 +440,7 @@ class LazyTomoWARPMRCData(data.Dataset):
         assert self.real_data
         n = min(n,self.N)
         if self.real_data:
-            imgs = np.asarray([self.particles[i].get() for i in range(0,self.N, self.N//n)])
+            imgs = np.asarray([self.particles[i].get().astype(np.float32) for i in range(0,self.N, self.N//n)])
         #if self.invert_data: imgs *= -1
         #log('first image: {}'.format(imgs[0]))
         imgs = np.nan_to_num(imgs[:, :self.D//4, :, :])
