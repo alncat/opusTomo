@@ -269,7 +269,7 @@ class Starfile():
         directory = Path("./subtomos")
         # check directory
         directory.mkdir(parents=True, exist_ok=True)
-        len_tilt = ((tilt_range*2)//tilt_step+1)
+        len_tilt = (int((tilt_range*2)/tilt_step)+1)
         for name, df in particles:
             #print(headers)
             #tilt = df['_rlnAngleTilt'].astype(float).to_numpy()
@@ -415,9 +415,9 @@ class Starfile():
             mrc_files = ['{}/{}'.format(datadir, x) for x in mrc_files]
             csvs = ['{}/{}'.format(datadir, x) for x in csvs]
         ctfs = []
-        tilt_range = int(tilt_range)
-        tilt_step = int(tilt_step)
-        len_tilt = ((tilt_range*2)//tilt_step+1)
+        tilt_range = tilt_range
+        tilt_step = tilt_step
+        len_tilt = (int((tilt_range*2)/tilt_step)+1)
         isotropic = False
         for csv in csvs:
             if isotropic:
@@ -454,12 +454,14 @@ class Starfile():
                 def_tlt = np.stack([tilt, defocus, voltage, cs, w, bfactor, scale], axis=1)
             else:
                 def_tlt = np.stack([tilt, dfu, dfv, dfangle, voltage, cs, w, bfactor, scale], axis=1)
+            #sort tilt first
+            def_tlt = def_tlt[def_tlt[:, 0].argsort()]
             mask = np.isclose(def_tlt[:, 0, None], dummy_tlt[:, 0], atol=tilt_step/2.-0.1)
             #print(def_tlt[:, 0], dummy_tlt[np.where(mask)[1]][:, 0],)
             mask_indices = np.where(mask)[1]
             dummy_tlt[mask_indices] = def_tlt
             if dummy_tlt[dummy_tlt[:, -1] != 0.].shape[0] != def_tlt.shape[0]:
-                print(mask_indices, dummy_tlt, def_tlt)
+                print(csv, mask_indices, dummy_tlt, def_tlt)
             assert np.sum(np.abs(dummy_tlt[dummy_tlt[:, -1] != 0.] - def_tlt)) == 0.
             ctfs.append(dummy_tlt)
 
