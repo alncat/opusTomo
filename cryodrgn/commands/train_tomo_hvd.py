@@ -1232,8 +1232,8 @@ def main(args):
 
         flog('# =====> Epoch: {} Average validation gen_loss = {:.6}, SNR2 = {:.6f}, '\
              'total loss = {:.6f}; Finished in {}'.format(epoch+1,
-                                                         gen_loss_accum/(Nimg_test*hvd.size()+1),
-                                                         snr_accum/(Nimg_test*hvd.size()+1), loss_accum/(Nimg_test*hvd.size()+1), dt.now()-t2))
+                                                         gen_loss_accum/(Nimg_test+1)*hvd.size(),
+                                                         snr_accum/(Nimg_test+1)*hvd.size(), loss_accum/(Nimg_test+1)*hvd.size(), dt.now()-t2))
 
         hvd.barrier()
 
