@@ -117,7 +117,7 @@ You can create the conda environment for OPUS-ET using the environment file in t
 conda env create --name opuset -f environment.yml
 ```
 
-This will create an environment with cuda 11.3 and pytorch 1.11.0. There are also other environment files for choosing. Additionally, you can install horovod according to the tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation, which enables distributed data parallel for training OPUS-ET. After the environment is sucessfully created, you can then activate it and install OPUS-ET within the environment.
+This will create an environment with cuda 11.3 and pytorch 1.11.0. There are also other environment files for choosing. OPUS-ET has a distributed data parallel training script using the default ```torch.distributed```. It also includes an implementation using horovod, which could be installed according to the tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation. After the environment is sucessfully created, you can then activate it and install OPUS-ET within the environment.
 
 ```
 conda activate opuset
@@ -198,6 +198,14 @@ dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 
 ```
 OPUS-ET provides a ```--float16``` option, which converts input subtomograms to 16-bit floating point (float16) before transferring them to the GPU. Enabling this option can reduce data transfer overhead and improve training efficiency, especially for large input subtomograms when I/O or communication is a bottleneck.
 
+To train OPUS-ET using distributed data parallel in pytorch, you can use the command,
+
+```
+torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --poses ribotm_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.5e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o . -r ../zribotmt/mask.mrc --split deep.pkl --lamb 0.5 --bfactor 3.75 --valfrac 0.1 --templateres 128 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --plot --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --estpose
+```
+
+which invokes 4 processes on a 4gpu cluster, and might achieve faster training speed compared with data parallel.
+
 If you have installed horovod according to tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation, you can train OPUS-ET using
 
 ```
@@ -258,7 +266,14 @@ To restart execution from a checkpoint, you can use
 ```
 dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3.5 --templateres 128 --angpix 3.37 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --load weights.9.pkl --latents z.9.pkl
 ```
+,
+
+```
+torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --poses ribotm_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.5e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o . -r ../zribotmt/mask.mrc --split deep.pkl --lamb 0.5 --bfactor 3.75 --valfrac 0.1 --templateres 128 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --plot --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --estpose --load weights.9.pkl --latents z.9.pkl
+```
+
 or
+
 ```
 horovodrun -np 4 dsd train_tomo_hvd /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.e-5 --num-gpus 1 --multigpu --beta-control 0.5 -o /work/ribo -r ./mask.mrc --downfrac 0.9 --valfrac 0.1 --lamb 0.5 --split ribo-split.pkl --bfactor 3.5 --templateres 128 --angpix 3.37 --estpose --tmp-prefix ref --datadir /work/ --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --load weights.9.pkl --latents z.9.pkl
 ```

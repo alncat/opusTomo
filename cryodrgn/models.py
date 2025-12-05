@@ -53,7 +53,8 @@ class HetOnlyVAE(nn.Module):
             z_affine_dim=4,
             ctf_alpha=0.,
             ctf_beta=1.,
-            normalize_ctf=False):
+            normalize_ctf=False,
+            rank=0):
         super(HetOnlyVAE, self).__init__()
         self.lattice = lattice
         self.zdim = zdim

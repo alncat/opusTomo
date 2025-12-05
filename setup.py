@@ -26,7 +26,6 @@ with open('README.md') as inp:
 
 PACKAGES = ['cryodrgn',
             'cryodrgn.commands',
-            #'cryodrgn.sync_batchnorm',
             'cryodrgn.templates',
             'analysis_scripts',
             'testing',

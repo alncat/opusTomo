@@ -459,7 +459,11 @@ class Starfile():
             mask = np.isclose(def_tlt[:, 0, None], dummy_tlt[:, 0], atol=tilt_step/2.-0.1)
             #print(def_tlt[:, 0], dummy_tlt[np.where(mask)[1]][:, 0],)
             mask_indices = np.where(mask)[1]
-            dummy_tlt[mask_indices] = def_tlt
+            try:
+                dummy_tlt[mask_indices] = def_tlt
+            except:
+                print(csv, "tilt assignment error!")
+                raise RuntimeError
             if dummy_tlt[dummy_tlt[:, -1] != 0.].shape[0] != def_tlt.shape[0]:
                 print(csv, mask_indices, dummy_tlt, def_tlt)
             assert np.sum(np.abs(dummy_tlt[dummy_tlt[:, -1] != 0.] - def_tlt)) == 0.

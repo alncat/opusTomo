@@ -403,7 +403,7 @@ class LazyTomoWARPMRCData(data.Dataset):
     '''
     def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
                  window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75,
-                 tilt_step=2, tilt_range=50, read_ctf=False, use_float16=False):
+                 tilt_step=2, tilt_range=50, read_ctf=False, use_float16=False, rank=0):
         #assert not keepreal, 'Not implemented error'
         assert mrcfile.endswith('.star')
         print(f"tilt_range is {tilt_range}, tilt_step is {tilt_step}")
@@ -433,8 +433,9 @@ class LazyTomoWARPMRCData(data.Dataset):
         self.warp_ctfs = warp_ctfs
         self.read_ctf = read_ctf
         self.use_float16 = use_float16
-        print("ctf is of shape: ", self.ctfs.shape)
-        print("first ctf is: ", self.ctfs[0])
+        if rank == 0:
+            print("ctf is of shape: ", self.ctfs.shape)
+            print("first ctf is: ", self.ctfs[0])
 
     def estimate_normalization(self, n=100):
         assert self.real_data
@@ -473,7 +474,7 @@ class LazyTomoMRCData(data.Dataset):
     Class representing an .mrcs stack file -- images loaded on the fly
     '''
     def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
-                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75, use_float16=False):
+                 window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75, use_float16=False, rank=0):
         #assert not keepreal, 'Not implemented error'
         assert mrcfile.endswith('.star')
         particles, ctfs, ctf_files = load_subtomos(mrcfile, True, datadir=datadir, relion31=relion31)
@@ -497,7 +498,8 @@ class LazyTomoMRCData(data.Dataset):
         self.ctfs = np.stack(ctfs, axis=0)
         self.ctf_files = ctf_files
         self.use_float16 = use_float16
-        print("ctf is of shape: ", self.ctfs.shape)
+        if rank == 0:
+            print("ctf is of shape: ", self.ctfs.shape)
 
     def estimate_normalization(self, n=100):
         assert self.real_data
@@ -653,6 +655,56 @@ class SplitBatchSampler(data.Sampler):
         for i in range(self.num_samples//self.batch_size):
             sample_ind = rand_perms[i*self.batch_size:(i+1)*self.batch_size]
             yield self.ind[sample_ind]
+
+    def __len__(self,):
+        return self.num_samples//self.batch_size
+
+class ClassSplitBatchDistSampler(data.Sampler):
+    def __init__(self, batch_size, poses_ind, split, rank=0, size=1):
+        #self.weights = torch.as_tensor(weights)
+        self.batch_size = batch_size
+        self.poses_ind = poses_ind # list of torch tensors
+
+        #filter poses_ind not in split
+        poses_ind_new = []
+        for x in self.poses_ind:
+            filtered= x[np.isin(x.numpy(), split.numpy())]
+            #filter particles not in this rank
+            local_size = len(filtered)//size
+            poses_ind_new.append(filtered[rank*local_size:(rank+1)*local_size])
+        self.poses_ind = poses_ind_new
+        self.ns = [(len(x) // self.batch_size)*self.batch_size for x in self.poses_ind]
+        print(self.ns)
+
+        self.num_samples = sum(self.ns)
+        self.rank = rank
+        self.size = size
+        if rank == 0:
+            print("num_samples: ", self.num_samples)
+
+    def __iter__(self,):
+        current_num_samples = 0
+        current_ind = [0 for _ in self.ns]
+        rand_perms = [torch.randperm(len(x)) for x in self.poses_ind]
+        #print("rand_perms: ", rand_perms)
+        #print("ns: ", self.ns)
+        #print("current_ind: ", current_ind)
+        for _ in range(self.num_samples//self.batch_size):
+            #rand_tensor = torch.multinomial(self.weights, 1, self.replacement)
+            found = False
+            while not found and current_num_samples < self.num_samples:
+                rand_pose = torch.randint(high=len(self.ns), size=(1,), dtype=torch.int64)
+                if current_ind[rand_pose] < self.ns[rand_pose]:
+                    found = True
+            if not found:
+                break
+            start = current_ind[rand_pose]
+            current_ind[rand_pose] += self.batch_size
+            current_num_samples += self.batch_size
+            sample_ind = rand_perms[rand_pose][start:start + self.batch_size]
+            #indexing poses_ind
+            yield self.poses_ind[rand_pose][sample_ind]
+        print("final_ind: ", current_ind)
 
     def __len__(self,):
         return self.num_samples//self.batch_size

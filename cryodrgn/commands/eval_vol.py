@@ -154,7 +154,7 @@ def main(args):
 
     if args.load:
         log('Loading checkpoint from {}'.format(args.load))
-        checkpoint = torch.load(args.load)
+        checkpoint = torch.load(args.load, map_location="cuda:0")
         print(checkpoint.keys())
         #pretrained_dict = checkpoint['model_state_dict']
         #model_dict = model.state_dict()
