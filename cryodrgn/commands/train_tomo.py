@@ -178,61 +178,6 @@ def train_batch(model, lattice, y, yt, rot, trans, optim, beta,
     return z_mu, loss.item(), gen_loss.item(), snr.item(), losses['l2'].mean().item(), losses['tvl2'].mean().item(), \
             mu2.item()/args.zdim, std2.item()/args.zdim, mmd.item(), c_mmd.item(), mse.item(), body_poses_pred
 
-def data_augmentation(y, trans, ctf_grid, grid, window_r, downfrac=0.5):
-    with torch.no_grad():
-        y_fft = fft.torch_fft2_center(y)
-        # undo experimental image translation
-        #trans = torch.clamp(trans, min=-10, max=10)
-        #rand_t = torch.randn_like(trans)*2.5
-        # correct translation
-        y_fft = ctf_grid.translate_ft(y_fft, -trans)#+rand_t)#+trans.round())
-        #y_fft = ctf_grid.translate_ft(y_fft, -trans.round())
-
-        #window y
-        y = fft.torch_ifft2_center(y_fft)
-        mask_real = grid.get_circular_mask(window_r)
-        y *= mask_real
-        y_fft = fft.torch_fft2_center(y)
-
-        # apply b factor
-        #random_b = np.random.rand() - 0.5
-        random_b = (np.random.rand() - 0.5)*0.5*torch.ones(y_fft.shape[0])
-        #random_b = 0.5*(torch.rand(y_fft.shape[0]) - 0.5)
-        b_fact = ctf_grid.get_b_factor_bc(b=random_b).unsqueeze(1)
-        #random_b = 0.5*(torch.rand(y_fft.shape[0]) - 0.5)
-        #random_d = torch.rand(y_fft.shape[0])
-        #d_fact = ctf_grid.get_ddefocus_bc(b=random_d).unsqueeze(1)
-        y_fft_ori = y_fft*b_fact
-
-        #random_b = np.random.rand() - 0.5
-        #random_b = 0.25*(torch.rand(y_fft.shape[0]) - 0.5)
-        #b_fact = ctf_grid.get_b_factor_bc(b=random_b).unsqueeze(1)
-        #y_fft *= b_fact
-
-        #print(y.shape, y_fft.shape)
-        # window y
-        #y = fft.torch_ifft2_center(y_fft)
-        #mask_real = grid.get_circular_mask(window_r)
-        #y *= mask_real
-
-        # downsample in frequency space by applying cos filter
-        #y_fft = utils.mask_image_fft(y, mask, ctf_grid)
-
-        down_size = (int(y.shape[-1]*downfrac)//2)*2
-        down_scale = down_size/y.shape[-1]
-        y_fft_s = torch.fft.fftshift(y_fft, dim=(-2))
-        y_fft_crop = utils.crop_fft(y_fft_s, down_size)*(down_scale)**2
-        y_fft = torch.fft.ifftshift(y_fft_crop, dim=(-2))
-        y = fft.torch_ifft2_center(y_fft)
-
-        y_fft_s = torch.fft.fftshift(y_fft_ori, dim=(-2))
-        y_fft_crop = utils.crop_fft(y_fft_s, down_size)*(down_scale)**2
-        y_fft_ori = torch.fft.ifftshift(y_fft_crop, dim=(-2))
-
-        #y_rand = ctf_grid.sample_local_translation(y_fft, 1, 1.)
-        #y = fft.torch_ifft2_center(y_rand)
-        return y, y_fft_ori, random_b
-
 def preprocess_input(y, yt, lattice, trans, vanilla=True):
     # center the image
     B = y.size(0)
