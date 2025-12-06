@@ -47,7 +47,7 @@ OPUS-ET can be applied to STA results (e.g., from M): disentangle compositional 
 In short, OPUS-ET aims to reconstruct both compositional and conformational changes across the entire cryo-ET processing pipeline, from raw picking to high-resolution structural and dynamical analysis.
 
 
-Exemplar dynamics resolved by OPUS-ET is shown below:
+Exemplar dynamics resolved by OPUS-ET are shown below:
 The counter rotation between F0 and F1 subcomplexes in ATP synthase when switching primary states (3C->1A),
 
 https://github.com/user-attachments/assets/0a743ce3-e09c-4610-a9b4-c355154f856f
@@ -62,21 +62,19 @@ The model is trained using M refined subtomograms.
 
 https://github.com/user-attachments/assets/9d5a52f7-95dd-4c30-b5bd-938dbfaa5d69
 
-Another important function of OPUS-ET is clustering the template matching result and achiving high-resolution reconstruction! You can check the wiki pages for a tutorial (https://github.com/alncat/opusTomo/wiki)
+Another important function of OPUS-ET is clustering the template matching result and achiving high-resolution reconstruction, which are detailed in the wiki (https://github.com/alncat/opusTomo/wiki)
 
 <img width="859" height="664" alt="image" src="https://github.com/user-attachments/assets/9f49fb93-e19e-4162-9af4-a198e1e7c9a7" />
 
-The workflow of OPUS-ET is demonstrated as follows:
+The architecture of OPUS-ET is demonstrated as follows:
 
 <img width="838" height="334" alt="image" src="https://github.com/user-attachments/assets/97a52494-18fc-4e12-9314-9fd23a9bd6e8" />
 
-
-Note that all input and output of this method are in real space! 
 The architecture of encoder is (Encoder class in cryodrgn/models.py):
 
 <img width="2056" height="314" alt="image" src="https://github.com/user-attachments/assets/641c9cb1-4c8e-4eb2-a2e2-a2b9cb3e4875" />
 
-The architecture of composition decoder is (ConvTemplate class in cryodrgn/models.py. In this version, the default size of output volume is set to 192^3, I downsampled the intermediate activations to save some gpu memories. You can tune it as you wish, happy training!):
+The architecture of composition decoder is (ConvTemplate class in cryodrgn/models.py. In this version, the default size of output volume is set to 160^3, which can be set via ```--templateres```:
 
 <img width="964" alt="image" src="https://github.com/user-attachments/assets/ed448e4a-3097-473c-8d2a-d50725e1c735">
 
@@ -86,7 +84,7 @@ The architecture of conformation decoder is:
 
 OPUS-ET directly takes 3D subtomograms as input. Its performance is robust across subtomograms obtained from a wide range of particle localization methods, including neural network–based approaches such as DeePiCt (https://github.com/ZauggGroup/DeePiCt￼) and more classical, template-based methods such as PyTom (https://github.com/SBC-Utrecht/PyTom/￼, which provides GPU-accelerated template matching with a user-friendly GUI).
 
-For structural heterogeneity analysis, OPUS-ET supports simple yet powerful statistical tools, namely PCA and k-means clustering. In practice, these two approaches already enable rich insights into both conformational and compositional changes of macromolecular complexes. In particular, performing PCA in the learned latent space allows OPUS-ET to decompose structural variations in cryo-ET datasets into distinct modes of motion, greatly facilitating interpretation. Conceptually, this is analogous to normal mode analysis (NMA) for macromolecules, which characterizes their intrinsic modes of movement.
+For structural heterogeneity analysis, OPUS-ET incorporates simple yet powerful statistical tools—principally PCA and k-means clustering. In practice, these methods provide rich insights into both conformational and compositional variability within macromolecular assemblies. In particular, applying PCA to the learned latent space enables OPUS-ET to decompose structural variations in cryo-ET datasets into interpretable modes of motion. This greatly facilitates downstream biological interpretation. Conceptually, this latent-space PCA is analogous to normal mode analysis (NMA) in structural biology, which characterizes the intrinsic dynamical modes of macromolecules.
 
 ## C. reinhardtii ATP synthase <a name="atp"></a>
 The C. reinhardtii dataset is publicly available at EMPIAR-11830. OPUS-ET resolved the rotary substates of ATP synthase in situ.
@@ -201,7 +199,7 @@ OPUS-ET provides a ```--float16``` option, which converts input subtomograms to 
 To train OPUS-ET using distributed data parallel in pytorch, you can use the command,
 
 ```
-torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --poses ribotm_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.5e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o . -r ../zribotmt/mask.mrc --split deep.pkl --lamb 0.5 --bfactor 3.75 --valfrac 0.1 --templateres 128 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --plot --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --estpose
+torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --poses ribotm_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.5e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o . -r ../zribotmt/mask.mrc --split deep.pkl --lamb 0.5 --bfactor 3.75 --valfrac 0.1 --templateres 128 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --estpose
 ```
 
 which invokes 4 processes on a 4gpu cluster, and might achieve faster training speed compared with data parallel.
@@ -269,7 +267,7 @@ dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 
 ,
 
 ```
-torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --poses ribotm_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.5e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o . -r ../zribotmt/mask.mrc --split deep.pkl --lamb 0.5 --bfactor 3.75 --valfrac 0.1 --templateres 128 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --plot --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --estpose --load weights.9.pkl --latents z.9.pkl
+torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --poses ribotm_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.5e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o . -r ../zribotmt/mask.mrc --split deep.pkl --lamb 0.5 --bfactor 3.75 --valfrac 0.1 --templateres 128 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --estpose --load weights.9.pkl --latents z.9.pkl
 ```
 
 or
