@@ -1098,13 +1098,14 @@ def main(args):
                 out_pose = '{}/pose.{}.pkl'.format(args.outdir, epoch)
                 log('save {}'.format(out_pose))
                 posetracker.save(out_pose)
-
-        flog('# =====> Epoch: {} Average training gen_loss = {:.6}, SNR2 = {:.6f}, '\
+        loss_statistics = torch.tensor([gen_loss_accum, snr_accum, loss_accum], device=device)
+        dist.all_reduce(loss_statistics)
+        if epoch % world_size == rank:
+            flog('# =====> Epoch: {} Average training gen_loss = {:.6}, SNR2 = {:.6f}, '\
              'total loss = {:.6f}; Finished in {}'.format(epoch+1,
-                                                         gen_loss_accum/Nimg_train*world_size,
-                                                         snr_accum/Nimg_train*world_size, loss_accum/Nimg_train*world_size, dt.now()-t2))
+                                                         loss_statistics[0].item()/Nimg_train,
+                                                         loss_statistics[1].item()/Nimg_train, loss_statistics[2].item()/Nimg_train, dt.now()-t2))
 
-        dist.barrier()
         # validation
         gen_loss_accum, snr_accum, loss_accum = 0, 0, 0
         loop = tqdm(enumerate(val_data_generator), total=len(val_data_generator), leave=True, file=sys.stdout)
@@ -1148,10 +1149,13 @@ def main(args):
             snr_accum += snr*B
             loss_accum += loss*B
 
-        flog('# =====> Epoch: {} Average validation gen_loss = {:.6}, SNR2 = {:.6f}, '\
+        loss_statistics = torch.tensor([gen_loss_accum, snr_accum, loss_accum], device=device)
+        dist.all_reduce(loss_statistics)
+        if epoch % world_size == rank:
+            flog('# =====> Epoch: {} Average validation gen_loss = {:.6}, SNR2 = {:.6f}, '\
              'total loss = {:.6f}; Finished in {}'.format(epoch+1,
-                                                         gen_loss_accum/(Nimg_test+1)*world_size,
-                                                         snr_accum/(Nimg_test+1)*world_size, loss_accum/(Nimg_test+1)*world_size, dt.now()-t2))
+                                                         loss_statistics[0].item()/(Nimg_test+1),
+                                                         loss_statistics[1].item()/(Nimg_test+1), loss_statistics[2].item()/(Nimg_test+1), dt.now()-t2))
 
         if args.checkpoint and epoch % args.checkpoint == 0 and rank == 0:
             out_weights = '{}/weights.{}.pkl'.format(args.outdir,epoch)
