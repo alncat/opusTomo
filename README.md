@@ -12,7 +12,7 @@
 
 This repository contains the implementation of OPUS-Electron Tomography (OPUS-ET), developed by Zhenwei (Benedict, 本笃) Luo in the group of Prof. Jianpeng Ma at Fudan University.
 
-OPUS-ET is designed to work seamlessly with the WARP/M pipeline (through a modified WARP which can export subtomogram without CTF correction and CTF parameters as csv, https://github.com/alncat/warp/tree/alncat) to facilitate high-resolution cryo-electron tomography (cryo-ET) structure determination and to reveal in situ macromolecular dynamics.
+OPUS-ET is designed to work seamlessly with the WARP/M pipeline (through a modified WARP which can export subtomogram without CTF correction and CTF parameters as csv, https://github.com/alncat/warp/tree/alncat) to facilitate high-resolution cryo-electron tomography (cryo-ET) structure determination and to reveal in situ macromolecular dynamics. OPUS-ET supports different parallel strategies for efficient training!
 
 ▶ Tutorials: see the OPUS-ET wiki:
 https://github.com/alncat/opusTomo/wiki
@@ -117,7 +117,7 @@ You can create the conda environment for OPUS-ET using the environment file in t
 conda env create --name opuset -f environment.yml
 ```
 
-This will create an environment with cuda 11.3 and pytorch 1.11.0. There are also other environment files for choosing. OPUS-ET has a distributed data parallel training script using the default ```torch.distributed```. It also includes an implementation using horovod, which could be installed according to the tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation. After the environment is sucessfully created, you can then activate it and install OPUS-ET within the environment.
+This will create an environment with cuda 11.3 and pytorch 1.11.0. There are also other environment files for choosing. OPUS-ET has several different training scripts implementing different parallelisms. ```dsd train_tomo``` implements a legacy data parallel training. ```cryodrgn.commands.train_tomo_dist``` implements distributed data parallel training using ```torch.distributed```. ```dsd train_tomo_hvd``` implements distributed data parallel training using horovod, which should have horovod installed according to the tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation. After the environment is sucessfully created, you can then activate it and install OPUS-ET within the environment.
 
 ```
 conda activate opuset
