@@ -12,7 +12,7 @@
 
 This repository contains the implementation of OPUS-Electron Tomography (OPUS-ET), developed by Zhenwei (Benedict, 本笃) Luo in the group of Prof. Jianpeng Ma at Fudan University.
 
-OPUS-ET is designed to work seamlessly with the WARP/M pipeline (through a modified WARP which can export subtomogram without CTF correction and CTF parameters as csv, https://github.com/alncat/warp/tree/alncat) to facilitate high-resolution cryo-electron tomography (cryo-ET) structure determination and to reveal in situ macromolecular dynamics. OPUS-ET supports different parallel strategies for efficient training!
+OPUS-ET is designed to work seamlessly with the WARP/M pipeline (through a modified WARP which can export subtomogram without CTF correction and CTF parameters as csv, https://github.com/alncat/warp/tree/alncat) to facilitate high-resolution cryo-electron tomography (cryo-ET) structure determination and to reveal in situ macromolecular dynamics. OPUS-ET supports different parallel strategies for efficient training! Note that OPUS-ET is still undergoing code improvements, you can kept up to data by ```git pull```.
 
 ▶ Tutorials: see the OPUS-ET wiki:
 https://github.com/alncat/opusTomo/wiki
