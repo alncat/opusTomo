@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import pickle
+import inspect
 import healpy as hp
 from sklearn.cluster import KMeans
 
@@ -11,10 +12,12 @@ log = utils.log
 
 class PoseTracker(nn.Module):
     def __init__(self, rots_np, trans_np=None, D=None, emb_type=None, deform=False, deform_emb_size=2, eulers_np=None,
-                 latents=None, batch_size=None, body_eulers_np=None, body_trans_np=None, affine_dim=4):
+                 latents=None, batch_size=None, body_eulers_np=None, body_trans_np=None, affine_dim=4, rank=0):
         super(PoseTracker, self).__init__()
         rots = torch.tensor(rots_np).float()
         trans = torch.tensor(trans_np).float() if trans_np is not None else None
+        if trans is None:
+            trans = torch.zeros(rots.shape[0], 3)
         self.eulers = torch.tensor(eulers_np).float() if eulers_np is not None else None
         self.body_eulers = torch.tensor(body_eulers_np).float() if body_eulers_np is not None else None
         self.body_trans = torch.tensor(body_trans_np).float() if body_trans_np is not None else None
@@ -53,7 +56,8 @@ class PoseTracker(nn.Module):
             #self.deform_emb = deform_emb
 
             rots_from_euler = lie_tools.euler_to_SO3(self.eulers)
-            print(rots_from_euler[:5, ...], self.rots[:5, ...])
+            if rank == 0:
+                print(rots_from_euler[:5, ...], self.rots[:5, ...])
             self.rots = rots_from_euler
             self.rots_update = torch.eye(3).unsqueeze(0).repeat(self.rots.shape[0], 1, 1)
             self.trans_update = torch.zeros_like(self.trans)
@@ -63,11 +67,12 @@ class PoseTracker(nn.Module):
             self.hopfs = lie_tools.euler_to_hopf(self.eulers)
             new_eulers = lie_tools.hopf_to_euler(self.hopfs)
             #print(self.eulers[30, :], self.hopfs.numpy()[30,:], np.where(np.isnan(new_eulers.numpy())))
-            print("euler difference: ", torch.sum((self.eulers - new_eulers).abs())/self.hopfs.shape[0], self.hopfs.shape[0])
-            print("max difference: ", torch.max((self.eulers - new_eulers).abs(), dim=0))
-            # convert poses to healpix indices
-            print(eulers_np[:5, :])
-            print(self.hopfs[:5, :])
+            if rank == 0:
+                print("euler difference: ", torch.sum((self.eulers - new_eulers).abs())/self.hopfs.shape[0], self.hopfs.shape[0])
+                print("max difference: ", torch.max((self.eulers - new_eulers).abs(), dim=0))
+                # convert poses to healpix indices
+                print(eulers_np[:5, :])
+                print(self.hopfs[:5, :])
 
             #reset euler using hopf
             self.eulers = self.hopfs
@@ -284,7 +289,7 @@ class PoseTracker(nn.Module):
         torch.save({"mu": self.mu, "nn": self.nearest_poses, "multi_mu": self.multi_mu}, filename)
 
     @classmethod
-    def load(cls, infile, Nimg, D, emb_type=None, ind=None, deform=False, deform_emb_size=2, latents=None, batch_size=None, affine_dim=4, decoder_infile=None):
+    def load(cls, infile, Nimg, D, emb_type=None, ind=None, deform=False, deform_emb_size=2, latents=None, batch_size=None, affine_dim=4, decoder_infile=None, rank=0):
         '''
         Return an instance of PoseTracker
 
@@ -371,8 +376,12 @@ class PoseTracker(nn.Module):
             eulers = None
 
         if latents is not None:
-            latents = torch.load(latents)
-        return cls(rots, trans, D, emb_type, deform, deform_emb_size, eulers, latents, batch_size, body_eulers_np=body_eulers, body_trans_np=body_trans, affine_dim=affine_dim)
+            load_kwargs = {}
+            if "weights_only" in inspect.signature(torch.load).parameters:
+                # PyTorch is new enough to support this arg (e.g. >= 2.x)
+                load_kwargs["weights_only"] = False  # or True, if you want safe weights-only loading
+            latents = torch.load(latents, **load_kwargs)
+        return cls(rots, trans, D, emb_type, deform, deform_emb_size, eulers, latents, batch_size, body_eulers_np=body_eulers, body_trans_np=body_trans, affine_dim=affine_dim, rank=rank)
 
     def save_decoder_pose(self, out_pkl):
         r = self.rots.cpu().numpy()

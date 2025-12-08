@@ -406,7 +406,7 @@ class LazyTomoWARPMRCData(data.Dataset):
                  tilt_step=2, tilt_range=50, read_ctf=False, use_float16=False, rank=0):
         #assert not keepreal, 'Not implemented error'
         assert mrcfile.endswith('.star')
-        print(f"tilt_range is {tilt_range}, tilt_step is {tilt_step}")
+        log(f"the maximum tilt_range of loading tilt series is {tilt_range}, the tilt_step of loaded tilt series is {tilt_step}")
         particles, ctfs, ctf_files, warp_ctfs = load_warp_subtomos(mrcfile, True, datadir=datadir, relion31=relion31,
                                                         tilt_step=tilt_step, tilt_range=tilt_range)
         self.tilt_step = tilt_step
@@ -416,7 +416,7 @@ class LazyTomoWARPMRCData(data.Dataset):
         ny, nx, nz = particles[0].get().shape
         assert ny == nx == nz, "Images must be cubic"
         assert ny % 2 == 0, "Image size must be even"
-        log('Loaded {} {}x{}x{} images, float16: {}'.format(N, ny, nx, nz, use_float16))
+        log('Loaded {} {}x{}x{} images, while float16: {}'.format(N, ny, nx, nz, use_float16))
         self.particles = particles
         self.N = N
         self.D = ny + 1 # after symmetrizing HT
@@ -425,7 +425,7 @@ class LazyTomoWARPMRCData(data.Dataset):
         if norm is None:
             norm = self.estimate_normalization()
         self.norm = norm
-        log('Image Mean, Std are {} +/- {}'.format(*self.norm))
+        log('Subtomogram Mean, Std are {} +/- {}'.format(*self.norm))
         self.window = window_cos_mask(ny, window_r, .95) if window else None
         self.in_mem = in_mem
         self.ctfs = np.stack(ctfs, axis=0)
@@ -434,8 +434,8 @@ class LazyTomoWARPMRCData(data.Dataset):
         self.read_ctf = read_ctf
         self.use_float16 = use_float16
         if rank == 0:
-            print("ctf is of shape: ", self.ctfs.shape)
-            print("first ctf is: ", self.ctfs[0])
+            log("The 3DCTFs are of shape: {}".format(self.ctfs.shape))
+            log("The first 3DCTF is: {}".format(self.ctfs[0]))
 
     def estimate_normalization(self, n=100):
         assert self.real_data
@@ -499,7 +499,7 @@ class LazyTomoMRCData(data.Dataset):
         self.ctf_files = ctf_files
         self.use_float16 = use_float16
         if rank == 0:
-            print("ctf is of shape: ", self.ctfs.shape)
+            log("ctf is of shape: {}".format(self.ctfs.shape))
 
     def estimate_normalization(self, n=100):
         assert self.real_data

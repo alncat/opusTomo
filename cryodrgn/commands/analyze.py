@@ -8,6 +8,7 @@ import sys, os
 import pickle
 import shutil
 import healpy as hp
+import inspect
 from datetime import datetime as dt
 import scipy
 
@@ -279,8 +280,11 @@ def main(args):
             plt.xticks(range(1, len(losses)+1))
             plt.legend(loc="upper right")
             plt.savefig(f"{workdir}/train_losses.png")
-
-        z = torch.load(zfile)["mu"].cpu().numpy()
+        load_kwargs = {}
+        if "weights_only" in inspect.signature(torch.load).parameters:
+            # PyTorch is new enough to support this arg (e.g. >= 2.x)
+            load_kwargs["weights_only"] = False  # or True, if you want safe weights-only loading
+        z = torch.load(zfile, **load_kwargs)["mu"].cpu().numpy()
         log("loading {}, z shape {}".format(zfile, z.shape))
         Nimg = z.shape[0]
         zdim = z.shape[1]
