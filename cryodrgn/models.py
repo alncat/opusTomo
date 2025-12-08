@@ -1493,8 +1493,8 @@ class VanillaDecoder(nn.Module):
             #print(ref_i_ft.shape, c.shape)
             #ref_i_ft *= torch.sign(c[i:i+1])
             ref_i_ft *= c[i:i+1].abs().pow(self.ctf_alpha)*torch.sign(c[i:i+1]) # 1, Z, Y, X, * 1, Z, Y, X
-            bfactor_shift = np.random.randn()/3.*bfactor*0.1
-            ref_i_ft = self.bfactor_blurring(ref_i_ft, -(bfactor-bfactor_shift)/self.Apix**2)/np.exp((bfactor-bfactor_shift)*np.pi**2/9.**2)
+            bfactor_shift = np.random.randn()/3.*bfactor*0.05
+            ref_i_ft = self.bfactor_blurring(ref_i_ft, -(bfactor-bfactor_shift)/self.Apix**2)#/np.exp((bfactor-bfactor_shift)*np.pi**2/9.**2)
             ref_i = fft.torch_irfft3_center(ref_i_ft, center=True)
             ref_i = utils.crop_vol(ref_i, self.crop_vol_size)
 
@@ -1692,9 +1692,9 @@ class VanillaDecoder(nn.Module):
             #print(image_fft.shape, c.shape, ref.shape)
 
             #image_fft: 8, D, H, W; c: 1, D, H, W; ref: 1, crop_D, crop_H, crop_W
-            ctf_beta_rand = (np.random.randn()/4.)*0.1
+            ctf_beta_rand = (np.random.randn()/4.)*0.02
             image_fft = image_fft*c[i:i+1].abs().pow(self.ctf_beta + ctf_beta_rand)
-            image_fft = self.bfactor_blurring(image_fft, (bfactor+bfactor_shift)/2./self.Apix**2)*max(np.sqrt((bfactor+bfactor_shift)/2./self.Apix**2)**3, 0.6)/np.power(0.5, ctf_beta_rand)
+            image_fft = self.bfactor_blurring(image_fft, (bfactor+bfactor_shift)/2./self.Apix**2)#*max(np.sqrt((bfactor+bfactor_shift)/2./self.Apix**2)**3, 0.6)/np.power(0.5, ctf_beta_rand)
             #*ctf_beta*2.
             image_fft = self.tilt_blurring(image_fft, (bfactor+bfactor_shift)/2./self.Apix**2)
             image_fft = fft.torch_irfft3_center(image_fft, center=True)

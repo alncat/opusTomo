@@ -479,7 +479,7 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
 
     #print(losses["kldiv"].shape, losses["tvl2"].shape)
 
-    lamb = args.lamb * (1. - torch.exp(-torch.clamp(0.5*(snr.detach()/0.01)**2, max=16))) #*torch.clamp(snr.abs().sqrt().detach(), max=1.)
+    lamb = args.lamb * (1. - torch.exp(-torch.clamp(0.25*(snr.detach()/0.01)**2, max=16))) #*torch.clamp(snr.abs().sqrt().detach(), max=1.)
     eps = 1e-3
     #kld, mu2 = utils.compute_kld(z_mu, z_logstd)
     #cross_corr = utils.compute_cross_corr(z_mu)
@@ -981,7 +981,7 @@ def main(args):
         update_it = 0
         beta_control = args.beta_control
         #increasing bfactor slowly
-        args.bfactor = bfactor*(1. + 0.25/(1. + 3.*math.exp(-0.1*epoch)))
+        args.bfactor = bfactor*(1. + 0.05/(1. + 3.*math.exp(-0.1*epoch)))
         beta_max    = 1. #0.98 ** (epoch)
         log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
                         lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
