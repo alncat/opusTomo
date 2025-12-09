@@ -938,7 +938,7 @@ def main(args):
     Nimg_test = int(Nimg*args.valfrac)
     train_split, val_split = rand_split[:Nimg_train], rand_split[Nimg_train:]
     train_sampler = dataset.ClassSplitBatchDistSampler(args.batch_size, posetracker.poses_ind, train_split, rank=rank, size=world_size)
-    val_sampler = dataset.ClassSplitBatchDistSampler(args.batch_size, posetracker.poses_ind, val_split, rank=rank, size=world_size)
+    val_sampler = dataset.ClassSplitBatchDistSampler(max(args.batch_size//2, 1), posetracker.poses_ind, val_split, rank=rank, size=world_size)
     print("Nimg_train: ", Nimg_train, len(train_split))
 
     data_generator = DataLoader(data, batch_sampler=train_sampler, pin_memory=True, num_workers=16)#, persistent_workers=True)
