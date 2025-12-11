@@ -284,18 +284,22 @@ def main(args):
         if "weights_only" in inspect.signature(torch.load).parameters:
             # PyTorch is new enough to support this arg (e.g. >= 2.x)
             load_kwargs["weights_only"] = False  # or True, if you want safe weights-only loading
-        z = torch.load(zfile, **load_kwargs)["mu"].cpu().numpy()
+        load_z = torch.load(zfile, **load_kwargs)
+        z = load_z["mu"].cpu().numpy()
         log("loading {}, z shape {}".format(zfile, z.shape))
         Nimg = z.shape[0]
         zdim = z.shape[1]
-        posetracker = PoseTracker.load(poses, Nimg, args.D, None, None,
-                                   deform=True, deform_emb_size=zdim, latents=zfile, batch_size=4)# hp_order=2)
-        groups = posetracker.euler_groups
-        utils.save_pkl(groups, f"{workdir}/groups.pkl")
-        log("loading {}".format(poses))
+        if os.path.isfile(args.pose):
+            posetracker = PoseTracker.load(poses, Nimg, args.D, None, None,
+                                       deform=True, deform_emb_size=zdim, latents=zfile, batch_size=4)# hp_order=2)
+            groups = posetracker.euler_groups
+            utils.save_pkl(groups, f"{workdir}/groups.pkl")
+            log("loading {}".format(poses))
+        else:
+            groups = None
         # loading z codes for deformation too
-        if posetracker.multi_mu is not None:
-            multi_z = posetracker.multi_mu
+        if "multi_mu" in load_z:
+            multi_z = load_z["multi_mu"].cpu().numpy()
         else:
             multi_z = None
     else:
@@ -309,6 +313,44 @@ def main(args):
         analyze_z1(z, outdir, vg)
     else:
         analyze_zN(z, outdir, vg, groups, skip_umap=args.skip_umap, num_pcs=args.pc, num_ksamples=args.ksample)
+        # perform pca on selected cluster
+        # combine composition with conformation
+        if args.kpc is not None:
+            selected_pcs = args.kpc.split(',')
+            selected_pcs = [int(x) for x in selected_pcs]
+            z_k = z[np.isin(kmeans_labels, selected_pcs)]
+            umap_emb = umap_emb[np.isin(kmeans_labels, selected_pcs)]
+            log(f'Perfoming principal component analysis for class {args.kpc}...')
+            pc, pca = analysis.run_pca(z_k)
+            for i in range(args.pc):
+                start, end = np.percentile(pc[:,i],(1,99))
+                log(f'traversing pc {i} from {start} to {end}')
+                z_pc = analysis.get_pc_traj(pca, z_k.shape[1], 10, i+1, start, end)
+                if not os.path.exists(f'{outdir}/pc{i+1}'):
+                    os.mkdir(f'{outdir}/pc{i+1}')
+                np.savetxt(f'{outdir}/pc{i+1}/z_pc.txt', z_pc)
+            # kmeans clustering
+            log('K-means clustering for class {args.kpc}...')
+            K = args.ksample
+            _, centers = analysis.cluster_kmeans(z_k, args.ksample)
+            _, centers_ind = analysis.get_nearest_point(z_k, centers)
+            if not os.path.exists(f'{outdir}/kmeans{K}'):
+                os.mkdir(f'{outdir}/kmeans{K}')
+            np.savetxt(f'{outdir}/kmeans{K}/centers.txt', centers)
+            np.savetxt(f'{outdir}/kmeans{K}/centers_ind.txt', centers_ind, fmt='%d')
+            xmax = np.max(umap_emb[:, 0])
+            xmin = np.min(umap_emb[:, 0])
+            ymax = np.max(umap_emb[:, 1])
+            ymin = np.min(umap_emb[:, 1])
+            analysis.scatter_annotate(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True,
+                                  xlim=(xmin, xmax), ylim=(ymin, ymax),
+                                  alpha=.15, s=1.)
+            plt.xlabel('UMAP1', fontsize=10, weight='bold')
+            plt.ylabel('UMAP2', fontsize=10, weight='bold')
+            plt.savefig(f'{outdir}/kmeans{K}/umap.png')
+
+
+
         if multi_z is not None:
             if not os.path.exists(outdir_multi):
                 os.mkdir(outdir_multi)
