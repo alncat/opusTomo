@@ -11,6 +11,7 @@ import healpy as hp
 import inspect
 from datetime import datetime as dt
 import scipy
+from pathlib import Path
 
 import matplotlib
 matplotlib.use('Agg') # non-interactive backend
@@ -43,6 +44,7 @@ def add_args(parser):
     group.add_argument('--pc', type=int, default=2, help='Number of principal component traversals to generate (default: %(default)s)')
     group.add_argument('--ksample', type=int, default=20, help='Number of kmeans samples to generate (default: %(default)s)')
     group.add_argument('--kpc', type=str, default=None, help='Perform PCA within the kpc cluster (default: %(default)s)')
+    group.add_argument('--joint', action='store_true', help='Concat conformation latent codes to composition')
     return parser
 
 def analyze_z1(z, outdir, vg):
@@ -65,7 +67,7 @@ def analyze_z1(z, outdir, vg):
     ztraj = np.linspace(*np.percentile(z,(5,95)), 10) # or np.percentile(z, np.linspace(5,95,10)) ?
     vg.gen_volumes(outdir, ztraj)
 
-def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=20):
+def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=20, joint=False, multi_z=None):
     zdim = z.shape[1]
 
     # Principal component analysis
@@ -106,6 +108,11 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     K = num_ksamples
     kmeans_labels, centers = analysis.cluster_kmeans(z, K)
     _, centers_ind = analysis.get_nearest_point(z, centers)
+    #concat the corresponding conformation latent codes to centers
+    if multi_z is not None:
+        assert z.shape[0] == multi_z.shape[0], f"z shape {z.shape} must be equal to multi_z shape {multi_z.shape} at first dimension"
+        multi_z_center = multi_z[centers_ind]
+        centers_joint = np.concatenate([centers, multi_z_center], axis=-1)
     if not os.path.exists(f'{outdir}/kmeans{K}'):
         os.mkdir(f'{outdir}/kmeans{K}')
     if not os.path.exists(f'{outdir}/kmeans{K}') or not skip_umap:
@@ -113,11 +120,15 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
         utils.save_pkl(centers, f'{outdir}/kmeans{K}/centers.pkl')
         np.savetxt(f'{outdir}/kmeans{K}/centers.txt', centers)
         np.savetxt(f'{outdir}/kmeans{K}/centers_ind.txt', centers_ind, fmt='%d')
+        if joint:
+            np.savetxt(f'{outdir}/kmeans{K}/centers_joint.txt', centers_joint)
     elif skip_umap:
         log('loading kmeans clustering')
         kmeans_labels = utils.load_pkl(f'{outdir}/kmeans{K}/labels.pkl')
         centers = utils.load_pkl(f'{outdir}/kmeans{K}/centers.pkl')
         centers_ind = np.loadtxt(f'{outdir}/kmeans{K}/centers_ind.txt', dtype=np.int64)
+        if joint:
+            np.savetxt(f'{outdir}/kmeans{K}/centers_joint.txt', centers_joint)
     log('Generating volumes...')
     vg.gen_volumes(f'{outdir}/kmeans{K}', centers)
     log(f'{np.bincount(kmeans_labels)}')
@@ -312,32 +323,71 @@ def main(args):
     if zdim == 1:
         analyze_z1(z, outdir, vg)
     else:
-        analyze_zN(z, outdir, vg, groups, skip_umap=args.skip_umap, num_pcs=args.pc, num_ksamples=args.ksample)
+        if args.kpc is None:
+            analyze_zN(z, outdir, vg, groups, skip_umap=args.skip_umap, num_pcs=args.pc, num_ksamples=args.ksample, joint=args.joint, multi_z=multi_z)
         # perform pca on selected cluster
-        # combine composition with conformation
         if args.kpc is not None:
-            selected_pcs = args.kpc.split(',')
-            selected_pcs = [int(x) for x in selected_pcs]
+            umap_file = f'{outdir}/umap.pkl'
+            if os.path.exists(umap_file):
+                umap_emb = utils.load_pkl(umap_file)
+            else:
+                raise FileNotFoundError(f"UMAP pickle not found: {umap_file}")
+            # kmeans clustering
+            K = args.kpc.split(':')[0]
+            log(f'select K-means clustering for class {args.kpc} in {K}...')
+
+            if os.path.exists(f'{outdir}/kmeans{K}'):
+                log('loading kmeans clustering')
+                kmeans_labels = utils.load_pkl(f'{outdir}/kmeans{K}/labels.pkl')
+                centers = utils.load_pkl(f'{outdir}/kmeans{K}/centers.pkl')
+                centers_ind = np.loadtxt(f'{outdir}/kmeans{K}/centers_ind.txt', dtype=np.int64)
+            else:
+                raise FileNotFoundError(f"Previous KMeans not found: {outdir}/kmeans{K}")
+            #keep only latents in selected classes
+            selected_cls = args.kpc.split(':')[1].split(',')
+            selected_pcs = []
+            for x in selected_cls:
+                #if '-' in string, then expand it
+                if '-' in x:
+                    ks = x.split('-')
+                    assert int(ks[0]) < int(ks[1]), f"starting class number {ks[0]} must be smaller than ending class number {ks[1]}"
+                    selected_pcs += list(range(int(ks[0]), int(ks[1])+1))
+                else:
+                    selected_pcs.append(int(x))
             z_k = z[np.isin(kmeans_labels, selected_pcs)]
             umap_emb = umap_emb[np.isin(kmeans_labels, selected_pcs)]
+            #keep only latents in selected classes
+            if multi_z is not None:
+                multi_z = multi_z[np.isin(kmeans_labels, selected_pcs)]
+                if groups is not None:
+                    groups = groups[np.isin(kmeans_labels, selected_pcs)]
             log(f'Perfoming principal component analysis for class {args.kpc}...')
             pc, pca = analysis.run_pca(z_k)
+            outdir = f'{workdir}/analyze.filter.{E}'
             for i in range(args.pc):
                 start, end = np.percentile(pc[:,i],(1,99))
                 log(f'traversing pc {i} from {start} to {end}')
                 z_pc = analysis.get_pc_traj(pca, z_k.shape[1], 10, i+1, start, end)
                 if not os.path.exists(f'{outdir}/pc{i+1}'):
-                    os.mkdir(f'{outdir}/pc{i+1}')
+                    outdir = Path(outdir)
+                    pc_dir = outdir / f"pc{i+1}"
+                    pc_dir.mkdir(parents=True, exist_ok=True)
                 np.savetxt(f'{outdir}/pc{i+1}/z_pc.txt', z_pc)
             # kmeans clustering
             log('K-means clustering for class {args.kpc}...')
             K = args.ksample
             _, centers = analysis.cluster_kmeans(z_k, args.ksample)
             _, centers_ind = analysis.get_nearest_point(z_k, centers)
+            if multi_z is not None:
+                assert z_k.shape[0] == multi_z.shape[0], f"z shape {z.shape} must be equal to multi_z shape {multi_z.shape} at first dimension"
+                multi_z_center = multi_z[centers_ind]
+                centers_joint = np.concatenate([centers, multi_z_center], axis=-1)
             if not os.path.exists(f'{outdir}/kmeans{K}'):
                 os.mkdir(f'{outdir}/kmeans{K}')
             np.savetxt(f'{outdir}/kmeans{K}/centers.txt', centers)
             np.savetxt(f'{outdir}/kmeans{K}/centers_ind.txt', centers_ind, fmt='%d')
+            if args.joint:
+                np.savetxt(f'{outdir}/kmeans{K}/centers_joint.txt', centers_joint)
             xmax = np.max(umap_emb[:, 0])
             xmin = np.min(umap_emb[:, 0])
             ymax = np.max(umap_emb[:, 1])
@@ -349,9 +399,9 @@ def main(args):
             plt.ylabel('UMAP2', fontsize=10, weight='bold')
             plt.savefig(f'{outdir}/kmeans{K}/umap.png')
 
-
-
         if multi_z is not None:
+            if args.kpc is not None:
+                outdir_multi = f'{workdir}/defanalyze.filter.{E}'
             if not os.path.exists(outdir_multi):
                 os.mkdir(outdir_multi)
             analyze_zN(multi_z, outdir_multi, vg, groups, skip_umap=args.skip_umap, num_pcs=min(args.pc, multi_z.shape[1]), num_ksamples=args.ksample)

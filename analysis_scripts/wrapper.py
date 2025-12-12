@@ -6,8 +6,8 @@ class eval_vol:
     @classmethod
     def add_args(cls, parser):
         parser.add_argument('resdir', type=os.path.abspath, help='result directory')
-        parser.add_argument('N', type=int, help='epoch number')
-        parser.add_argument('method', choices=('kmeans','pc', 'dpc'), default='kmeans', help='choosing an analysis method (default: %(default)s), \
+        parser.add_argument('N', type=str, help='epoch number')
+        parser.add_argument('method', choices=('kmeans','pc', 'dpc', 'joint'), default='kmeans', help='choosing an analysis method (default: %(default)s), \
                             dpc is used to reconstruct multi-body dynamics')
         parser.add_argument('num', type=int, help='the number of KMeans clusters or PCs for reconstruction')
         parser.add_argument('apix', type=float, help='desired apix of the output volume')
@@ -38,14 +38,23 @@ class analyze:
         parser.add_argument('numpc', type=int, help='number of PCs')
         parser.add_argument('numk', type=int, help='number of KMeans clusters')
         parser.add_argument('--skip-umap', action='store_true', required=False, help='instead of learn a umap embedding, loading one from umap.pkl (default: %(default)s)')
-
+        parser.add_argument('--kpc', type=str, required=False, help='perform PCA on classes selected in kpc (default: %(default)s)')
+        parser.add_argument('--joint', action='store_true', required=False, help='saving composition latent code together with conformation latent code (default: %(default)s)')
     @classmethod
     def main(cls, args):
         script_path = os.path.join(os.path.dirname(__file__), 'analyze.sh')
-        if args.skip_umap:
-            subprocess.call(['bash', script_path, args.resdir, str(args.N), str(args.numpc), str(args.numk), '--skip-umap'])
+        if args.kpc:
+            kpc = '--kpc ' + str(args.kpc)
         else:
-            subprocess.call(['bash', script_path, args.resdir, str(args.N), str(args.numpc), str(args.numk),])
+            kpc = ''
+        if args.joint:
+            joint = '--joint'
+        else:
+            joint = ''
+        if args.skip_umap:
+            subprocess.call(['bash', script_path, args.resdir, str(args.N), str(args.numpc), str(args.numk), '--skip-umap', kpc, joint])
+        else:
+            subprocess.call(['bash', script_path, args.resdir, str(args.N), str(args.numpc), str(args.numk), kpc, joint])
 
 class parse_pose:
     @classmethod
