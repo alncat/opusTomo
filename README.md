@@ -283,7 +283,7 @@ horovodrun -np 4 dsd train_tomo_hvd /work/ribo.star --poses ./ribo_pose_euler.pk
 
 both are in the output directory
 
-During training, OPUS-ET will output temporary volumes called ```tmp*.mrc``` (or the prefix you specified), you can check the intermediate results by viewing them in Chimera. By default, OPUS-ET reads subotomograms from disk as needed during training.
+During training, OPUS-ET will output temporary volumes called ```tmp*.mrc``` (or the prefix you specified), you can check the intermediate results by viewing them in Chimera. OPUS-ET reads subotomograms from disk as needed during training.
 
 # analyze result <a name="analysis"></a>
 You can use the analysis scripts in ```dsdsh``` to visualize the learned latent space! The analysis procedure is detailed as following and the same as OPUS-DSD!
@@ -314,6 +314,19 @@ The sampled latent codes are in ```analyze.16/kmeans20/centers.txt``` for kmeans
 The sampled latent codes for conformation latent space are stored in ```defanalyze.16``` in similar conventiion.
 
 After executing the analysis once, you may skip the lengthy umap embedding laterly by appending ```--skip-umap``` to the command in analyze.sh. Our analysis script will read the pickled umap embeddings directly.
+Moreover, you can perform a second round of analysis on selected clusters from the first round, e.g.,
+```
+dsdsh analyze /work/ribo 16 12 30 --kpc 20:2-5,8
+```
+The ```--kpc``` argument specifies that the analysis is based on the KMeans clustering result ```analyze.16/kmeans20```, using classes ```2 to 5, and 8```.
+The grammar of ```--kpc``` is that the first value before ```:``` is the number of clusters used in previous analysis, ```x-y``` means using classes from x to y, 
+and ```,``` is used as separation. This command will create a new folder ```analyze.filter.16```, which stores the analysis result.
+Finally, you may ask OPUS-ET to output a joint latent code, which combine composition and conformation latent codes by specifying ```--joint```, i.e.,
+```
+dsdsh analyze /work/ribo 16 12 30 --kpc 20:2-5,8 --joint
+```
+will output ```analyze.filter.16/kmeans30/centers_joint.txt``` additionally, which concatanate the corresponding conformation latent codes to composition cluster 
+centroids and allows you to reconstruct conformations with full latent space laterly.
 
 ## reconstruct volumes <div id="reconstruct">
 Next, you can reconstruct volumes at those latent codes sampled by KMeans and PCA.
@@ -327,9 +340,9 @@ dsdsh eval_vol /work/sp 16 kmeans 16 2.2
 ```
 
 - $1 is the output directory used in training, which stores ```weights.*.pkl, z.*.pkl, config.pkl``` and the clustering result
-- $2 is the epoch number you just analyzed
+- $2 is the epoch number you just analyzed, if you have performed second round analysis, you can specify ```filter.N```
 - $3 specifies the kind of analysis result where volumes are generated, i.e., kmeans clusters or principal components, use ```kmeans``` for kmeans clustering, ```pc```
-for principal components, and ```dpc``` for conformation principal components.
+for principal components, ```dpc``` for conformation principal components, ```joint``` for kmeans clustering with corresponding conformation latent codes,
 - $4 is the number of kmeans clusters (or principal component) you used in analysis
 - $5 is the apix of the generated volumes, you can specify a target value
 
