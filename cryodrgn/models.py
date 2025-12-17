@@ -116,7 +116,7 @@ class HetOnlyVAE(nn.Module):
         elif encode_mode == 'grad':
             self.encoder = Encoder(self.zdim, lattice.D, crop_vol_size=self.encoder_crop_size,
                                    in_mask=ref_vol, window_r=self.window_r, render_size=self.encoder_image_size,
-                                   masks_params=masks_params, rank=rank)
+                                   masks_params=masks_params, z_affine_dim=self.z_affine_dim, rank=rank)
             self.fixed_deform = True
         else:
             raise RuntimeError('Encoder mode {} not recognized'.format(encode_mode))
@@ -509,7 +509,7 @@ class AffineMixWeight(nn.Module):
         return out
 
 class Encoder(nn.Module):
-    def __init__(self, zdim, D, crop_vol_size, in_mask=None, window_r=None, render_size=None, masks_params=None, rank=0):
+    def __init__(self, zdim, D, crop_vol_size, in_mask=None, window_r=None, render_size=None, masks_params=None, z_affine_dim=4, rank=0):
         super(Encoder, self).__init__()
 
         self.zdim = zdim
@@ -603,7 +603,7 @@ class Encoder(nn.Module):
         self.down3 = nn.Sequential(
                 nn.Linear(self.out_channels * self.out_dim ** 3, 512), nn.LeakyReLU(0.2))
 
-        self.z_affine_dim = 4
+        self.z_affine_dim = z_affine_dim
         self.mu = nn.Linear(512, self.zdim+self.z_affine_dim)
         self.logstd = nn.Linear(512, self.zdim+self.z_affine_dim)
 
