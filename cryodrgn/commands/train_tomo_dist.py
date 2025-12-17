@@ -773,7 +773,7 @@ def main(args):
 
     # instantiate model
     lattice = Lattice(D, extent=0.5)
-    grid = Grid(D, device)
+    grid = Grid(D, device, rank=rank)
     ctf_grid = None #CTFGrid(D, device)
     if args.enc_mask is None:
         args.enc_mask = D//2
@@ -805,7 +805,7 @@ def main(args):
                 rank=rank)
 
     # use downsampled ctf grid
-    ctf_grid = CTFGrid(model.render_size+1, device)
+    ctf_grid = CTFGrid(model.render_size+1, device, rank=rank)
 
     if rank == 0:
         flog(model)
@@ -931,7 +931,8 @@ def main(args):
         dist.broadcast(rand_split, 0)
         rand_split = rand_split.cpu()
     else:
-        log(f'loading train validation split from {args.split}')
+        if rank == 0:
+            log(f'loading train validation split from {args.split}')
         rand_split = torch.load(args.split)
         assert len(rand_split) == Nimg, "the split file should have length {Nimg}"
     Nimg_train = int(Nimg*(1. - args.valfrac))
@@ -939,7 +940,8 @@ def main(args):
     train_split, val_split = rand_split[:Nimg_train], rand_split[Nimg_train:]
     train_sampler = dataset.ClassSplitBatchDistSampler(args.batch_size, posetracker.poses_ind, train_split, rank=rank, size=world_size)
     val_sampler = dataset.ClassSplitBatchDistSampler(max(args.batch_size//2, 1), posetracker.poses_ind, val_split, rank=rank, size=world_size)
-    print("Nimg_train: ", Nimg_train, len(train_split))
+    if rank == 0:
+        log(f"Nimg_train: {Nimg_train} {len(train_split)}")
 
     data_generator = DataLoader(data, batch_sampler=train_sampler, pin_memory=True, num_workers=16)#, persistent_workers=True)
     val_data_generator = DataLoader(data, batch_sampler=val_sampler, pin_memory=True, num_workers=16)#, persistent_workers=True)

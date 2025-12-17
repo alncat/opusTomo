@@ -10,7 +10,7 @@ from . import utils
 
 log = utils.log
 class CTFGrid:
-    def __init__(self, D, device, center=False, vol_size=None):
+    def __init__(self, D, device, center=False, vol_size=None, rank=0):
         self.vol_size = D - 1
         assert self.vol_size >= 4, "volume size {} is smaller than 4".format(self.vol_size)
         self.x_size = self.vol_size//2 + 1
@@ -37,11 +37,12 @@ class CTFGrid:
         self.shells_index = torch.round(torch.sqrt(torch.sum((self.freqs2d * self.vol_size) ** 2, dim=-1)))
         self.shells_index = self.shells_index.type(torch.int64)
         self.max_r = self.shells_index.max()
-        log("lattice: creating ctf grid {} with grid {}".format(center, self.shells_index))
+        if rank == 0:
+            log("lattice: creating ctf grid {} with grid {}".format(center, self.shells_index))
         shells_index_val = self.shell_to_grid(torch.arange(self.vol_size).unsqueeze(0).to(device))
-        log("lattice: difference: {}".format((shells_index_val - self.shells_index).sum()))
-
-        log("lattice: created ctf grid with shape: {}, max_r: {}".format(self.freqs2d.shape, self.max_r))
+        if rank == 0:
+            log("lattice: difference: {}".format((shells_index_val - self.shells_index).sum()))
+            log("lattice: created ctf grid with shape: {}, max_r: {}".format(self.freqs2d.shape, self.max_r))
         #get number of frequencies per shell
         self.shells_weight = torch.ones_like(self.shells_index, dtype=torch.float32)
 
@@ -237,8 +238,9 @@ class CTFGrid:
 
 
 class Grid:
-    def __init__(self, D, device):
-        print("initializing 2d grid of size ", D - 1)
+    def __init__(self, D, device, rank=0):
+        if rank == 0:
+            log(f"initializing a 2d grid of size {D - 1}")
         self.vol_size = D - 1
         self.x_size = self.vol_size//2 + 1
         #x_idx = torch.arange(0, self.vol_size, dtype=torch.float32)

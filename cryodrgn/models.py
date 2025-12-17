@@ -74,12 +74,14 @@ class HetOnlyVAE(nn.Module):
             in_vol_nonzeros = torch.nonzero(ref_vol)
             in_vol_mins, _ = in_vol_nonzeros.min(dim=0)
             in_vol_maxs, _ = in_vol_nonzeros.max(dim=0)
-            log("model: loading mask with nonzeros between {}, {}, {}".format(in_vol_mins, in_vol_maxs, ref_vol.shape))
+            if rank == 0:
+                log("model: loading mask with nonzeros between {}, {}, {}".format(in_vol_mins, in_vol_maxs, ref_vol.shape))
             in_vol_maxs = ref_vol.shape[-1] - in_vol_maxs
             in_vol_min = min(in_vol_maxs.min(), in_vol_mins.min())
             mask_frac = (ref_vol.shape[-1] - in_vol_min*2 + 4) / ref_vol.shape[-1]
             self.window_r = min(mask_frac, 0.98)
-            log("model: cropping volume using fraction: {}".format(self.window_r))
+            if rank == 0:
+                log("model: cropping volume using fraction: {}".format(self.window_r))
             if templateres == 256:
                 self.window_r = min(self.window_r, 0.9)
         else:
@@ -114,7 +116,7 @@ class HetOnlyVAE(nn.Module):
         elif encode_mode == 'grad':
             self.encoder = Encoder(self.zdim, lattice.D, crop_vol_size=self.encoder_crop_size,
                                    in_mask=ref_vol, window_r=self.window_r, render_size=self.encoder_image_size,
-                                   masks_params=masks_params)
+                                   masks_params=masks_params, rank=rank)
             self.fixed_deform = True
         else:
             raise RuntimeError('Encoder mode {} not recognized'.format(encode_mode))
@@ -507,7 +509,7 @@ class AffineMixWeight(nn.Module):
         return out
 
 class Encoder(nn.Module):
-    def __init__(self, zdim, D, crop_vol_size, in_mask=None, window_r=None, render_size=None, masks_params=None):
+    def __init__(self, zdim, D, crop_vol_size, in_mask=None, window_r=None, render_size=None, masks_params=None, rank=0):
         super(Encoder, self).__init__()
 
         self.zdim = zdim
@@ -522,9 +524,10 @@ class Encoder(nn.Module):
         self.transformer_e = SpatialTransformer(self.crop_vol_size, render_size=self.render_size)
         #self.out_dim = (self.crop_vol_size)//128 + 1
         self.out_dim = 1
-        log("encoder: the input after cropping is {}, render size is {}, original size is {}".format(
-                                                self.crop_vol_size, self.render_size, self.vol_size))
-        log("encoder: the crop fraction is {}, the scale is {}".format(self.crop_scale, self.scale))
+        if rank == 0:
+            log("encoder: the input after cropping is {}, render size is {}, original size is {}".format(
+                                                    self.crop_vol_size, self.render_size, self.vol_size))
+            log("encoder: the crop fraction is {}, the scale is {}".format(self.crop_scale, self.scale))
         # create 3d frequencies
         self.x_size = self.render_size//2 + 1
         #y_idx = torch.arange(-self.x_size+2, self.x_size)/float(self.render_size) #(-0.5, 0.5]
@@ -537,7 +540,8 @@ class Encoder(nn.Module):
         #grid_y = torch.roll(grid[1], shifts=(self.x_size,), dims=(1,)) #fft shifted, center at the corner
         #grid_z = torch.roll(grid[0], shifts=(self.x_size,), dims=(0,))
         freqs3d = torch.stack((grid_x, grid_y, grid_z), dim=-1)
-        log("encoder: created freqs3d {}".format(freqs3d[0,...].pow(2).sum(dim=-1)))
+        if rank == 0:
+            log("encoder: created freqs3d {}".format(freqs3d[0,...].pow(2).sum(dim=-1)))
         x_idx = torch.linspace(-1., 1., self.render_size) #[-s, s)
         grid  = torch.meshgrid(x_idx, x_idx, indexing='ij')
         xgrid = grid[1] #change fast [[0,1,2,3]]
@@ -550,12 +554,14 @@ class Encoder(nn.Module):
         #downsample mask
         if in_mask is not None:
             crop_mask_size = (int(in_mask.shape[-1]*self.window_r)//2)*2 #(self.crop_vol_size/128) previous default
-            log("encoder: cropping mask from {} to {} using window {},".format(in_mask.shape, crop_mask_size, self.window_r))
+            if rank == 0:
+                log("encoder: cropping mask from {} to {} using window {},".format(in_mask.shape, crop_mask_size, self.window_r))
             in_mask = self.transformer_e.crop(in_mask, crop_mask_size).unsqueeze(0).unsqueeze(0)
             # downsample
             in_mask = self.transformer_e.sample(in_mask)
             self.register_buffer("in_mask", in_mask)
-            print(self.in_mask.shape)
+            if rank == 0:
+                print(self.in_mask.shape)
             self.use_mask = True
         else:
             self.register_buffer("in_mask", (self.transformer_e.grid.pow(2).sum(dim=-1) < 1).float())
@@ -1229,7 +1235,8 @@ class VanillaDecoder(nn.Module):
 
                 self.apix_ori = self.Apix
                 self.Apix = self.vol_size/self.render_size*self.Apix
-                log("decoder: changing apix from {} to {}".format(self.apix_ori, self.Apix))
+                if rank == 0:
+                    log("decoder: changing apix from {} to {}".format(self.apix_ori, self.Apix))
                 #self.ref_mask_com = (self.transformer.grid*self.ref_mask.unsqueeze(-1)).mean(dim=(0, 1, 2, 3, 4))
                 #print(self.ref_mask_com)
 

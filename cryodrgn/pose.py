@@ -68,24 +68,20 @@ class PoseTracker(nn.Module):
             new_eulers = lie_tools.hopf_to_euler(self.hopfs)
             #print(self.eulers[30, :], self.hopfs.numpy()[30,:], np.where(np.isnan(new_eulers.numpy())))
             if rank == 0:
-                print("euler difference: ", torch.sum((self.eulers - new_eulers).abs())/self.hopfs.shape[0], self.hopfs.shape[0])
-                print("max difference: ", torch.max((self.eulers - new_eulers).abs(), dim=0))
+                log(f"pose: euler difference: , {torch.sum((self.eulers - new_eulers).abs())/self.hopfs.shape[0]}, {self.hopfs.shape[0]}")
+                log(f"pose: max difference: {torch.max((self.eulers - new_eulers).abs(), dim=0)}")
                 # convert poses to healpix indices
-                print(eulers_np[:5, :])
-                print(self.hopfs[:5, :])
+                log(f"{eulers_np[:5, :]}")
+                log(f"{self.hopfs[:5, :]}")
 
             #reset euler using hopf
             self.eulers = self.hopfs
-            eulers_np = self.hopfs.cpu().numpy()
-            self.decoder_eulers = None
-            if self.decoder_eulers is not None:
-                #convert euler to hopf
-                self.decoder_eulers = lie_tools.euler_to_hopf(self.decoder_eulers)
-                print("hopf difference between encoder and decoder: ", torch.sum((self.eulers - self.decoder_eulers).abs())/self.hopfs.shape[0], self.hopfs.shape[0])
+            self.hp_order = 2
+            self.batch_size = batch_size
 
+            eulers_np = self.hopfs.cpu().numpy()
             euler0 = eulers_np[:, 0]*np.pi/180 #(-180, 180)
             euler1 = eulers_np[:, 1]*np.pi/180 #(0, 180)
-            self.hp_order = 2
             euler_pixs = hp.ang2pix(self.hp_order, euler1, euler0, nest=True)
             num_pixs   = self.hp_order**2*12
             self.poses_ind = [[] for i in range(num_pixs)]
@@ -94,6 +90,18 @@ class PoseTracker(nn.Module):
                 self.poses_ind[euler_pixs[i]].append(i)
             self.poses_ind = [torch.tensor(x) for x in self.poses_ind]
             self.euler_groups = euler_pixs
+            self.ns = [(len(x) // self.batch_size)*self.batch_size for x in self.poses_ind]
+            self.total_ns = sum(self.ns)
+            if rank == 0:
+                print(self.ns)
+            self.valid_poses = []
+            for i in range(num_pixs):
+                if self.ns[i] > 0:
+                    self.valid_poses.append(i)
+            #print("poses_ind: ", self.poses_ind)
+            if rank == 0:
+                print(len(euler_pixs), len(eulers_np), self.valid_poses)
+
             if latents is not None:
                 #self.mu = latents
                 self.mu = latents["mu"]
@@ -106,17 +114,9 @@ class PoseTracker(nn.Module):
                 self.mu = torch.randn(rots.shape[0], self.deform_emb_size)
                 self.nearest_poses = [np.array([], dtype=np.int64) for i in range(len(euler_pixs))]
                 self.multi_mu = torch.randn(rots.shape[0], affine_dim)
-            self.batch_size = batch_size
-            print("nn: ", len(self.nearest_poses), "batch_size: ", self.batch_size)
-            self.ns = [(len(x) // self.batch_size)*self.batch_size for x in self.poses_ind]
-            self.total_ns = sum(self.ns)
-            print(self.ns)
-            self.valid_poses = []
-            for i in range(num_pixs):
-                if self.ns[i] > 0:
-                    self.valid_poses.append(i)
-            #print("poses_ind: ", self.poses_ind)
-            print(len(euler_pixs), len(eulers_np), self.valid_poses)
+            if rank == 0:
+                print("nn: ", len(self.nearest_poses), "batch_size: ", self.batch_size)
+
 
     def filter_poses_ind(self, split):
         poses_ind_new = []
@@ -310,10 +310,6 @@ class PoseTracker(nn.Module):
             poses = (utils.load_pkl(infile[0]), utils.load_pkl(infile[1]))
         else: # rotation pickle or poses pickle
             poses = utils.load_pkl(infile[0])
-            if decoder_infile is not None:
-                decoder_poses = utils.load_pkl(decoder_infile)
-            else:
-                decoder_poses = None
             if type(poses) != tuple: poses = (poses,)
 
         # rotations
@@ -336,7 +332,6 @@ class PoseTracker(nn.Module):
             trans *= D # convert from fraction to pixels
         elif len(poses) == 3:
             trans = poses[1]
-            decoder_trans = decoder_poses[1] if decoder_poses is not None else None
             if ind is not None:
                 if len(trans) > Nimg: # HACK
                     trans = trans[ind]
@@ -345,7 +340,6 @@ class PoseTracker(nn.Module):
             trans *= D # convert from fraction to pixels
             log("loaded eulers")
             eulers = poses[2]
-            decoder_eulers = decoder_poses[2] if decoder_poses is not None else None
             if ind is not None:
                 if len(trans) > Nimg: # HACK
                     eulers = eulers[ind]
@@ -381,17 +375,9 @@ class PoseTracker(nn.Module):
                 # PyTorch is new enough to support this arg (e.g. >= 2.x)
                 load_kwargs["weights_only"] = False  # or True, if you want safe weights-only loading
             latents = torch.load(latents, **load_kwargs)
-        return cls(rots, trans, D, emb_type, deform, deform_emb_size, eulers, latents, batch_size, body_eulers_np=body_eulers, body_trans_np=body_trans, affine_dim=affine_dim, rank=rank)
+        return cls(rots, trans, D, emb_type, deform, deform_emb_size, eulers, latents, batch_size,
+                   body_eulers_np=body_eulers, body_trans_np=body_trans, affine_dim=affine_dim, rank=rank)
 
-    def save_decoder_pose(self, out_pkl):
-        r = self.rots.cpu().numpy()
-        t = self.decoder_trans.cpu().numpy()
-        t = t/self.D # convert from pixels to extent
-        # convert from hopf back to euler
-        new_eulers = lie_tools.hopf_to_euler(self.decoder_eulers)
-        e = new_eulers.cpu().numpy()
-        poses = (r,t,e)
-        pickle.dump(poses, open(out_pkl,'wb'))
 
     def save(self, out_pkl):
         if self.emb_type == 'quat':

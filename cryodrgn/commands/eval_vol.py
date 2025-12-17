@@ -108,7 +108,7 @@ def main(args):
     Apix = cfg['model_args']['Apix']
     templateres = cfg['model_args']['templateres']
     #args.Apix = down_vol_size/((D - 1)*downfrac*0.85)*Apix
-    window_r = crop_vol_size/((D-1)*downfrac)
+    window_r = crop_vol_size/(int((D-1)*downfrac)//2*2)
     downfrac *= Apix/args.Apix
 
     # load masks
