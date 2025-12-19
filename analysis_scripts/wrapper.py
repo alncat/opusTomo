@@ -92,11 +92,13 @@ class convert_warp:
     def add_args(cls, parser):
         parser.add_argument('starfile', type=os.path.abspath, help='starfile in WARP format')
         parser.add_argument('angpix', type=float, help='angstrom per pixel of the tilt series')
+        parser.add_argument('--kv', default=300, type=float, help='voltage of tilt series, (default: %(default)s)')
+        parser.add_argument('--cs', default=2.7, type=float, help='spherical aberration of tilt series, (default: %(default)s)')
 
     @classmethod
     def main(cls, args):
         script_path = os.path.join(os.path.dirname(__file__), 'convert_warp.py')
-        subprocess.call(['python', script_path, args.starfile, str(args.angpix)])
+        subprocess.call(['python', script_path, args.starfile, str(args.angpix), str(args.kv), str(args.cs)])
 
 class convert_pytom:
     @classmethod
@@ -147,7 +149,7 @@ class prepare_multi:
         parser.add_argument('--volumes', type=os.path.abspath, help='the path to the volume series generated from PCA for defining rotation axes')
         parser.add_argument('--relion31', action='store_true', help='whether the input starfile is of version 3.1')
         parser.add_argument('--outmasks', default='mask_params', help='the name of pkl file storing masks related parameters, \
-                            you should omit the filetype name .pkl')
+                            you should omit the filetype name .pkl, (default: %(default)s)')
 
     @classmethod
     def main(cls, args):

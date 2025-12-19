@@ -582,6 +582,7 @@ def save_config(args, dataset, lattice, model, out_config):
                       players=args.players,
                       pdim=args.pdim,
                       zdim=args.zdim,
+                      z_affine_dim=args.zaffinedim,
                       encode_mode=args.encode_mode,
                       enc_mask=args.enc_mask,
                       pe_type=args.pe_type,
@@ -749,6 +750,12 @@ def main(args):
         in_dim = lattice.D**2 if not args.use_real else (lattice.D-1)**2
     else:
         raise RuntimeError("Invalid argument for encoder mask radius {}".format(args.enc_mask))
+
+    if args.templateres % 16 != 0:
+        t_ori = args.templateres
+        args.templateres = (args.templateres//16+1)*16
+        flog(f"change templateres from given {t_ori} to {args.templateres}")
+
     activation={"relu": nn.ReLU, "leaky_relu": nn.LeakyReLU}[args.activation]
     model = HetOnlyVAE(lattice, args.qlayers, args.qdim, args.players, args.pdim,
                 in_dim, args.zdim, encode_mode=args.encode_mode, enc_mask=enc_mask,
