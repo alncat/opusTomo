@@ -133,8 +133,10 @@ class Starfile():
         f.write('\n')
         f.write('data_\n\n')
         f.write('loop_\n')
-        f.write('\n'.join(self.headers))
-        f.write('\n')
+        col_count = 1
+        for col in self.headers:
+            f.write(f'{col} #{col_count}\n')
+            col_count += 1
         for i in self.df.index:
             # TODO: Assumes header and df ordering is consistent
             f.write(' '.join([str(v) for v in self.df.loc[i]]))
@@ -145,10 +147,13 @@ class Starfile():
         f = open(outstar,'w')
         f.write('# Created {}\n'.format(dt.now()))
         f.write('\n')
-        f.write('data_images\n\n')
+        f.write('data_\n\n')
         f.write('loop_\n')
-        f.write('\n'.join(df.columns))
-        f.write('\n')
+        #f.write('\n'.join(df.columns))
+        col_count = 1
+        for col in df.columns:
+            f.write(f'{col} #{col_count}\n')
+            col_count += 1
         for i in df.index:
             # TODO: Assumes header and df ordering is consistent
             f.write(' '.join([str(v) for v in df.loc[i]]))
@@ -160,10 +165,14 @@ class Starfile():
         f.write('\n')
         f.write('data_\n\n')
         f.write('loop_\n')
-        f.write('\n'.join(self.headers))
-        f.write('\n')
+        col_count = 1
+        for col in self.headers:
+            f.write(f'{col} #{col_count}\n')
+            col_count += 1
+        count = 0
         for i in self.df.index:
             if label[i]:
+                count += 1
                 # TODO: Assumes header and df ordering is consistent
                 f.write(' '.join([str(v) for v in self.df.loc[i]]))
                 f.write('\n')
