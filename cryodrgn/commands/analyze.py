@@ -113,9 +113,8 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
         assert z.shape[0] == multi_z.shape[0], f"z shape {z.shape} must be equal to multi_z shape {multi_z.shape} at first dimension"
         multi_z_center = multi_z[centers_ind]
         centers_joint = np.concatenate([centers, multi_z_center], axis=-1)
-    if not os.path.exists(f'{outdir}/kmeans{K}'):
-        os.mkdir(f'{outdir}/kmeans{K}')
     if not os.path.exists(f'{outdir}/kmeans{K}') or not skip_umap:
+        os.mkdir(f'{outdir}/kmeans{K}')
         utils.save_pkl(kmeans_labels, f'{outdir}/kmeans{K}/labels.pkl')
         utils.save_pkl(centers, f'{outdir}/kmeans{K}/centers.pkl')
         np.savetxt(f'{outdir}/kmeans{K}/centers.txt', centers)
@@ -354,6 +353,8 @@ def main(args):
                     selected_pcs += list(range(int(ks[0]), int(ks[1])+1))
                 else:
                     selected_pcs.append(int(x))
+            ptcl_inds = np.arange(len(kmeans_labels))
+            selected_ptcl_inds = ptcl_inds[np.isin(kmeans_labels, selected_pcs)]
             z_k = z[np.isin(kmeans_labels, selected_pcs)]
             umap_emb = umap_emb[np.isin(kmeans_labels, selected_pcs)]
             #keep only latents in selected classes
@@ -374,16 +375,23 @@ def main(args):
                     pc_dir.mkdir(parents=True, exist_ok=True)
                 np.savetxt(f'{outdir}/pc{i+1}/z_pc.txt', z_pc)
             # kmeans clustering
-            log('K-means clustering for class {args.kpc}...')
+            log(f'K-means clustering for class {args.kpc}...')
             K = args.ksample
-            _, centers = analysis.cluster_kmeans(z_k, args.ksample)
+            kmeans_labels_filtered, centers = analysis.cluster_kmeans(z_k, args.ksample)
             _, centers_ind = analysis.get_nearest_point(z_k, centers)
+            #recover the original labels
+            kmeans_labels[:] = args.ksample
+            for i_k in range(args.ksample):
+                kmeans_labels[selected_ptcl_inds[kmeans_labels_filtered == i_k]] = i_k
             if multi_z is not None:
                 assert z_k.shape[0] == multi_z.shape[0], f"z shape {z.shape} must be equal to multi_z shape {multi_z.shape} at first dimension"
                 multi_z_center = multi_z[centers_ind]
                 centers_joint = np.concatenate([centers, multi_z_center], axis=-1)
             if not os.path.exists(f'{outdir}/kmeans{K}'):
                 os.mkdir(f'{outdir}/kmeans{K}')
+
+            utils.save_pkl(kmeans_labels, f'{outdir}/kmeans{K}/labels.pkl')
+            utils.save_pkl(centers, f'{outdir}/kmeans{K}/centers.pkl')
             np.savetxt(f'{outdir}/kmeans{K}/centers.txt', centers)
             np.savetxt(f'{outdir}/kmeans{K}/centers_ind.txt', centers_ind, fmt='%d')
             if args.joint:
