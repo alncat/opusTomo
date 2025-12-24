@@ -321,6 +321,8 @@ dsdsh analyze /work/ribo 16 12 30 --kpc 20:2-5,8
 The ```--kpc``` argument specifies that the analysis is based on the KMeans clustering result ```analyze.16/kmeans20```, using classes ```2 to 5, and 8```.
 The grammar of ```--kpc``` is that the first value before ```:``` is the number of clusters used in previous analysis, ```x-y``` means using classes from x to y, 
 and ```,``` is used as separation. This command will create a new folder ```analyze.filter.16```, which stores the analysis result.
+This kinds of hierarhical clustering could be very effective at identifying sparsely populated species, or reconstruting intra-class variations along PCs by focusing on several clusters.
+
 Finally, you may ask OPUS-ET to output a joint latent code, which combine composition and conformation latent codes by specifying ```--joint```, i.e.,
 ```
 dsdsh analyze /work/ribo 16 12 30 --kpc 20:2-5,8 --joint
@@ -372,7 +374,7 @@ You can find volumes in ```/work/sp/defanalyze.16/pc1```.
 Finally, you can also retrieve the star files for subtomograms in each kmeans cluster using
 
 ```
-dsdsh parse_pose /work/consensus_data.star 320 1.699 /work/sp 16 16 --relion31
+dsdsh parse_pose /work/consensus_data.star 320 1.699 /work/sp 16 20 --relion31
                                 $1           $2  $3    $4     $5 $6  $7
 ```
 
@@ -387,7 +389,13 @@ dsdsh parse_pose /work/consensus_data.star 320 1.699 /work/sp 16 16 --relion31
 change to directory ```/work/sp/analyze.16/kmeans16``` to checkout the starfile for subtomograms in each cluster. 
 With those starfiles, you can easily obtain the desired population of biomolecules by combining clusters with expected reconstructions.
 
-Moreover, you can obatin the unfiltered reconstruction using relion via the command
+Equivalently, you can use the command
+```
+dsd parse_pose_star /work/consensus_data.star -D 128 --Apix 3.37 --labels analyze.filter.19/kmeans20/labels.pkl --outdir analyze.filter.19/kmeans20/
+```
+to split the ```consensus_data.star``` into different subsets for different clusters.
+
+Lastly, you can obatin the unfiltered reconstruction using RELION via the command
 ```
 relion_reconstruct --i pre1.star --3d_rot
 ```
