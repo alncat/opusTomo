@@ -933,10 +933,11 @@ def main(args):
     # create classwise sampler
     if not os.path.exists(args.split):
         rand_split = torch.randperm(Nimg, dtype=torch.int64, device=device)
+        dist.barrier()
+        dist.broadcast(rand_split, src=0)
         if rank == 0:
             log(f'saving train validation split to {args.split}')
             torch.save(rand_split.cpu(), args.split)
-        dist.broadcast(rand_split, 0)
         rand_split = rand_split.cpu()
     else:
         if rank == 0:
