@@ -114,7 +114,8 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
         multi_z_center = multi_z[centers_ind]
         centers_joint = np.concatenate([centers, multi_z_center], axis=-1)
     if not os.path.exists(f'{outdir}/kmeans{K}') or not skip_umap:
-        os.mkdir(f'{outdir}/kmeans{K}')
+        if not os.path.exists(f'{outdir}/kmeans{K}'):
+            os.mkdir(f'{outdir}/kmeans{K}')
         utils.save_pkl(kmeans_labels, f'{outdir}/kmeans{K}/labels.pkl')
         utils.save_pkl(centers, f'{outdir}/kmeans{K}/centers.pkl')
         np.savetxt(f'{outdir}/kmeans{K}/centers.txt', centers)
