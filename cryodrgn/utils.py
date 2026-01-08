@@ -214,6 +214,15 @@ def xavier_uniform_(m, gain):
     std = xaviermultiplier(m, gain)
     m.weight.data.uniform_(-std * math.sqrt(3.0), std * math.sqrt(3.0))
 
+def blockwise_assign(m):
+    m.data[:, :, 0::2, 0::2, 1::2] = m.data[:, :, 0::2, 0::2, 0::2]
+    m.data[:, :, 0::2, 1::2, 0::2] = m.data[:, :, 0::2, 0::2, 0::2]
+    m.data[:, :, 0::2, 1::2, 1::2] = m.data[:, :, 0::2, 0::2, 0::2]
+    m.data[:, :, 1::2, 0::2, 0::2] = m.data[:, :, 0::2, 0::2, 0::2]
+    m.data[:, :, 1::2, 0::2, 1::2] = m.data[:, :, 0::2, 0::2, 0::2]
+    m.data[:, :, 1::2, 1::2, 0::2] = m.data[:, :, 0::2, 0::2, 0::2]
+    m.data[:, :, 1::2, 1::2, 1::2] = m.data[:, :, 0::2, 0::2, 0::2]
+
 def initmod(m, gain=1.0, weightinitfunc=xavier_uniform_):
     validclasses = [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d]
     if any([isinstance(m, x) for x in validclasses]):

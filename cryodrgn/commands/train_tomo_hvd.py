@@ -87,6 +87,7 @@ def add_args(parser):
     group.add_argument('--lamb', type=float, default=0.5, help='restraint strength for umap prior (default: %(default)s)')
     group.add_argument('--downfrac', type=float, default=0.5, help='downsample to (default: %(default)s) of original size')
     group.add_argument('--templateres', type=int, default=160, help='define the output size of 3d volume (default: %(default)s)')
+    group.add_argument('--encoderres', type=int, default=12, help='define the dimension of intermediate activations of encoder (default: %(default)s)')
     group.add_argument('--bfactor', type=float, default=2., help='apply bfactor (default: %(default)s) to reconstruction')
     group.add_argument('--beta', default='cos', help='Choice of beta schedule')
     group.add_argument('--beta-control', default=0.5, type=float, help='restraint strength for KL target. (default: %(default)s)')
@@ -672,7 +673,8 @@ def save_config(args, dataset, lattice, model, out_config):
                       template_type=args.template_type,
                       down_vol_size=model.down_vol_size,
                       Apix=model.decoder.Apix,
-                      templateres=model.templateres)
+                      templateres=model.templateres,
+                      encoderres=model.encoderres)
     config = dict(dataset_args=dataset_args,
                   lattice_args=lattice_args,
                   model_args=model_args)
@@ -853,6 +855,7 @@ def main(args):
                 deform_emb_size=args.deform_size,
                 downfrac=args.downfrac,
                 templateres=args.templateres,
+                encoderres=args.encoderres,
                 tmp_prefix=args.tmp_prefix,
                 masks_params=masks_params,
                 z_affine_dim=args.zaffinedim,

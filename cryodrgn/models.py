@@ -46,6 +46,7 @@ class HetOnlyVAE(nn.Module):
             render_size=140,
             downfrac=0.5,
             templateres=192,
+            encoderres=12,
             tmp_prefix="ref",
             window_r=0.85,
             masks_params=None,
@@ -89,8 +90,11 @@ class HetOnlyVAE(nn.Module):
         self.down_vol_size = int(self.render_size*self.window_r)//2*2
         self.encoder_crop_size = self.down_vol_size
         self.encoder_image_size = int(self.render_size*self.encoder_crop_size/self.down_vol_size)//2*2
+        self.templateres = templateres
+        self.encoderres = encoderres
         assert self.encoder_image_size == self.render_size
         log("model: image supplemented into encoder will be of size {}".format(self.encoder_image_size))
+        log(f"model: encoder will resample activations to {self.encoderres}")
         self.ref_vol = ref_vol
 
         if encode_mode == 'conv':
@@ -108,7 +112,7 @@ class HetOnlyVAE(nn.Module):
                             zdim*2, # out_dim
                             activation) #in_dim -> hidden_dim
         elif encode_mode == 'fixed':
-            self.encoder = FixedEncoder(self.num_struct, self.zdim+4)
+            self.encoder = FixedEncoder(self.num_struct, self.zdim+self.z_affine_dim)
             #self.pose_encoder = pose_encoder.PoseEncoder(image_size=128)
         elif encode_mode == 'deform':
             self.encoder = FixedEncoder(self.num_struct, self.zdim)
@@ -116,7 +120,7 @@ class HetOnlyVAE(nn.Module):
         elif encode_mode == 'grad':
             self.encoder = Encoder(self.zdim, lattice.D, crop_vol_size=self.encoder_crop_size,
                                    in_mask=ref_vol, window_r=self.window_r, render_size=self.encoder_image_size,
-                                   masks_params=masks_params, z_affine_dim=self.z_affine_dim, rank=rank)
+                                   masks_params=masks_params, z_affine_dim=self.z_affine_dim, encoderres=self.encoderres, rank=rank)
             self.fixed_deform = True
         else:
             raise RuntimeError('Encoder mode {} not recognized'.format(encode_mode))
@@ -127,7 +131,6 @@ class HetOnlyVAE(nn.Module):
         self.template_type = template_type
         self.symm = symm
         self.deform_emb_size = deform_emb_size
-        self.templateres = templateres
         self.masks_params = masks_params
         self.Apix = Apix
         self.decoder = get_decoder(3+zdim, lattice.D, players, pdim, domain, enc_type, enc_dim,
@@ -509,7 +512,8 @@ class AffineMixWeight(nn.Module):
         return out
 
 class Encoder(nn.Module):
-    def __init__(self, zdim, D, crop_vol_size, in_mask=None, window_r=None, render_size=None, masks_params=None, z_affine_dim=4, rank=0):
+    def __init__(self, zdim, D, crop_vol_size, in_mask=None, window_r=None, render_size=None,
+                 masks_params=None, z_affine_dim=4, encoderres=12, rank=0):
         super(Encoder, self).__init__()
 
         self.zdim = zdim
@@ -573,7 +577,7 @@ class Encoder(nn.Module):
         outchannels = 32
         self.down2 = []
         downsample1 = []
-        self.intermediate_size = 12
+        self.intermediate_size = encoderres
         for i in range(n_layers):
             if i < 3:
                 downsample.append(nn.Conv3d(inchannels, outchannels, 4, 2, 1))
@@ -802,6 +806,8 @@ class Encoder(nn.Module):
         #print(coordinate_embeddings.shape, enc1.shape)
         #enc2 = self.down2(torch.cat((enc1, ctf_embedding), dim=1))# + coordinate_embeddings)
         enc2 = self.down2(enc1)# + coordinate_embeddings)# + ctf_embedding)# )
+        #max pooling
+        enc2 = F.adaptive_max_pool3d(enc2, 1)
         enc2 = enc2.view(B, self.out_dim ** 3 *self.out_channels)
         encs = self.down3(enc2)
 
