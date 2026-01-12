@@ -813,7 +813,8 @@ def main(args):
                 ctf_alpha=args.ctfalpha,
                 ctf_beta=args.ctfbeta,
                 normalize_ctf=args.normalizectf,
-                rank=rank)
+                rank=rank,
+                estimate_pose=args.estpose)
 
     # use downsampled ctf grid
     ctf_grid = CTFGrid(model.render_size+1, device, rank=rank)

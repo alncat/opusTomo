@@ -235,6 +235,7 @@ The functionality of each argument is explained in the table:
 | --valfrac | the fraction of subtomograms in the validation set, default is 0.1 |
 | --bfactor | will apply exp(-bfactor/4 * s^2 * 4*pi^2/ angpix**2 ) decaying to the FT of reconstruction, s is the magnitude of frequency, increase it leads to sharper reconstruction, but takes longer to reveal the part of model with weak density since it actually dampens learning rate, possible ranges are [3, 5]. You can increase bfactor for subtomograms with larger angpix. Besides, consider using higher values for more dynamic structures.  |
 | --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to subtomograms. The default value is 160. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
+| --encoderres | the cubic size used to resample intermediate encoder activations before later conv layers (default 12); larger values increase memory/compute |
 | --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the Z-projection of subtomograms and experimental subtomograms after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_tomo```|
 | --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-ET will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
 | --angpix | the angstrom per pixel for the input subtomogram |
@@ -406,4 +407,3 @@ This program is built upon a set of great works:
 - [Neural Volumes](https://stephenlombardi.github.io/projects/neuralvolumes/)
 - [UMAP](https://umap-learn.readthedocs.io/en/latest/)
 - [Healpy](https://healpy.readthedocs.io/en/latest/)
-

@@ -861,7 +861,8 @@ def main(args):
                 z_affine_dim=args.zaffinedim,
                 ctf_alpha=args.ctfalpha,
                 ctf_beta=args.ctfbeta,
-                normalize_ctf=args.normalizectf)
+                normalize_ctf=args.normalizectf,
+                estimate_pose=args.estpose)
 
     # use downsampled ctf grid
     ctf_grid = CTFGrid(model.render_size+1, device)

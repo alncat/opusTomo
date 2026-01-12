@@ -55,7 +55,8 @@ class HetOnlyVAE(nn.Module):
             ctf_alpha=0.,
             ctf_beta=1.,
             normalize_ctf=False,
-            rank=0):
+            rank=0,
+            estimate_pose=False):
         super(HetOnlyVAE, self).__init__()
         self.lattice = lattice
         self.zdim = zdim
@@ -92,6 +93,7 @@ class HetOnlyVAE(nn.Module):
         self.encoder_image_size = int(self.render_size*self.encoder_crop_size/self.down_vol_size)//2*2
         self.templateres = templateres
         self.encoderres = encoderres
+        self.estimate_pose = estimate_pose
         assert self.encoder_image_size == self.render_size
         log("model: image supplemented into encoder will be of size {}".format(self.encoder_image_size))
         log(f"model: encoder will resample activations to {self.encoderres}")
@@ -141,7 +143,8 @@ class HetOnlyVAE(nn.Module):
                                    fixed_deform=self.fixed_deform, deform_emb_size=self.deform_emb_size,
                                    render_size=self.encoder_image_size, down_vol_size=self.down_vol_size, tmp_prefix=tmp_prefix,
                                    masks_params=self.masks_params, num_bodies=self.num_bodies, affine_dim=self.z_affine_dim,
-                                   ctf_alpha=self.ctf_alpha, ctf_beta=self.ctf_beta, normalize_ctf=self.normalize_ctf, rank=rank)
+                                   ctf_alpha=self.ctf_alpha, ctf_beta=self.ctf_beta, normalize_ctf=self.normalize_ctf, rank=rank,
+                                   estimate_pose=self.estimate_pose)
 
     @classmethod
     def load(self, config, weights=None, device=None):
@@ -357,7 +360,7 @@ def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activati
                 ref_vol=None, Apix=1., template_type=None, warp_type=None,
                 symm=None, ctf_grid=None, fixed_deform=False, deform_emb_size=2, render_size=140,
                 down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4,
-                ctf_alpha=0, ctf_beta=1, normalize_ctf=False, rank=0):
+                ctf_alpha=0, ctf_beta=1, normalize_ctf=False, rank=0, estimate_pose=False):
     if enc_type == 'none':
         if domain == 'hartley':
             model = ResidLinearMLP(in_dim, layers, dim, 1, activation)
@@ -372,7 +375,8 @@ def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activati
                               deform_emb_size=deform_emb_size,
                               zdim=in_dim - 3, render_size=render_size,
                               down_vol_size=down_vol_size, tmp_prefix=tmp_prefix, masks_params=masks_params, num_bodies=num_bodies,
-                              affine_dim=affine_dim, ctf_alpha=ctf_alpha, ctf_beta=ctf_beta, normalize_ctf=normalize_ctf, rank=rank)
+                              affine_dim=affine_dim, ctf_alpha=ctf_alpha, ctf_beta=ctf_beta, normalize_ctf=normalize_ctf, rank=rank,
+                              estimate_pose=estimate_pose)
     else:
         model = PositionalDecoder if domain == 'hartley' else FTPositionalDecoder
         return model(in_dim, D, layers, dim, activation, enc_type=enc_type, enc_dim=enc_dim)
@@ -1109,7 +1113,7 @@ class VanillaDecoder(nn.Module):
     def __init__(self, D, in_vol=None, Apix=1., template_type=None, templateres=256, warp_type=None, symm_group=None,
                  ctf_grid=None, fixed_deform=False, deform_emb_size=2, zdim=8, render_size=140,
                  use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4,
-                 ctf_alpha=0., ctf_beta=1., normalize_ctf=False, rank=0):
+                 ctf_alpha=0., ctf_beta=1., normalize_ctf=False, rank=0, estimate_pose=False):
         super(VanillaDecoder, self).__init__()
         self.D = D
         self.vol_size = (D - 1)
@@ -1126,6 +1130,7 @@ class VanillaDecoder(nn.Module):
         self.ctf_alpha = ctf_alpha
         self.ctf_beta = ctf_beta
         self.normalize_ctf = normalize_ctf
+        self.estimate_pose= estimate_pose
         log("decoder: correct ctf using alpha {}, beta {}, and normalize ctf {}".format(self.ctf_alpha, self.ctf_beta, self.normalize_ctf))
 
         if symm_group is not None:
@@ -1178,12 +1183,14 @@ class VanillaDecoder(nn.Module):
                     self.register_buffer("A_rot90", lie_tools.yrot(torch.tensor(-90)))
                     #scale change the original scale in render_size to the volume size after cropping
                     self.register_buffer("radius", masks_params["radii_bodies"]/self.vol_size)
+                    self.estimate_pose = True
                     if rank == 0:
                         log(f"decoder: com of bodies are {self.com_bodies}, rg of bodies are {self.radius*self.scale}, scale is {self.scale}")
                         log(f"decoder: rotate_directions are {self.rotate_directions}, orient_bodies are {self.orient_bodies}, principal_axesT are {self.principal_axesT}")
-                self.template = ConvTemplate(in_dim=self.zdim, templateres=self.templateres, affine=True, num_bodies=self.num_bodies, affine_dim=affine_dim)
+                self.template = ConvTemplate(in_dim=self.zdim, templateres=self.templateres, affine=self.estimate_pose, num_bodies=self.num_bodies, affine_dim=affine_dim)
         else:
             self.template = nn.Parameter(in_vol)
+        log("decoder: estimate pose {}".format(self.estimate_pose))
 
         if self.use_fourier:
             zgrid, ygrid, xgrid = np.meshgrid(np.linspace(-1., 1., self.templateres),
@@ -1607,13 +1614,19 @@ class VanillaDecoder(nn.Module):
                 else:
                     assert self.num_bodies == 0
                     # rotation
-                    body_quat_i = affine[0][i, ...]
-                    rot_resi_i = lie_tools.quaternions_to_SO3_wiki(body_quat_i)
+                    if affine is not None:
+                        body_quat_i = affine[0][i, ...]
+                        rot_resi_i = lie_tools.quaternions_to_SO3_wiki(body_quat_i)
+                        # translation
+                        global_trans_i = affine[1][i, self.num_bodies:, ...]
                     # rotation corrected by mlp
                     if estimate_pose:
                         rot_i = rot_i @ rot_resi_i[self.num_bodies:, ...].unsqueeze(1).unsqueeze(1)
-                    # translation
-                    global_trans_i = affine[1][i, self.num_bodies:, ...]
+                        # convert body_rots_pred to hopf_angles
+                        rot_i_correction = lie_tools.so3_to_hopf(rot_resi_i[self.num_bodies:,...])
+                        body_rots_pred.append(rot_i_correction)
+                        body_trans_pred.append(global_trans_i)
+
                     # transform the estimate global translation to experimental reference system
                     #R_global_trans_i = rot_i @ global_trans_i.unsqueeze(-1)
                     #print(R_global_trans_i.shape, rot_i.shape, global_trans_i.shape)
@@ -1628,10 +1641,7 @@ class VanillaDecoder(nn.Module):
                         pos = self.transformer.rotate(rot_i)
                     #valid = F.grid_sample(self.sphere_mask.unsqueeze(1), pos, align_corners=ALIGN_CORNERS)
                     valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
-                    # convert body_rots_pred to hopf_angles
-                    rot_i_correction = lie_tools.so3_to_hopf(rot_resi_i[self.num_bodies:,...])
-                    body_rots_pred.append(rot_i_correction)
-                    body_trans_pred.append(global_trans_i)
+
                     #body_trans_pred.append(R_global_trans_i.squeeze() + trans[i:i+1, ...])
 
                 #print(euler2.shape, neighbor_eulers.shape, rot.shape)
@@ -2349,6 +2359,5 @@ class SO3reparameterize(nn.Module):
         logvar = z[:,6:]
         z_std = torch.exp(.5*logvar) # or could do softplus
         return z_mu, z_std
-
 
 
