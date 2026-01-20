@@ -75,6 +75,7 @@ def add_args(parser):
     group.add_argument('--readctf', default=False, action='store_true', help='Reading ctfs from warp')
     group.add_argument('--tilt-step', type=float, default=2, help='the interval between successive tilts (default: %(default)s)')
     group.add_argument('--tilt-range', type=float, default=50, help='the range of tilt angles (default: %(default)s)')
+    group.add_argument('--tilt-limit', type=float, default=None, help='the range of tilt angles for training (default: %(default)s)')
     group.add_argument('--ctfalpha', type=float, default=0, help='the degree of ctf correction to experimental subtomogram (default: %(default)s)')
     group.add_argument('--ctfbeta', type=float, default=1, help='the degree of ctf correction to reconstruction of decoder (default: %(default)s)')
     group.add_argument('--normalizectf', action='store_true', help='normalize ctf using backprojected grid weights (default: %(default)s)')
@@ -234,7 +235,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
 
     # encode
     if vanilla:
-        z_mu, z_logvar, z = 0., 0., 0.
+        z_mu, z_logvar, z_logstd, z = 0., 0., 0., 0.
 
     # add bfactors to ctf_params, the second from last column stores bfactor, the last column stores scale
     #random_b = (np.random.rand() - 0.5)*args.angpix
@@ -282,12 +283,14 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         # sample nearest neighbors
         #posetracker.set_emb(encout["z_mu"][:, :args.zdim], ind)
         ####posetracker.set_emb(encout["z_mu"], ind)
-        mus, others, top_mus, neg_mus = sample_neighbors(posetracker, data, euler, rot,
-                                                ind, ctf_params, ctf_grid, grid, args, W, out_size)
-        mus = mus.to(z.get_device())
-        neg_mus = neg_mus.to(z.get_device())
+        if args.encode_mode in ['grad']:
+            mus, others, top_mus, neg_mus = sample_neighbors(posetracker, data, euler, rot,
+                                                    ind, ctf_params, ctf_grid, grid, args, W, out_size)
+            mus = mus.to(z.get_device())
+            neg_mus = neg_mus.to(z.get_device())
+        else:
+            mus = neg_mus = None
         others = None
-        #neg_idices = None
 
         # decode latents
         decout = model.vanilla_decode(rot, trans, z=z, save_mrc=save_image, eulers=euler,
@@ -303,7 +306,8 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         dist.all_gather(ind_global, ind_gpu)
         ind_global = torch.cat(ind_global, dim=0).cpu()
 
-        posetracker.set_emb(z_global, ind_global)
+        if args.encode_mode in ["grad"]:
+            posetracker.set_emb(z_global, ind_global)
 
         if decout["affine"] is not None:
             rot_local = decout["affine"][0].detach()
@@ -327,8 +331,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
         if 'losses' in encout:
             losses.update(encout["losses"])
         # set the encoding of each particle
-        if args.encode_mode == "grad":
-            # keep only the compositional encoding
+        if args.encode_mode in ["grad", "fixed"]:
             z_mu = encout["z_mu"]#[:, :args.zdim]
             z_logstd = encout["z_logstd"]#[:, :args.zdim]
             #z = encout["encoding"]
@@ -465,6 +468,7 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         rot_loss, tran_loss = torch.tensor(0.), torch.tensor(0.)
     # total loss
     mu2, std2 = torch.tensor(0.), torch.tensor(0.)
+    z_snr = std2
 
     if "mu2" in losses:
         mu2 = losses["mu2"]
@@ -491,32 +495,34 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
     #mmd = utils.compute_smmd(z_mu, z_logstd, s=.5)
     #c_mmd = utils.compute_cross_smmd(z_mu, mus, s=1/16, adaptive=False)
     # matching z dim to image space
-    # compute cross entropy
-    c_en = (z_mu.unsqueeze(1) - mus).pow(2).sum(-1) + eps #(B, P)
-    c_neg_en = (z_mu.unsqueeze(1) - neg_mus).pow(2).sum(-1) + eps #(B, N)
-    #prob = ((-c_en).exp() + eps)/((-c_en).exp() + (-c_neg_en).exp().sum(-1, keepdim=True) + eps)
-    #print(c_en.shape, c_neg_en.shape, prob.shape)
-    #c_mmd = -torch.log(prob).mean()
-    c_mmd = torch.log(1 + c_en).mean() + 3*torch.log(1 + 1./c_neg_en).mean()
-    # compute cross entropy based on deconvoluted image
-    #deconv_recon = y_recon_ori[:,0,...]
-    #deconv_recon = utils.downsample_image(deconv_recon, deconv_recon.shape[-1]//2)
-    #probs = deconv_recon.unsqueeze(1) - deconv_recon.unsqueeze(0)
-    #probs = (probs.pow(2).mean(dim=(-1, -2)))
-    #probs_med = torch.median(probs).detach() #(n)
-    #probs = (-probs/probs_med).exp()
-    # spread probs
-    diff = (z_mu.unsqueeze(1) - z_mu.unsqueeze(0)).pow(2).sum(dim=(-1)) + eps
-    #spread_probs = (-diff).exp()
-    #spread_probs = (spread_probs + eps)/(spread_probs.sum(-1) + eps)
-    #mmd = -torch.log(spread_probs).mean()
-    diag_mask = (~torch.eye(B, dtype=bool).to(z_mu.get_device())).float()
-    mmd = torch.log(1 + 1./diff)*torch.clip(diff.detach(), max=1)*diag_mask
-    mmd = mmd.mean()
-    #print("c_mmd: ", c_mmd, "mmd: ", mmd)
-    loss += lamb*(c_mmd + mmd)*((beta+0.05)/1.05)/mask_sum
     if "knn" in losses:
+        # compute cross entropy
+        c_en = (z_mu.unsqueeze(1) - mus).pow(2).sum(-1) + eps #(B, P)
+        c_neg_en = (z_mu.unsqueeze(1) - neg_mus).pow(2).sum(-1) + eps #(B, N)
+        #prob = ((-c_en).exp() + eps)/((-c_en).exp() + (-c_neg_en).exp().sum(-1, keepdim=True) + eps)
+        #print(c_en.shape, c_neg_en.shape, prob.shape)
+        #c_mmd = -torch.log(prob).mean()
+        c_mmd = torch.log(1 + c_en).mean() + 3*torch.log(1 + 1./c_neg_en).mean()
+        # compute cross entropy based on deconvoluted image
+        #deconv_recon = y_recon_ori[:,0,...]
+        #deconv_recon = utils.downsample_image(deconv_recon, deconv_recon.shape[-1]//2)
+        #probs = deconv_recon.unsqueeze(1) - deconv_recon.unsqueeze(0)
+        #probs = (probs.pow(2).mean(dim=(-1, -2)))
+        #probs_med = torch.median(probs).detach() #(n)
+        #probs = (-probs/probs_med).exp()
+        # spread probs
+        diff = (z_mu.unsqueeze(1) - z_mu.unsqueeze(0)).pow(2).sum(dim=(-1)) + eps
+        #spread_probs = (-diff).exp()
+        #spread_probs = (spread_probs + eps)/(spread_probs.sum(-1) + eps)
+        #mmd = -torch.log(spread_probs).mean()
+        diag_mask = (~torch.eye(B, dtype=bool).to(z_mu.get_device())).float()
+        mmd = torch.log(1 + 1./diff)*torch.clip(diff.detach(), max=1)*diag_mask
+        mmd = mmd.mean()
+        #print("c_mmd: ", c_mmd, "mmd: ", mmd)
+        loss += lamb*(c_mmd + mmd)*((beta+0.05)/1.05)/mask_sum
         loss += lamb*losses["knn"]*((beta+0.05)/1.05)/mask_sum
+    else:
+        mmd, c_mmd = torch.tensor(0.), torch.tensor(0.)
     #loss = loss/(1 + lamb*beta)
     #print(mmd)
 
@@ -530,7 +536,7 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         plt.savefig(args.tmp_prefix+'.png')
         #plt.show()
 
-    return loss, gen_loss, snr, mu2.mean(), z_snr.mean(), rot_loss, tran_loss, top_euler, y2.mean()
+    return loss, gen_loss, snr, mu2.mean(), z_snr.mean(), mmd, c_mmd, top_euler, y2.mean()
 
 def eval_z(model, lattice, data, batch_size, device, trans=None, use_tilt=False, ctf_params=None, use_real=False):
     assert not model.training
@@ -714,7 +720,8 @@ def main(args):
                                    real_data=args.real_data, invert_data=args.invert_data,
                                    ind=ind, keepreal=args.use_real, window=False,
                                    datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
-                                   tilt_step=args.tilt_step, tilt_range=args.tilt_range, read_ctf=args.readctf, use_float16=args.float16,
+                                   tilt_step=args.tilt_step, tilt_range=args.tilt_range, tilt_limit=args.tilt_limit,
+                                   read_ctf=args.readctf, use_float16=args.float16,
                                    rank=rank)
     else:
         raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
@@ -735,11 +742,12 @@ def main(args):
     # load poses
     #if args.do_pose_sgd: assert args.domain == 'hartley', "Need to use --domain hartley if doing pose SGD"
     do_pose_sgd = args.do_pose_sgd
-    do_deform   = args.warp_type == 'deform' or args.encode_mode == 'grad'
+    do_deform   = args.warp_type == 'deform' or args.encode_mode in ['grad', 'fixed']
     # use D-1 instead of D
     posetracker = PoseTracker.load(args.poses, Nimg, D-1, 's2s2' if do_pose_sgd else None, ind,
                                    deform=do_deform, deform_emb_size=args.zdim, latents=args.latents,
-                                   batch_size=args.batch_size, affine_dim=args.zaffinedim, rank=rank)
+                                   batch_size=args.batch_size, affine_dim=args.zaffinedim, rank=rank,
+                                   use_euler_group=(args.encode_mode=='grad'))
     posetracker.to(device)
     pose_optimizer = torch.optim.SparseAdam(list(posetracker.parameters()), lr=args.pose_lr) if do_pose_sgd else None
 
@@ -837,7 +845,13 @@ def main(args):
 
     # set model parameters to be encoder and decoder
     #model_parameters = list(model.parameters())+list(group_stat.parameters())
-    model_parameters = list(model.encoder.parameters()) + list(model.decoder.parameters()) #+ list(group_stat.parameters())
+    if args.encode_mode == "fixed":
+        model_parameters = list(model.decoder.parameters())
+        #broadcast fixed encoding
+        dist.broadcast(getattr(model.encoder, 'encoding1'), src=0)
+        log(f'reset fixed encoding to {model.encoder.encoding1}')
+    else:
+        model_parameters = list(model.encoder.parameters()) + list(model.decoder.parameters()) #+ list(group_stat.parameters())
     pose_encoder = None
     optim = torch.optim.AdamW(model_parameters, lr=args.lr, weight_decay=args.wd)
 
@@ -868,7 +882,8 @@ def main(args):
         model, optim = amp.initialize(model, optim, opt_level='O1')
 
     # parallelize
-    model.encoder = DDP(model.encoder, device_ids=[rank])
+    if args.encode_mode != "fixed":
+        model.encoder = DDP(model.encoder, device_ids=[rank])
     model.decoder = DDP(model.decoder, device_ids=[rank])
 
     # restart from checkpoint

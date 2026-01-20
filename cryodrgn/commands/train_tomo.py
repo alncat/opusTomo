@@ -73,6 +73,7 @@ def add_args(parser):
     group.add_argument('--readctf', default=False, action='store_true', help='Reading ctfs from warp')
     group.add_argument('--tilt-step', type=float, default=2, help='the interval between successive tilts (default: %(default)s)')
     group.add_argument('--tilt-range', type=float, default=50, help='the range of tilt angles (default: %(default)s)')
+    group.add_argument('--tilt-limit', type=float, default=None, help='the range of tilt angles for training (default: %(default)s)')
     group.add_argument('--ctfalpha', type=float, default=0, help='the degree of ctf correction to experimental subtomogram (default: %(default)s)')
     group.add_argument('--ctfbeta', type=float, default=1, help='the degree of ctf correction to reconstruction of decoder (default: %(default)s)')
     group.add_argument('--normalizectf', action='store_true', help='normalize ctf using backprojected grid weights (default: %(default)s)')
@@ -681,7 +682,8 @@ def main(args):
                                    real_data=args.real_data, invert_data=args.invert_data,
                                    ind=ind, keepreal=args.use_real, window=False,
                                    datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
-                                   tilt_step=args.tilt_step, tilt_range=args.tilt_range, read_ctf=args.readctf, use_float16=args.float16)
+                                   tilt_step=args.tilt_step, tilt_range=args.tilt_range, tilt_limit=args.tilt_limit,
+                                   read_ctf=args.readctf, use_float16=args.float16)
     else:
         raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
 

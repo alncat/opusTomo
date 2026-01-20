@@ -76,7 +76,7 @@ def load_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
         raise NotImplementedError
     return particles, ctfs, ctf_files
 
-def load_warp_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False, tilt_step=2, tilt_range=50):
+def load_warp_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False, tilt_step=2, tilt_range=50, tilt_limit=None):
     '''
     Load particle stack from either a .mrcs file, a .star file, a .txt file containing paths to .mrcs files, or a cryosparc particles.cs file
 
@@ -88,12 +88,12 @@ def load_warp_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False, 
         try:
             star = starfile.Starfile.load(mrcs_txt_star, relion31=relion31)
             particles = star.get_subtomos(datadir=datadir, lazy=lazy,)# key='_rlnCtfImage')
-            warp_ctfs, ctf_files, ctf_params = star.get_warp3dctfs(datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range)
+            warp_ctfs, ctf_files, ctf_params = star.get_warp3dctfs(datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range, tilt_limit=tilt_limit)
         except Exception as e:
             if datadir is None:
                 datadir = os.path.dirname(mrcs_txt_star) # assume .mrcs files are in the same director as the starfile
                 particles = starfile.Starfile.load(mrcs_txt_star, relion31=relion31).get_particles(datadir=datadir, lazy=lazy)
-                ctfs, ctfs_files, ctf_params = star.get_warp3dctfs(datadir=datadir, lazy=lazy)
+                ctfs, ctfs_files, ctf_params = star.get_warp3dctfs(datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range, tilt_limit=tilt_limit)
             else: raise RuntimeError(e)
     else:
         raise NotImplementedError
@@ -403,12 +403,14 @@ class LazyTomoWARPMRCData(data.Dataset):
     '''
     def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
                  window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75,
-                 tilt_step=2, tilt_range=50, read_ctf=False, use_float16=False, rank=0):
+                 tilt_step=2, tilt_range=50, tilt_limit=None, read_ctf=False, use_float16=False, rank=0):
         #assert not keepreal, 'Not implemented error'
         assert mrcfile.endswith('.star')
-        log(f"the maximum tilt_range of loading tilt series is {tilt_range}, the tilt_step of loaded tilt series is {tilt_step}")
+        log(f"the maximum tilt_range of loading tilt series is {tilt_range}, \
+            the tilt_step of loaded tilt series is {tilt_step}, \
+            the tilt_limit of loaded tilt series is {tilt_limit}")
         particles, ctfs, ctf_files, warp_ctfs = load_warp_subtomos(mrcfile, True, datadir=datadir, relion31=relion31,
-                                                        tilt_step=tilt_step, tilt_range=tilt_range)
+                                                        tilt_step=tilt_step, tilt_range=tilt_range, tilt_limit=tilt_limit)
         self.tilt_step = tilt_step
         self.tilt_range = tilt_range
         assert len(particles) == len(ctf_files)

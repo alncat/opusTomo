@@ -226,8 +226,8 @@ class HetOnlyVAE(nn.Module):
     def vanilla_encode(self, img, rots=None, trans=None, eulers=None, num_gpus=4, snr2=1., body_poses=[None, None], ctf_param=None):
         if self.encode_mode == 'fixed':
             z = self.encoder()
-            z = z.repeat(num_gpus, 1)
-            encout = {'encoding': None, 'z_mu': z}
+            z = z.repeat(rots.shape[0], 1)
+            encout = {'encoding': None, 'z_mu': z, 'z_logstd': torch.zeros_like(z)}
         elif self.encode_mode == 'fixed_blur':
             #split encodings to template and blur kernel
             zs = self.encoder()
@@ -2359,5 +2359,6 @@ class SO3reparameterize(nn.Module):
         logvar = z[:,6:]
         z_std = torch.exp(.5*logvar) # or could do softplus
         return z_mu, z_std
+
 
 

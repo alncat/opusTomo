@@ -402,7 +402,7 @@ class Starfile():
             dataset = np.array([x.get() for x in dataset])
         return dataset
 
-    def get_warp3dctfs(self, datadir=None, lazy=True, tilt_step=2, tilt_range=50):
+    def get_warp3dctfs(self, datadir=None, lazy=True, tilt_step=2, tilt_range=50, tilt_limit=None):
         '''
         Return ctfs of particles of the starfile
 
@@ -476,6 +476,8 @@ class Starfile():
             if dummy_tlt[dummy_tlt[:, -1] != 0.].shape[0] != def_tlt.shape[0]:
                 print(csv, mask_indices, dummy_tlt, def_tlt)
             assert np.sum(np.abs(dummy_tlt[dummy_tlt[:, -1] != 0.] - def_tlt)) == 0.
+            if tilt_limit is not None:
+                dummy_tlt[np.abs(dummy_tlt[:, 0]) > tilt_limit, -1] = 0.
             ctfs.append(dummy_tlt)
 
         #header = mrc.parse_header(mrc_files[0])

@@ -12,7 +12,8 @@ log = utils.log
 
 class PoseTracker(nn.Module):
     def __init__(self, rots_np, trans_np=None, D=None, emb_type=None, deform=False, deform_emb_size=2, eulers_np=None,
-                 latents=None, batch_size=None, body_eulers_np=None, body_trans_np=None, affine_dim=4, rank=0):
+                 latents=None, batch_size=None, body_eulers_np=None, body_trans_np=None, affine_dim=4, rank=0,
+                 use_euler_group=True):
         super(PoseTracker, self).__init__()
         rots = torch.tensor(rots_np).float()
         trans = torch.tensor(trans_np).float() if trans_np is not None else None
@@ -74,33 +75,33 @@ class PoseTracker(nn.Module):
                 log(f"{eulers_np[:5, :]}")
                 log(f"{self.hopfs[:5, :]}")
 
-            #reset euler using hopf
+            #reset euler using hopf style, now they are identical
             self.eulers = self.hopfs
             self.hp_order = 2
             self.batch_size = batch_size
+            self.use_euler_group = use_euler_group
 
-            eulers_np = self.hopfs.cpu().numpy()
-            euler0 = eulers_np[:, 0]*np.pi/180 #(-180, 180)
-            euler1 = eulers_np[:, 1]*np.pi/180 #(0, 180)
-            euler_pixs = hp.ang2pix(self.hp_order, euler1, euler0, nest=True)
-            num_pixs   = self.hp_order**2*12
-            self.poses_ind = [[] for i in range(num_pixs)]
-            for i in range(len(euler_pixs)):
-                assert euler_pixs[i] < num_pixs
-                self.poses_ind[euler_pixs[i]].append(i)
-            self.poses_ind = [torch.tensor(x) for x in self.poses_ind]
-            self.euler_groups = euler_pixs
-            self.ns = [(len(x) // self.batch_size)*self.batch_size for x in self.poses_ind]
-            self.total_ns = sum(self.ns)
-            if rank == 0:
-                print(self.ns)
-            self.valid_poses = []
-            for i in range(num_pixs):
-                if self.ns[i] > 0:
-                    self.valid_poses.append(i)
+            self.set_euler_groups()
+            #eulers_np = self.hopfs.cpu().numpy()
+            #euler0 = eulers_np[:, 0]*np.pi/180 #(-180, 180)
+            #euler1 = eulers_np[:, 1]*np.pi/180 #(0, 180)
+            #euler_pixs = hp.ang2pix(self.hp_order, euler1, euler0, nest=True)
+            #num_pixs   = self.hp_order**2*12
+            #self.poses_ind = [[] for i in range(num_pixs)]
+            #for i in range(len(euler_pixs)):
+            #    assert euler_pixs[i] < num_pixs
+            #    self.poses_ind[euler_pixs[i]].append(i)
+            #self.poses_ind = [torch.tensor(x) for x in self.poses_ind]
+            #self.euler_groups = euler_pixs
+            #self.ns = [(len(x) // self.batch_size)*self.batch_size for x in self.poses_ind]
+            #self.total_ns = sum(self.ns)
+            #self.valid_poses = []
+            #for i in range(num_pixs):
+            #    if self.ns[i] > 0:
+            #        self.valid_poses.append(i)
             #print("poses_ind: ", self.poses_ind)
             if rank == 0:
-                print(len(euler_pixs), len(eulers_np), self.valid_poses)
+                print(self.ns, self.valid_poses)
 
             if latents is not None:
                 #self.mu = latents
@@ -112,11 +113,33 @@ class PoseTracker(nn.Module):
                     self.multi_mu = torch.randn(rots.shape[0], affine_dim)#None
             else:
                 self.mu = torch.randn(rots.shape[0], self.deform_emb_size)
-                self.nearest_poses = [np.array([], dtype=np.int64) for i in range(len(euler_pixs))]
+                #self.nearest_poses = [np.array([], dtype=np.int64) for i in range(len(euler_pixs))]
+                self.nearest_poses = None
                 self.multi_mu = torch.randn(rots.shape[0], affine_dim)
-            if rank == 0:
-                print("nn: ", len(self.nearest_poses), "batch_size: ", self.batch_size)
+            #if rank == 0:
+            #    print("nn: ", len(self.nearest_poses), "batch_size: ", self.batch_size)
 
+    def set_euler_groups(self,):
+        eulers_np = self.hopfs.cpu().numpy()
+        euler0 = eulers_np[:, 0]*np.pi/180 #(-180, 180)
+        euler1 = eulers_np[:, 1]*np.pi/180 #(0, 180)
+        euler_pixs = hp.ang2pix(self.hp_order, euler1, euler0, nest=True)
+        num_pixs   = self.hp_order**2*12
+        if not self.use_euler_group:
+            num_pixs = 1
+            euler_pixs = np.zeros_like(euler_pixs)
+        self.poses_ind = [[] for i in range(num_pixs)]
+        for i in range(len(euler_pixs)):
+            assert euler_pixs[i] < num_pixs
+            self.poses_ind[euler_pixs[i]].append(i)
+        self.poses_ind = [torch.tensor(x) for x in self.poses_ind]
+        self.euler_groups = euler_pixs
+        self.ns = [(len(x) // self.batch_size)*self.batch_size for x in self.poses_ind]
+        self.total_ns = sum(self.ns)
+        self.valid_poses = []
+        for i in range(num_pixs):
+            if self.ns[i] > 0:
+                self.valid_poses.append(i)
 
     def filter_poses_ind(self, split):
         poses_ind_new = []
@@ -289,7 +312,8 @@ class PoseTracker(nn.Module):
         torch.save({"mu": self.mu, "nn": self.nearest_poses, "multi_mu": self.multi_mu}, filename)
 
     @classmethod
-    def load(cls, infile, Nimg, D, emb_type=None, ind=None, deform=False, deform_emb_size=2, latents=None, batch_size=None, affine_dim=4, decoder_infile=None, rank=0):
+    def load(cls, infile, Nimg, D, emb_type=None, ind=None, deform=False, deform_emb_size=2,
+             latents=None, batch_size=None, affine_dim=4, rank=0, use_euler_group=True):
         '''
         Return an instance of PoseTracker
 
@@ -376,7 +400,8 @@ class PoseTracker(nn.Module):
                 load_kwargs["weights_only"] = False  # or True, if you want safe weights-only loading
             latents = torch.load(latents, **load_kwargs)
         return cls(rots, trans, D, emb_type, deform, deform_emb_size, eulers, latents, batch_size,
-                   body_eulers_np=body_eulers, body_trans_np=body_trans, affine_dim=affine_dim, rank=rank)
+                   body_eulers_np=body_eulers, body_trans_np=body_trans, affine_dim=affine_dim, rank=rank,
+                   use_euler_group=use_euler_group)
 
 
     def save(self, out_pkl):
