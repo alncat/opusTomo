@@ -204,6 +204,14 @@ torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --p
 
 which invokes 4 processes on a 4gpu cluster, and might achieve faster training speed compared with data parallel.
 
+The ```--encode-mode``` argument controls how latent codes are produced. ```grad``` (default) uses the encoder to produce per-particle latents and backpropagates through the encoder. ```fixed``` uses a single fixed latent code shared across particles and trains only the decoder.
+
+Example for fixed mode training:
+
+```
+torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist pre18.star --poses pre18_pose_euler.pkl -n 120 -b 4 --zdim 12 --lr 3.e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o . -r ../zribo_test/mask.mrc --split deep_splt.pkl --lamb 0.5 --bfactor 4. --valfrac 0. --templateres 160 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/warp_DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --warp --ctfalpha 0 --ctfbeta 1 --encode-mode fixed --checkpoint 10
+```
+
 If you have installed horovod according to tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation, you can train OPUS-ET using
 
 ```
@@ -236,6 +244,7 @@ The functionality of each argument is explained in the table:
 | --bfactor | will apply exp(-bfactor/4 * s^2 * 4*pi^2/ angpix**2 ) decaying to the FT of reconstruction, s is the magnitude of frequency, increase it leads to sharper reconstruction, but takes longer to reveal the part of model with weak density since it actually dampens learning rate, possible ranges are [3, 5]. You can increase bfactor for subtomograms with larger angpix. Besides, consider using higher values for more dynamic structures.  |
 | --templateres | the size of output volume of our convolutional network, it will be further resampled by spatial transformer before projecting to subtomograms. The default value is 160. You may keep it around ```D*downfrac/0.75```, which is larger than the input size. This corresponds to downsampling from the output volume of our network. You can tweak it to other resolutions, larger resolutions can generate sharper density maps, ***choices are Nx16, where N is integer between 8 and 16*** |
 | --encoderres | the cubic size used to resample intermediate encoder activations before later conv layers (default 12); larger values increase memory/compute |
+| --encode-mode | how latents are produced; ```grad``` trains the encoder for per-particle latents, ```fixed``` uses a shared fixed latent code and trains only the decoder |
 | --plot | you can also specify this argument if you want to monitor how the reconstruction progress, our program will display the Z-projection of subtomograms and experimental subtomograms after 8 times logging intervals. Namely, you switch to interative mode by including this. The interative mode should be run using command ```python -m cryodrgn.commands.train_tomo```|
 | --tmp-prefix | the prefix of intermediate reconstructions, default value is ```tmp```. OPUS-ET will output temporary reconstructions to the root directory of this program when training, whose names are ```$tmp-prefix.mrc``` |
 | --angpix | the angstrom per pixel for the input subtomogram |
