@@ -7,6 +7,7 @@
    1. [sample latent spaces](#sample)
    2. [reconstruct volumes](#reconstruct)
    3. [select particles](#select)
+   4. [Interactive filtering with cryodrgn_filtering.ipynb](#filtering)
 
 # OPUS-ET <div id="opustomo">
 
@@ -406,10 +407,33 @@ dsd parse_pose_star /work/consensus_data.star -D 128 --Apix 3.37 --labels analyz
 ```
 to split the ```consensus_data.star``` into different subsets for different clusters.
 
-Lastly, you can obatin the unfiltered reconstruction using RELION via the command
+Lastly, you can obtain the unfiltered reconstruction using RELION via the command
 ```
 relion_reconstruct --i pre1.star --3d_rot
 ```
+
+## Interactive filtering with cryodrgn_filtering.ipynb <div id="filtering">
+
+For interactive particle selection and filtering, OPUS-ET provides a Jupyter notebook template `cryodrgn/templates/cryoDRGN_filtering_template.ipynb`. This notebook enables visual exploration of the latent space and selection of particles using multiple methods:
+
+- **Clustering-based selection**: Select particles belonging to specific k-means or Gaussian Mixture Model (GMM) clusters.
+- **Outlier detection**: Identify particles with latent vector magnitudes beyond a specified Z-score threshold.
+
+### Usage
+
+1. Run an analysis, then the template notebook will be copied to your analysis directory:
+   ```
+   dsdsh analyze . 19 10 20
+   ```
+   
+2. Open the notebook with Jupyter and adjust the `WORKDIR` and `EPOCH` variables to point to your training output.
+
+3. Run the cells sequentially to load the latent encodings, visualize the latent space (PCA, UMAP, pose distributions), and apply filtering methods.
+
+4. The notebook tracks selected particles in the variable `ind_selected`. You can save the selection as a `.star` file for downstream use.
+
+**Note:** The notebook requires `jupyter-notebook`, `plotly` and `ipywidgets` for interactive visualizations. Install them via `pip install notebook plotly ipywidgets` if not already present in your environment.
+
 
 This program is built upon a set of great works:
 - [opusDSD](https://github.com/alncat/opusDSD)
