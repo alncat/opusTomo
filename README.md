@@ -8,6 +8,7 @@
    2. [reconstruct volumes](#reconstruct)
    3. [select particles](#select)
    4. [Interactive filtering with cryodrgn_filtering.ipynb](#filtering)
+5. [OPUS-ET Analysis Skill for Kimi Code CLI](#skill)
 
 # OPUS-ET <div id="opustomo">
 
@@ -434,6 +435,121 @@ For interactive particle selection and filtering, OPUS-ET provides a Jupyter not
 
 **Note:** The notebook requires `jupyter-notebook`, `plotly` and `ipywidgets` for interactive visualizations. Install them via `pip install notebook plotly ipywidgets` if not already present in your environment.
 
+
+## OPUS-ET Analysis Skill for Kimi Code CLI <div id="skill">
+
+OPUS-ET includes a skill file `opus-et-analysis.skill` that provides AI-assisted analysis workflows when using Kimi Code CLI. This skill encapsulates best practices for processing training results and can guide you through complex analysis pipelines.
+
+### Installing the Skill
+
+To use the skill in Kimi Code CLI:
+
+```bash
+# Import the skill into Kimi Code CLI
+kimi skill import opus-et-analysis.skill
+
+# Or copy to the skills directory manually
+cp opus-et-analysis.skill ~/.kimi/skills/
+```
+
+### What the Skill Provides
+
+The skill provides guided workflows for:
+
+1. **Epoch Analysis** - Running PCA and k-means clustering on training results
+2. **Volume Generation** - Creating volumes from cluster centers or PC trajectories
+3. **Particle Selection** - Splitting STAR files by cluster labels
+4. **Combined Workflows** - Chaining multiple analysis steps together
+5. **Deformation Analysis** - Working with rigid body motion parameters
+
+### Quick Usage Example
+
+Once the skill is installed, you can ask Kimi Code CLI to help with analysis tasks:
+
+```
+"Analyze epoch 39 with 10 PCs and 20 clusters"
+"Generate volumes for all k-means centers from epoch 39"
+"Combine clusters 9, 10, 11, 12 and create a pose pickle"
+"Run deformation analysis along PC1 using cluster 17 as template"
+```
+
+The skill will generate the appropriate commands based on your training configuration.
+
+### Key Workflows Covered
+
+| Task | Skill Guidance |
+|------|----------------|
+| Analyze epoch | Extracts config, runs `dsdsh analyze` with correct parameters |
+| Generate volumes | Uses `dsd eval_vol` with proper z-files and Apix |
+| Create star files | Parses poses with correct box size (D-1 from lattice) |
+| Combine clusters | Chains `combine_star` commands and generates pose pickle |
+| Deformation volumes | Sets up template z-files and `--deform` mode |
+
+### Configuration Extraction
+
+The skill includes a helper script to extract key parameters from `config.pkl`:
+
+```bash
+python opus-et-analysis/scripts/extract_config.py config.pkl
+```
+
+This outputs:
+- `Apix` - Angstrom per pixel
+- `D` - Effective box size (lattice D minus 1)
+- `particles` - Original star file path
+- `zdim` - Latent dimension
+
+### Directory Structure Convention
+
+The skill expects and maintains the standard OPUS-ET directory structure:
+
+```
+.
+├── analyze.<epoch>/          # Conformation latent space analysis
+│   ├── kmeans<numk>/
+│   │   ├── centers.txt      # Cluster center latent codes
+│   │   ├── labels.pkl       # Particle cluster assignments
+│   │   └── pre<N>.star      # Star files per cluster
+│   └── pc<N>/
+│       └── z_pc.txt         # PC trajectory latent codes
+├── defanalyze.<epoch>/       # Deformation parameter analysis (if applicable)
+├── kmeans_volumes/           # Generated cluster volumes
+├── pc_volumes/               # Generated PC trajectory volumes
+└── kmeans_pose/              # Split star files
+```
+
+### Deformation Analysis Workflow
+
+For models trained with `--masks` (rigid body deformation), the skill guides through:
+
+1. **Template Selection** - Extract a k-means center as the base conformation
+2. **Deformation Volumes** - Generate volumes along deformation PCs
+3. **Parameter Inspection** - Analyze `mask_params.pkl` for body definitions
+
+Example workflow:
+```bash
+# 1. Analysis (generates both analyze.39/ and defanalyze.39/)
+dsdsh analyze . 39 10 30
+
+# 2. Extract template from k-means center 17
+python3 << 'PYEOF'
+import pickle
+import numpy as np
+centers = pickle.load(open('analyze.39/kmeans30/centers.pkl', 'rb'))
+np.savetxt('template_z17.txt', centers[17].reshape(1, -1), fmt='%.6f')
+PYEOF
+
+# 3. Generate deformation volumes
+dsd eval_vol --load weights.39.pkl -c config.pkl \
+    -o defanalyze_volumes/pc1 --deform \
+    --masks mask_params.pkl --template-z template_z17.txt \
+    --template-z-ind 0 --zfile defanalyze.39/pc1/z_pc.txt \
+    --Apix 3.37 --prefix reference
+```
+
+For complete details on all available workflows, refer to the skill documentation or ask Kimi Code CLI: `"Show me OPUS-ET analysis workflows"`.
+
+---
 
 This program is built upon a set of great works:
 - [opusDSD](https://github.com/alncat/opusDSD)
