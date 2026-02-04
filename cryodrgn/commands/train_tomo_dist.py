@@ -416,7 +416,9 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         l2_diff = losses["ycorr"] + y_recon2
         #print(l2_diff)
         #print(y_recon.shape, y.shape, mask_sum.shape, l2_diff)
-        probs = F.softmax(-l2_diff.detach()/(W*0.125), dim=-1).detach()
+        #var = torch.maximum(l2_diff.std(dim=-1)*0.5, torch.tensor([W*0.125]).to(l2_diff.get_device()))
+        var = W*0.125
+        probs = F.softmax(-l2_diff.detach()/var, dim=-1).detach()
         #print(probs)
         #get argmax
         #inds = torch.argmax(probs, dim=-1, keepdim=True)

@@ -336,7 +336,8 @@ def random_direction(n, deg):
     #rad = deg*np.pi/180
     u = torch.rand((n, 2))
     u[..., 0] = u[..., 0]*2*180.
-    u[..., 1] = torch.acos(u[..., 1]*2. - 1)/np.pi*deg
+    #u[..., 1] = torch.acos(u[..., 1]*2. - 1)/np.pi*deg
+    u[..., 1] = u[..., 1]*deg
     v = euler_to_direction(u)
     return v
 
