@@ -7,7 +7,7 @@
    1. [sample latent spaces](#sample)
    2. [reconstruct volumes](#reconstruct)
    3. [select particles](#select)
-   4. [Interactive filtering with cryodrgn_filtering.ipynb](#filtering)
+   4. [Interactive filtering with cryoDRGN_filtering_template.ipynb](#filtering)
 5. [OPUS-ET Analysis Skill for Kimi Code CLI](#skill)
 
 # OPUS-ET <div id="opustomo">
@@ -408,37 +408,45 @@ dsd parse_pose_star /work/consensus_data.star -D 128 --Apix 3.37 --labels analyz
 ```
 to split the ```consensus_data.star``` into different subsets for different clusters.
 
-Lastly, you can obtain the unfiltered reconstruction using RELION via the command
-```
-relion_reconstruct --i pre1.star --3d_rot
-```
+Lastly, you can obtain the reconstruction using OPUS-ET by training the subset with ```--encode-mode fixed```.
 
-## Interactive filtering with cryodrgn_filtering.ipynb <div id="filtering">
+## Interactive filtering with cryoDRGN_filtering_template.ipynb <div id="filtering">
 
-For interactive particle selection and filtering, OPUS-ET provides a Jupyter notebook template `cryodrgn/templates/cryoDRGN_filtering_template.ipynb`. This notebook enables visual exploration of the latent space and selection of particles using multiple methods:
+For interactive particle selection and filtering, OPUS-ET provides a Jupyter notebook template at `cryodrgn/templates/cryoDRGN_filtering_template.ipynb`. This notebook enables visual exploration of the latent space and selection of particles using multiple interactive methods:
 
 - **Clustering-based selection**: Select particles belonging to specific k-means or Gaussian Mixture Model (GMM) clusters.
 - **Outlier detection**: Identify particles with latent vector magnitudes beyond a specified Z-score threshold.
+- **Lasso selection**: Manually select particles by drawing regions on UMAP or PCA plots.
+- **Interactive visualization**: Explore latent space embeddings with plotly-powered interactive plots.
 
 ### Usage
 
-1. Run an analysis, then the template notebook will be copied to your analysis directory:
+1. Perform analysis, the notebook template will be copied to your analysis directory:
    ```
-   dsdsh analyze . 19 10 20
+   dsdsh analyze . 39 10 20
    ```
-   
-2. Open the notebook with Jupyter and adjust the `WORKDIR` and `EPOCH` variables to point to your training output.
 
-3. Run the cells sequentially to load the latent encodings, visualize the latent space (PCA, UMAP, pose distributions), and apply filtering methods.
+2. Open the notebook with Jupyter and configure the `WORKDIR` and `EPOCH` variables to point to your training output directory.
 
-4. The notebook tracks selected particles in the variable `ind_selected`. You can save the selection as a `.star` file for downstream use.
+3. Run the cells sequentially to:
+   - Load latent encodings and pose parameters
+   - Visualize latent space (PCA, UMAP, pose distributions)
+   - Apply interactive filtering methods
+   - Export selected particles as STAR files
 
-**Note:** The notebook requires `jupyter-notebook`, `plotly` and `ipywidgets` for interactive visualizations. Install them via `pip install notebook plotly ipywidgets` if not already present in your environment.
+4. The notebook tracks selected particles in the variable `ind_selected`. Selected particles can be saved as a `.star` file for downstream processing in RELION or other tools.
+
+**Requirements:** The notebook requires `jupyter-notebook`, `anywidget`, `plotly`, and `ipywidgets` for interactive visualizations. Install them via:
+```bash
+pip install notebook plotly anywidget ipywidgets
+```
+
+**Tip:** The interactive filtering notebook is particularly useful for cleaning template matching results, removing outliers, and selecting homogeneous particle subsets for high-resolution refinement.
 
 
 ## OPUS-ET Analysis Skill for Kimi Code CLI <div id="skill">
 
-OPUS-ET includes a skill file `opus-et-analysis.skill` that provides AI-assisted analysis workflows when using Kimi Code CLI. This skill encapsulates best practices for processing training results and can guide you through complex analysis pipelines.
+OPUS-ET includes a skill file `opus-et-analysis.skill` that provides AI-assisted analysis workflows when using Kimi Code CLI. This skill encapsulates best practices for processing training results and can guide you through complex analysis pipelines including PCA/k-means clustering, volume generation, pose parsing, and STAR file manipulation.
 
 ### Installing the Skill
 
@@ -452,19 +460,9 @@ kimi skill import opus-et-analysis.skill
 cp opus-et-analysis.skill ~/.kimi/skills/
 ```
 
-### What the Skill Provides
+### Quick Start with the Skill
 
-The skill provides guided workflows for:
-
-1. **Epoch Analysis** - Running PCA and k-means clustering on training results
-2. **Volume Generation** - Creating volumes from cluster centers or PC trajectories
-3. **Particle Selection** - Splitting STAR files by cluster labels
-4. **Combined Workflows** - Chaining multiple analysis steps together
-5. **Deformation Analysis** - Working with rigid body motion parameters
-
-### Quick Usage Example
-
-Once the skill is installed, you can ask Kimi Code CLI to help with analysis tasks:
+Once installed, you can ask Kimi Code CLI to help with analysis tasks:
 
 ```
 "Analyze epoch 39 with 10 PCs and 20 clusters"
@@ -473,65 +471,121 @@ Once the skill is installed, you can ask Kimi Code CLI to help with analysis tas
 "Run deformation analysis along PC1 using cluster 17 as template"
 ```
 
-The skill will generate the appropriate commands based on your training configuration.
+The skill will automatically extract parameters from `config.pkl` and generate the appropriate commands.
 
-### Key Workflows Covered
+### Key Configuration Parameters
 
-| Task | Skill Guidance |
-|------|----------------|
-| Analyze epoch | Extracts config, runs `dsdsh analyze` with correct parameters |
-| Generate volumes | Uses `dsd eval_vol` with proper z-files and Apix |
-| Create star files | Parses poses with correct box size (D-1 from lattice) |
-| Combine clusters | Chains `combine_star` commands and generates pose pickle |
-| Deformation volumes | Sets up template z-files and `--deform` mode |
+When working with OPUS-ET results, these key parameters are extracted from `config.pkl`:
 
-### Configuration Extraction
+| Parameter | Source | Description |
+|-----------|--------|-------------|
+| `Apix` | `config['model_args']['Apix']` | Angstrom per pixel |
+| `D` | `config['lattice_args']['D'] - 1` | **Effective box size (lattice D minus 1)** |
+| `particles` | `config['dataset_args']['particles']` | Original STAR file path |
+| `zdim` | `config['model_args']['zdim']` | Latent dimension |
 
-The skill includes a helper script to extract key parameters from `config.pkl`:
+**Important:** The effective box size for `parse_pose_star` is always `lattice_args['D'] - 1`, not the raw D value.
 
+Use the included helper script to extract these values:
 ```bash
 python opus-et-analysis/scripts/extract_config.py config.pkl
 ```
 
-This outputs:
-- `Apix` - Angstrom per pixel
-- `D` - Effective box size (lattice D minus 1)
-- `particles` - Original star file path
-- `zdim` - Latent dimension
+### Standard Analysis Workflows
 
-### Directory Structure Convention
+#### 1. Analyze Epoch (PCA + K-means)
 
-The skill expects and maintains the standard OPUS-ET directory structure:
+Run PCA and k-means clustering on a specific epoch:
 
+```bash
+dsdsh analyze <workdir> <epoch> <numpc> <numk>
 ```
-.
-├── analyze.<epoch>/          # Conformation latent space analysis
-│   ├── kmeans<numk>/
-│   │   ├── centers.txt      # Cluster center latent codes
-│   │   ├── labels.pkl       # Particle cluster assignments
-│   │   └── pre<N>.star      # Star files per cluster
-│   └── pc<N>/
-│       └── z_pc.txt         # PC trajectory latent codes
-├── defanalyze.<epoch>/       # Deformation parameter analysis (if applicable)
-├── kmeans_volumes/           # Generated cluster volumes
-├── pc_volumes/               # Generated PC trajectory volumes
-└── kmeans_pose/              # Split star files
+
+Example:
+```bash
+dsdsh analyze . 39 10 20
+```
+
+Output: `analyze.39/` directory with `kmeans20/`, `pc1/` to `pc10/`, and visualization plots.
+
+#### 2. Generate Volumes for K-means Centers
+
+```bash
+dsd eval_vol --load weights.39.pkl \
+    -c config.pkl \
+    -o kmeans_volumes \
+    --zfile analyze.39/kmeans20/centers.txt \
+    --Apix 3.37 \
+    --prefix kmeans_cluster
+```
+
+#### 3. Generate Volumes for Principal Components
+
+```bash
+mkdir -p pc_volumes/pc1
+dsd eval_vol --load weights.39.pkl \
+    -c config.pkl \
+    -o pc_volumes/pc1 \
+    --zfile analyze.39/pc1/z_pc.txt \
+    --Apix 3.37 \
+    --prefix pc1
+```
+
+#### 4. Create Star Files for Clusters
+
+Parse poses and split by k-means cluster labels:
+
+```bash
+# Extract config to get correct D value
+python opus-et-analysis/scripts/extract_config.py config.pkl
+# Output: Apix=3.37, D=127 (effective box size)
+
+# Parse with correct box size (D-1 from lattice_args)
+dsd parse_pose_star ribotm.star \
+    -D 127 \
+    --Apix 3.37 \
+    --labels analyze.39/kmeans20/labels.pkl \
+    --outdir kmeans_pose
+```
+
+#### 5. Combine Star Files
+
+Merge multiple cluster STAR files:
+
+```bash
+# Chain combine commands for multiple files
+dsdsh combine_star pre9.star pre10.star temp1.star
+dsdsh combine_star temp1.star pre11.star temp2.star
+dsdsh combine_star temp2.star pre12.star combined_9_10_11_12.star
+```
+
+#### 6. Generate Pose Pickle for Combined Clusters
+
+```bash
+dsd parse_pose_star kmeans_pose/combined_9_10_11_12.star \
+    -D 127 \
+    --Apix 3.37 \
+    -o kmeans_pose/combined_9_10_11_12_pose.pkl
 ```
 
 ### Deformation Analysis Workflow
 
-For models trained with `--masks` (rigid body deformation), the skill guides through:
+For models trained with `--masks` (rigid body motion), the analysis generates **both** conformation and deformation latent spaces:
 
-1. **Template Selection** - Extract a k-means center as the base conformation
-2. **Deformation Volumes** - Generate volumes along deformation PCs
-3. **Parameter Inspection** - Analyze `mask_params.pkl` for body definitions
-
-Example workflow:
 ```bash
-# 1. Analysis (generates both analyze.39/ and defanalyze.39/)
+# Single command generates both analyze.39/ and defanalyze.39/
 dsdsh analyze . 39 10 30
+```
 
-# 2. Extract template from k-means center 17
+| Directory | Content | Dimensions | Use Case |
+|-----------|---------|------------|----------|
+| `analyze.<epoch>/` | Full composition latent space | Model zdim (e.g., 12) | Standard volume generation |
+| `defanalyze.<epoch>/` | Deformation parameter space | Conformational zdim (e.g., 4 for 2-body) | Rigid body motion analysis |
+
+#### Generate Deformation Volumes Along PCs
+
+```bash
+# Step 1: Extract k-means center as template
 python3 << 'PYEOF'
 import pickle
 import numpy as np
@@ -539,15 +593,87 @@ centers = pickle.load(open('analyze.39/kmeans30/centers.pkl', 'rb'))
 np.savetxt('template_z17.txt', centers[17].reshape(1, -1), fmt='%.6f')
 PYEOF
 
-# 3. Generate deformation volumes
-dsd eval_vol --load weights.39.pkl -c config.pkl \
-    -o defanalyze_volumes/pc1 --deform \
-    --masks mask_params.pkl --template-z template_z17.txt \
-    --template-z-ind 0 --zfile defanalyze.39/pc1/z_pc.txt \
-    --Apix 3.37 --prefix reference
+# Step 2: Generate deformation volumes
+dsd eval_vol --load weights.39.pkl \
+    -c config.pkl \
+    -o defanalyze_volumes/pc1 \
+    --deform \
+    --masks mask_params.pkl \
+    --template-z template_z17.txt \
+    --template-z-ind 0 \
+    --zfile defanalyze.39/pc1/z_pc.txt \
+    --Apix 3.37 \
+    --prefix reference
 ```
 
-For complete details on all available workflows, refer to the skill documentation or ask Kimi Code CLI: `"Show me OPUS-ET analysis workflows"`.
+**Key parameters for deformation mode:**
+- `--deform`: Enable deformation mode
+- `--masks`: Path to `mask_params.pkl` with rigid body definitions
+- `--template-z`: Base conformation z-values (2D: rows × zdim)
+- `--template-z-ind`: Template row index (0 for first row)
+- `--zfile`: Deformation parameters from `defanalyze.<epoch>/`
+
+#### Inspect Mask Parameters
+
+```python
+import torch
+m = torch.load('mask_params.pkl', map_location='cpu')
+print('Number of bodies:', m['com_bodies'].shape[0])
+print('COM of bodies:', m['com_bodies'])
+print('Principal axes:', m['principal_axes'])
+```
+
+### Complete Workflow Example
+
+Full pipeline from training results to combined particle selection:
+
+```bash
+# 1. Analyze epoch
+dsdsh analyze . 39 10 20
+
+# 2. Generate volumes for k-means centers
+dsd eval_vol --load weights.39.pkl -c config.pkl -o kmeans_volumes \
+    --zfile analyze.39/kmeans20/centers.txt --Apix 3.37 --prefix kmeans_cluster
+
+# 3. Create star files for all clusters
+dsd parse_pose_star ribotm.star -D 127 --Apix 3.37 \
+    --labels analyze.39/kmeans20/labels.pkl --outdir kmeans_pose
+
+# 4. Combine specific clusters
+dsdsh combine_star kmeans_pose/pre9.star kmeans_pose/pre10.star temp.star
+dsdsh combine_star temp.star kmeans_pose/pre11.star temp2.star
+dsdsh combine_star temp2.star kmeans_pose/pre12.star \
+    kmeans_pose/combined_9_10_11_12.star
+
+# 5. Generate pose pickle for combined clusters
+dsd parse_pose_star kmeans_pose/combined_9_10_11_12.star \
+    -D 127 --Apix 3.37 -o kmeans_pose/combined_9_10_11_12_pose.pkl
+```
+
+### Directory Structure Convention
+
+Standard output structure after analysis:
+
+```
+.
+├── analyze.<epoch>/              # Conformation latent space analysis
+│   ├── kmeans<numk>/
+│   │   ├── centers.txt          # Cluster center latent codes
+│   │   ├── centers.pkl          # Numpy array of centers
+│   │   ├── labels.pkl           # Particle cluster assignments
+│   │   ├── centers_ind.txt      # Particle indices closest to centers
+│   │   └── pre<N>.star          # Star files per cluster
+│   ├── pc<N>/
+│   │   └── z_pc.txt             # PC trajectory latent codes
+│   └── *.png                    # UMAP, PCA plots
+├── defanalyze.<epoch>/           # Deformation analysis (if --masks used)
+│   └── similar structure to analyze.<epoch>/
+├── kmeans_volumes/               # Generated cluster volumes
+├── pc_volumes/                   # Generated PC trajectory volumes
+└── kmeans_pose/                  # Split star files by cluster
+```
+
+For complete command reference and advanced workflows, refer to the skill documentation at `opus-et-analysis/references/commands.md` or ask Kimi Code CLI: `"Show me OPUS-ET analysis workflows"`.
 
 ---
 
