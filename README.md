@@ -417,7 +417,7 @@ For interactive particle selection and filtering, OPUS-ET provides a Jupyter not
 - **Clustering-based selection**: Select particles belonging to specific k-means or Gaussian Mixture Model (GMM) clusters.
 - **Outlier detection**: Identify particles with latent vector magnitudes beyond a specified Z-score threshold.
 - **Lasso selection**: Manually select particles by drawing regions on UMAP or PCA plots.
-- **Interactive visualization**: Explore latent space embeddings with plotly-powered interactive plots.
+- **Tomogram inspection and mapping**: Visualize tomogram slices, extract coordinates for selected particles in a chosen tomogram, and overlay selected particles as circles on tomogram slices.
 
 ### Usage
 
@@ -433,8 +433,18 @@ For interactive particle selection and filtering, OPUS-ET provides a Jupyter not
    - Visualize latent space (PCA, UMAP, pose distributions)
    - Apply interactive filtering methods
    - Export selected particles as STAR files
+   - Visualize tomogram slices with adjustable contrast via `CONTRAST_PERCENTILES`
+   - Extract selected-particle coordinates in one tomogram using `SELECTED_TOMOGRAM`
+   - Overlay selected particles as circles on tomogram slices with coordinate scaling (`COORD_SCALE_FACTOR_XY`, `COORD_SCALE_FACTOR_Z`)
 
 4. The notebook tracks selected particles in the variable `ind_selected`. Selected particles can be saved as a `.star` file for downstream processing in RELION or other tools.
+
+### Tomogram overlay notes
+
+- In the `Coordinates for selected particles in one tomogram` section, `coords_selected_tomo` stores selected particle rows and coordinates for the chosen tomogram.
+- In the `Overlay selected particles on a tomogram` section, set `TOMOGRAM_OVERLAY_MRC` to the tomogram file you want to display.
+- Use `COORD_SCALE_FACTOR_XY` and `COORD_SCALE_FACTOR_Z` to convert STAR-file coordinates into tomogram voxel coordinates before plotting circles.
+- If subtomogram coordinates and tomogram coordinates are not on the same scale, a common choice is `subtomogram angpix / (tomogram angpix)` for the corresponding scale factor.
 
 **Requirements:** The notebook requires `jupyter-notebook`, `anywidget`, `plotly`, and `ipywidgets` for interactive visualizations. Install them via:
 ```bash
