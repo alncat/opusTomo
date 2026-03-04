@@ -61,7 +61,9 @@ class PoseTracker(nn.Module):
                 print(rots_from_euler[:5, ...], self.rots[:5, ...])
             self.rots = rots_from_euler
             self.rots_update = torch.eye(3).unsqueeze(0).repeat(self.rots.shape[0], 1, 1)
+            self.rots_resi = torch.eye(3).unsqueeze(0).repeat(self.rots.shape[0], 1, 1)
             self.trans_update = torch.zeros_like(self.trans)
+            self.trans_resi = torch.zeros_like(self.trans)
             self.trans_o = self.trans.clone()
 
             # convert euler to hopf
@@ -419,12 +421,13 @@ class PoseTracker(nn.Module):
                 t = self.trans_emb.weight.data.cpu().numpy()
 
             #add update
-            t = self.trans_o.cpu().numpy() + self.trans_update.cpu().numpy()
+            t = self.trans_o.cpu().numpy() + self.trans_update.cpu().numpy() + self.trans_resi.cpu().numpy()
 
             t = t/self.D # convert from pixels to extent
+
             if self.eulers is not None:
                 r = self.rots.cpu().numpy()
-                rots_to_save = self.rots @ self.rots_update
+                rots_to_save = self.rots @ self.rots_update @ self.rots_resi
                 delta_angle, delta_axis = lie_tools.rot_to_axis(self.rots_update)
                 #print(delta_angle[:8], delta_axis[:8])
                 #convert rotation to hopfs
@@ -460,6 +463,9 @@ class PoseTracker(nn.Module):
         rot_o = self.rots_update[ind]
         #print(rots.shape, rot_o.shape)
         delta_R = lie_tools.hopf_to_SO3(rots.squeeze(1).cpu())
+
+        self.rots_resi[ind] = delta_R
+
         delta_R = torch.transpose(rot_o, -1, -2) @ delta_R
         #convert delta_R to axis angle
         delta_angle, delta_axis = lie_tools.rot_to_axis(delta_R)
@@ -472,6 +478,8 @@ class PoseTracker(nn.Module):
         delta_angle, delta_axis = lie_tools.rot_to_axis(rot_n)
         self.rots_update[ind] = rot_n
         self.trans_update[ind] = self.trans_update[ind]*mu + delta_t[:, :]*(1-mu)
+
+        self.trans_resi[ind] = delta_t
         #update euler and trans
         new_rots = self.rots[ind] @ self.rots_update[ind]
         new_eulers = lie_tools.so3_to_hopf(new_rots)
