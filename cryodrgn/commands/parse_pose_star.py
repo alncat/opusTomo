@@ -20,6 +20,8 @@ def add_args(parser):
     parser.add_argument('--labels', metavar='PKL', type=os.path.abspath, required=False, help='Output label.pkl')
     parser.add_argument('--outdir', type=os.path.abspath, help='The directory for storing starfiles for clusters')
     parser.add_argument('--poses', metavar='PKL', type=os.path.abspath, required=False, help='Load poses from given pkl')
+    parser.add_argument('--out-star', metavar='STAR', type=os.path.abspath, required=False,
+                        help='Write updated STAR file (e.g., with perturbed or loaded poses)')
     parser.add_argument('--perturb-rot', type=float, default=0.,
                         help='Randomly perturb each rotation by up to this many degrees')
     parser.add_argument('--perturb-trans', type=float, default=0.,
@@ -110,6 +112,13 @@ def main(args):
 
     if args.poses or args.perturb_rot > 0 or args.perturb_trans > 0:
         update_star_with_poses(s, euler, trans)
+
+    if args.out_star is not None:
+        out_dir = os.path.dirname(args.out_star)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        log(f'Writing updated STAR to {args.out_star}')
+        s.write(args.out_star)
 
     log('Euler angles (Rot, Tilt, Psi):')
     log(euler[0])

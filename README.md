@@ -1,9 +1,9 @@
 # Table of contents
 1. [OPUS-ET](#opustomo)
-2. [setup environment](#setup)
-3. [training](#training)
+2. [Getting Started](#setup)
+3. [Training](#training)
    1. [train_tomo](#train_tomo)
-4. [analyze result](#analysis)
+4. [Analyze Result](#analysis)
    1. [sample latent spaces](#sample)
    2. [reconstruct volumes](#reconstruct)
    3. [select particles](#select)
@@ -108,7 +108,7 @@ We can also reconstruct the dynamics for FAS, using only 221 particles!
 
 https://github.com/user-attachments/assets/806c518c-427d-41c9-905d-17b18fba8922
 
-# set up environment <a name="setup"></a>
+# Getting Started <a name="setup"></a>
 
 After cloning the repository, to run OPUS-ET, you need to have an environment with pytorch installed and a machine with GPUs. The recommended hardware configuration is a machine with 4 V100 GPUs.
 You can create the conda environment for OPUS-ET using the environment file in the source folder by executing
@@ -132,6 +132,8 @@ OPUS-ET can be kept up to date by
 ```
 git pull
 ```
+
+A quick tutorial on small dataset can be found at https://github.com/alncat/opusTomo/wiki/Convert-M's-2D-particle-image-series-to-subtomograms-for-training-OPUS%E2%80%90ET.
 
 **Usage Example:**
 
