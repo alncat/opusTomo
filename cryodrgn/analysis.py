@@ -34,7 +34,7 @@ def parse_loss_vanilla(f, prefix):
     '''Parse loss from run.log'''
     lines = open(f).readlines()
     lines = [x for x in lines if prefix in x]
-    loss = [x.split()[10][:-1] for x in lines]
+    loss = [x.split()[10][:-1] for x in lines if 'loss' in x]
     loss = np.asarray(loss).astype(np.float32)
     print(prefix, " losses: ", loss)
     return loss
