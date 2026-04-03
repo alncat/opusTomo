@@ -116,11 +116,20 @@ class convert_star:
     def add_args(cls, parser):
         parser.add_argument('starfile', type=os.path.abspath, help='input starfile')
         parser.add_argument('angpix', type=float, help='angstrom per pixel of the tilt series')
+        parser.add_argument('--subset-label', type=int, required=False,
+                            help='when set, also write out only this _rlnRandomSubset label')
+        parser.add_argument('--remove-symexp', action='store_true', required=False,
+                            help='remove symmetry expansion using one row per rlnImageName')
 
     @classmethod
     def main(cls, args):
         script_path = os.path.join(os.path.dirname(__file__), 'convert_star.py')
-        subprocess.call(['python', script_path, args.starfile, str(args.angpix)])
+        cmd = ['python', script_path, args.starfile, str(args.angpix)]
+        if args.subset_label is not None:
+            cmd.extend(['--subset-label', str(args.subset_label)])
+        if args.remove_symexp:
+            cmd.append('--remove-symexp')
+        subprocess.call(cmd)
 
 class prepare:
     @classmethod
@@ -164,5 +173,3 @@ class prepare_multi:
                 subprocess.call(['bash', script_path, args.starfile, str(args.D), str(args.apix), args.masks, str(args.numb), '--volumes ' + args.volumes, '--outmasks ' + args.outmasks,])
             else:
                 subprocess.call(['bash', script_path, args.starfile, str(args.D), str(args.apix), args.masks, str(args.numb), '--outmasks ' + args.outmasks,])
-
-
