@@ -50,6 +50,12 @@ def main():
     parser_command2.set_defaults(func=wrapper.convert_star.main)
 
     # Subparser for command2
+    parser_command2 = subparsers.add_parser('create_mask', help='create solvent mask from input volume')
+    # Add arguments for command2 if needed
+    wrapper.create_mask.add_args(parser_command2)
+    parser_command2.set_defaults(func=wrapper.create_mask.main)
+
+    # Subparser for command2
     parser_command2 = subparsers.add_parser('prepare', help='prepare input files for training opus-tomo')
     # Add arguments for command2 if needed
     wrapper.prepare.add_args(parser_command2)
@@ -69,4 +75,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
