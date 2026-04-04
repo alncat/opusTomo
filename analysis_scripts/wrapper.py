@@ -116,6 +116,8 @@ class convert_star:
     def add_args(cls, parser):
         parser.add_argument('starfile', type=os.path.abspath, help='input starfile')
         parser.add_argument('angpix', type=float, help='angstrom per pixel of the tilt series')
+        parser.add_argument('--rescale-angpix', type=float, required=False,
+                            help='target angpix to rescale pixel coordinates/translations')
         parser.add_argument('--subset-label', type=int, required=False,
                             help='when set, also write out only this _rlnRandomSubset label')
         parser.add_argument('--remove-symexp', action='store_true', required=False,
@@ -125,6 +127,8 @@ class convert_star:
     def main(cls, args):
         script_path = os.path.join(os.path.dirname(__file__), 'convert_star.py')
         cmd = ['python', script_path, args.starfile, str(args.angpix)]
+        if args.rescale_angpix is not None:
+            cmd.extend(['--rescale-angpix', str(args.rescale_angpix)])
         if args.subset_label is not None:
             cmd.extend(['--subset-label', str(args.subset_label)])
         if args.remove_symexp:

@@ -10,6 +10,12 @@ def parse_args():
     parser.add_argument("starfile", help="input STAR file")
     parser.add_argument("angpix", type=float, help="angstrom per pixel")
     parser.add_argument(
+        "--rescale-angpix",
+        type=float,
+        default=None,
+        help="target angpix for rescaling pixel-based coordinates/translations",
+    )
+    parser.add_argument(
         "--subset-label",
         type=int,
         default=None,
@@ -36,6 +42,32 @@ def main():
     if origins[0] in df.columns:
         df[origins_new] = df[origins] / args.angpix
         df.drop(origins, axis=1, inplace=True)
+
+    if args.rescale_angpix is not None:
+        if args.rescale_angpix <= 0:
+            raise ValueError("--rescale-angpix must be > 0")
+        scale = float(args.angpix) / float(args.rescale_angpix)
+        # Rescale pixel-space coordinates/translations to the new angpix.
+        px_cols = [
+            "rlnCoordinateX",
+            "rlnCoordinateY",
+            "rlnCoordinateZ",
+            "rlnOriginX",
+            "rlnOriginY",
+            "rlnOriginZ",
+        ]
+        for col in px_cols:
+            if col in df.columns:
+                df[col] = df[col] * scale
+        # Update common STAR pixel-size metadata when present.
+        apix_cols = ["rlnImagePixelSize", "rlnMicrographPixelSize", "rlnPixelSize"]
+        for col in apix_cols:
+            if col in df.columns:
+                df[col] = float(args.rescale_angpix)
+        print(
+            f"rescale angpix: {args.angpix} -> {args.rescale_angpix}, "
+            f"pixel scale factor={scale:.6g}"
+        )
 
     if args.remove_symexp:
         if "rlnImageName" not in df.columns:
