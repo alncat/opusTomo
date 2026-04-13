@@ -408,7 +408,7 @@ class LazyTomoWARPMRCData(data.Dataset):
         assert mrcfile.endswith('.star')
         log(f"the maximum tilt_range of loading tilt series is {tilt_range}, \
             the tilt_step of loaded tilt series is {tilt_step}, \
-            the tilt_limit of loaded tilt series is {tilt_limit}")
+            the tilt_limit of loaded tilt series is {tilt_limit}\n")
         particles, ctfs, ctf_files, warp_ctfs = load_warp_subtomos(mrcfile, True, datadir=datadir, relion31=relion31,
                                                         tilt_step=tilt_step, tilt_range=tilt_range, tilt_limit=tilt_limit)
         self.tilt_step = tilt_step

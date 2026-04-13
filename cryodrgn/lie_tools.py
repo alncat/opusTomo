@@ -510,6 +510,15 @@ def so3_to_euler(A):
     #return alpha, beta, gamma
     return torch.stack((alpha, beta, gamma), dim=-1)
 
+def rotation_distance_angle(R1, R2):
+    # R1, R2: (..., 3, 3)
+    R_rel = R1.transpose(-1, -2) @ R2
+    trace = R_rel.diagonal(dim1=-2, dim2=-1).sum(-1)
+    cos_theta = (trace - 1.0) / 2.0
+    cos_theta = torch.clamp(cos_theta, -1.0, 1.0)
+    theta = torch.acos(cos_theta)
+    return theta  # shape (...,)
+
 def random_quaternions(n, dtype=torch.float32, device=None):
     u1, u2, u3 = torch.rand(3, n, dtype=dtype, device=device)
     return torch.stack((
@@ -531,7 +540,7 @@ def random_biased_SO3(n, bias=1., device=None):
     return rots
 
 def random_SO3(n, dtype=torch.float32, device=None):
-    return quaternions_to_SO3(random_quaternions(n, dtype, device))
+    return quaternions_to_SO3_wiki(random_quaternions(n, dtype, device))
 
 def logsumexp(inputs, dim=None, keepdim=False):
     '''Numerically stable logsumexp.

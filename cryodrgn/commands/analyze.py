@@ -219,8 +219,8 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
         analysis.scatter_annotate(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True,
                                   xlim=(xmin, xmax), ylim=(ymin, ymax),
                                   alpha=.15, s=0.5)
-        plt.xlabel('UMAP1', fontsize=12, weight='bold')
-        plt.ylabel('UMAP2', fontsize=12, weight='bold')
+        plt.xlabel('UMAP1', fontsize=14, weight='bold')
+        plt.ylabel('UMAP2', fontsize=14, weight='bold')
         plt.savefig(f'{outdir}/kmeans{K}/umap.png')
 
         g = analysis.scatter_annotate_hex(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True)

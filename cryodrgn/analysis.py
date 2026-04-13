@@ -241,9 +241,11 @@ def scatter_annotate(x, y, centers=None, centers_ind=None, annotate=True, labels
                           y=float(centers[i, 1]),
                           s=str(label),
                           ha='center',
-                          va='center', fontsize=10, weight="bold")
+                          va='center', fontsize=14, weight="bold")
                  for i, label in enumerate(labels)]
         adjust_text(texts=texts)
+        plt.xticks(fontsize=13, weight="bold")
+        plt.yticks(fontsize=13, weight="bold")
 
     return fig, ax
 

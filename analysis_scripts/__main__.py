@@ -44,10 +44,28 @@ def main():
     parser_command2.set_defaults(func=wrapper.convert_pytom.main)
 
     # Subparser for command2
+    parser_command2 = subparsers.add_parser('convert_pytom_to_star', help='convert PyTom XML particle lists to RELION STAR')
+    # Add arguments for command2 if needed
+    wrapper.convert_pytom_to_star.add_args(parser_command2)
+    parser_command2.set_defaults(func=wrapper.convert_pytom_to_star.main)
+
+    # Subparser for command2
+    parser_command2 = subparsers.add_parser('convert_artiax', help='convert STAR to ArtiaX-compatible format')
+    # Add arguments for command2 if needed
+    wrapper.convert_artiax.add_args(parser_command2)
+    parser_command2.set_defaults(func=wrapper.convert_artiax.main)
+
+    # Subparser for command2
     parser_command2 = subparsers.add_parser('convert_star', help='split starfiles by even/odd')
     # Add arguments for command2 if needed
     wrapper.convert_star.add_args(parser_command2)
     parser_command2.set_defaults(func=wrapper.convert_star.main)
+
+    # Subparser for command2
+    parser_command2 = subparsers.add_parser('extract_tomo_cubes', help='extract subtomogram cubes by STAR coordinates')
+    # Add arguments for command2 if needed
+    wrapper.extract_tomo_cubes.add_args(parser_command2)
+    parser_command2.set_defaults(func=wrapper.extract_tomo_cubes.main)
 
     # Subparser for command2
     parser_command2 = subparsers.add_parser('create_mask', help='create solvent mask from input volume')

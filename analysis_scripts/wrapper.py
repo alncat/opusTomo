@@ -111,6 +111,72 @@ class convert_pytom:
         script_path = os.path.join(os.path.dirname(__file__), 'convert_pytom.py')
         subprocess.call(['python', script_path, args.starfile, str(args.mic)])
 
+class convert_pytom_to_star:
+    @classmethod
+    def add_args(cls, parser):
+        parser.add_argument('--input', type=os.path.abspath, required=False, help='single input XML file')
+        parser.add_argument('--input-dir', type=os.path.abspath, required=False, help='directory containing XML files')
+        parser.add_argument('--pattern', type=str, default='*.xml', required=False,
+                            help='file pattern for batch conversion (default: %(default)s)')
+        parser.add_argument('--output', type=os.path.abspath, required=True, help='output STAR file path')
+        parser.add_argument('--pixel-size', type=float, default=7.84, required=False,
+                            help='detector pixel size in Angstroms (default: %(default)s)')
+        parser.add_argument('--bin-size', type=float, default=4, required=False,
+                            help='binning factor used in PyTom (default: %(default)s)')
+        parser.add_argument('--magnification', type=float, default=10000, required=False,
+                            help='magnification (default: %(default)s)')
+        parser.add_argument('--ctf-template', type=str, default=None, required=False,
+                            help='CTF image path template with {ts_name} or {i}')
+        parser.add_argument('--workers', type=int, default=10, required=False,
+                            help='number of workers for batch conversion (default: %(default)s)')
+
+    @classmethod
+    def main(cls, args):
+        script_path = os.path.join(os.path.dirname(__file__), 'convert_pytom_to_star.py')
+        cmd = ['python', script_path, '--output', args.output,
+               '--pattern', args.pattern,
+               '--pixel-size', str(args.pixel_size),
+               '--bin-size', str(args.bin_size),
+               '--magnification', str(args.magnification),
+               '--workers', str(args.workers)]
+        if args.input is not None:
+            cmd.extend(['--input', args.input])
+        if args.input_dir is not None:
+            cmd.extend(['--input-dir', args.input_dir])
+        if args.ctf_template is not None:
+            cmd.extend(['--ctf-template', args.ctf_template])
+        subprocess.call(cmd)
+
+class convert_artiax:
+    @classmethod
+    def add_args(cls, parser):
+        parser.add_argument('input', type=os.path.abspath, help='input STAR file')
+        parser.add_argument('mic', type=str, help='tomogram/micrograph id')
+        parser.add_argument('--factor', type=float, default=2.132, required=False,
+                            help='coordinate scaling factor (default: %(default)s)')
+        parser.add_argument('--deduplicate', action='store_true', required=False,
+                            help='remove duplicates by rlnImageName')
+        parser.add_argument('--micrograph-col', type=str, default='rlnMicrographName', required=False,
+                            help='micrograph column name (default: %(default)s)')
+        parser.add_argument('--data-block', type=str, required=False,
+                            help='STAR data block name for multi-block STAR')
+        parser.add_argument('-o', '--output', type=os.path.abspath, required=False,
+                            help='output STAR path (default: <input_stem>_<mic>.star)')
+
+    @classmethod
+    def main(cls, args):
+        script_path = os.path.join(os.path.dirname(__file__), 'convert_artiax.py')
+        cmd = ['python', script_path, args.input, args.mic,
+               '--factor', str(args.factor),
+               '--micrograph-col', args.micrograph_col]
+        if args.deduplicate:
+            cmd.append('--deduplicate')
+        if args.data_block is not None:
+            cmd.extend(['--data-block', args.data_block])
+        if args.output is not None:
+            cmd.extend(['--output', args.output])
+        subprocess.call(cmd)
+
 class convert_star:
     @classmethod
     def add_args(cls, parser):
@@ -133,6 +199,68 @@ class convert_star:
             cmd.extend(['--subset-label', str(args.subset_label)])
         if args.remove_symexp:
             cmd.append('--remove-symexp')
+        subprocess.call(cmd)
+
+class extract_tomo_cubes:
+    @classmethod
+    def add_args(cls, parser):
+        parser.add_argument('tomo', type=os.path.abspath, help='input tomogram (.mrc/.map)')
+        parser.add_argument('star', type=os.path.abspath, help='input STAR with coordinates')
+        parser.add_argument('--coord-cols', nargs=3, metavar=('XCOL', 'YCOL', 'ZCOL'),
+                            default=('rlnCoordinateX', 'rlnCoordinateY', 'rlnCoordinateZ'),
+                            help='coordinate columns in STAR')
+        parser.add_argument('--data-block', type=str, required=False,
+                            help='STAR data block name when STAR has multiple blocks')
+        parser.add_argument('--tomo-col', type=str, required=False,
+                            help='STAR column used to select one tomogram')
+        parser.add_argument('--tomo-id', type=str, required=False,
+                            help='value in --tomo-col for selected tomogram')
+        parser.add_argument('--box-size', type=int, required=True, help='cube size in voxels')
+        parser.add_argument('--coord-scale', type=float, default=1.0, required=False,
+                            help='scale factor for STAR coordinates')
+        parser.add_argument('--one-based', action='store_true', required=False,
+                            help='treat coordinates as 1-based')
+        parser.add_argument('--round-mode', choices=('round', 'floor', 'ceil'), default='round',
+                            required=False, help='rounding mode for float coordinates')
+        parser.add_argument('--pad-outside', action='store_true', required=False,
+                            help='pad cubes crossing boundary instead of skipping')
+        parser.add_argument('--out-star', type=os.path.abspath, required=False,
+                            help='optional STAR with only extracted entries')
+        parser.add_argument('-o', '--output-dir', type=os.path.abspath, required=True,
+                            help='output directory for extracted cubes')
+        parser.add_argument('--prefix', type=str, default='cube', required=False,
+                            help='prefix for output cube filenames')
+        parser.add_argument('--start-index', type=int, default=0, required=False,
+                            help='starting index for output filenames')
+        parser.add_argument('--write-stack', type=os.path.abspath, required=False,
+                            help='optional stack output path (.mrcs/.mrc)')
+
+    @classmethod
+    def main(cls, args):
+        script_path = os.path.join(os.path.dirname(__file__), 'extract_tomo_cubes.py')
+        cmd = ['python', script_path, args.tomo, args.star,
+               '--box-size', str(args.box_size),
+               '--coord-scale', str(args.coord_scale),
+               '--round-mode', args.round_mode,
+               '-o', args.output_dir,
+               '--prefix', args.prefix,
+               '--start-index', str(args.start_index)]
+        if args.coord_cols is not None:
+            cmd.extend(['--coord-cols', args.coord_cols[0], args.coord_cols[1], args.coord_cols[2]])
+        if args.data_block is not None:
+            cmd.extend(['--data-block', args.data_block])
+        if args.tomo_col is not None:
+            cmd.extend(['--tomo-col', args.tomo_col])
+        if args.tomo_id is not None:
+            cmd.extend(['--tomo-id', args.tomo_id])
+        if args.one_based:
+            cmd.append('--one-based')
+        if args.pad_outside:
+            cmd.append('--pad-outside')
+        if args.out_star is not None:
+            cmd.extend(['--out-star', args.out_star])
+        if args.write_stack is not None:
+            cmd.extend(['--write-stack', args.write_stack])
         subprocess.call(cmd)
 
 class create_mask:
