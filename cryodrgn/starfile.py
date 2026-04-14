@@ -478,19 +478,35 @@ class Starfile():
                 def_tlt = np.stack([tilt, defocus, voltage, cs, w, bfactor, scale], axis=1)
             else:
                 def_tlt = np.stack([tilt, dfu, dfv, dfangle, voltage, cs, w, bfactor, scale], axis=1)
-            #sort tilt first
-            def_tlt = def_tlt[def_tlt[:, 0].argsort()]
-            mask = np.isclose(def_tlt[:, 0, None], dummy_tlt[:, 0], atol=tilt_step/2.-0.1)
-            #print(def_tlt[:, 0], dummy_tlt[np.where(mask)[1]][:, 0],)
-            mask_indices = np.where(mask)[1]
-            try:
-                dummy_tlt[mask_indices] = def_tlt
-            except:
-                print(csv, "tilt assignment error!")
-                raise RuntimeError
-            if dummy_tlt[dummy_tlt[:, -1] != 0.].shape[0] != def_tlt.shape[0]:
-                print(csv, mask_indices, dummy_tlt, def_tlt)
-            assert np.sum(np.abs(dummy_tlt[dummy_tlt[:, -1] != 0.] - def_tlt)) == 0.
+            dummy_angles = dummy_tlt[:, 0]
+            def_angles = def_tlt[:, 0]
+            #get nearest neighbor
+            idx = np.argmin(np.abs(def_angles[:, None] - dummy_angles[None, :]), axis=1)
+            dist = np.abs(def_angles - dummy_angles[idx])
+            #keep those within tolerance
+            tol = tilt_step / 2
+            valid = dist <= tol
+
+            #check one-to-one correspondence
+            unique_idx, counts = np.unique(idx[valid], return_counts=True)
+            if np.any(counts > 1) or np.sum(valid) < len(def_angles):
+                print("Warning: multiple def_tlt or insufficient rows map to the same dummy_tlt row", csv)
+
+            dummy_tlt[idx[valid]] = def_tlt[valid]
+
+            ##sort tilt first
+            #def_tlt = def_tlt[def_tlt[:, 0].argsort()]
+            #mask = np.isclose(def_tlt[:, 0, None], dummy_tlt[:, 0], atol=tilt_step/2.-0.1)
+            ##print(def_tlt[:, 0], dummy_tlt[np.where(mask)[1]][:, 0],)
+            #mask_indices = np.where(mask)[1]
+            #try:
+            #    dummy_tlt[mask_indices] = def_tlt
+            #except:
+            #    print(csv, "tilt assignment error!")
+            #    raise RuntimeError
+            #if dummy_tlt[dummy_tlt[:, -1] != 0.].shape[0] != def_tlt.shape[0]:
+            #    print(csv, mask_indices, dummy_tlt, def_tlt)
+            #assert np.sum(np.abs(dummy_tlt[dummy_tlt[:, -1] != 0.] - def_tlt)) == 0.
             if tilt_limit is not None:
                 dummy_tlt[np.abs(dummy_tlt[:, 0]) > tilt_limit, -1] = 0.
             ctfs.append(dummy_tlt)
