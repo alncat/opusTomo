@@ -1,0 +1,623 @@
+# =============================================================================
+# Pipeline Manifest — single source of truth for validate.sh and agents
+# =============================================================================
+
+phases:
+  1:
+    description: "Frame series import — settings, link/motion correct, CTF"
+    requires_species: false
+    scripts:
+      - warp_frameseries_import.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - ANGPIX
+      - EXPOSURE
+      - FILE_EXTENSION
+      - FRAME_MODE
+      - CTF_RANGE_MAX
+      - CTF_DEFOCUS_MAX
+      - CTF_GRID
+    optional_vars:
+      - GAIN_FILE
+      - DEFECTS_FILE
+      - EER_NGROUPS
+      - GAIN_FLIP_X
+      - GAIN_FLIP_Y
+      - GAIN_TRANSPOSE
+      - MOTION_GRID
+    required_tools:
+      - WarpTools
+    required_conda:
+      - WARP_ENV
+    outputs:
+      - warp_frameseries.settings
+      - warp_frameseries/average/
+      - warp_frameseries/*.xml
+    pre_checks:
+      - "FRAME_DIR exists and contains $FILE_EXTENSION files"
+      - "GAIN_FILE exists (if non-empty)"
+
+  2:
+    description: "Tilt series setup — import from MDOC, create settings"
+    requires_species: false
+    scripts:
+      - warp_tiltseries_setup.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - ANGPIX
+      - EXPOSURE
+      - TOMO_DIM_Z
+      - MIN_INTENSITY
+    optional_vars:
+      - TOMO_DIM_X
+      - TOMO_DIM_Y
+      - SAMPLE_FRAME
+      - AUTO_INSTALL_MRCFILE
+    required_tools:
+      - WarpTools
+    required_conda:
+      - WARP_ENV
+    outputs:
+      - warp_tiltseries.settings
+      - tomostar/*.tomostar
+    pre_checks:
+      - "$MDOC_DIR exists and contains *.mdoc files"
+      - "Phase 1 outputs exist"
+
+  3:
+    description: "Tilt stack export + AreTomo2 alignment + angle negation"
+    requires_species: false
+    scripts:
+      - warp_export_stacks.slurm
+      - warp_aretomo_align_negate.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - BINNING_FACTOR
+      - TOMO_DIM_Z
+    required_tools:
+      - WarpTools
+      - AreTomo2
+    required_conda:
+      - WARP_ENV
+    outputs:
+      - tiltstack/TS_XXX/TS_XXX.st
+      - tiltstack/TS_XXX/TS_XXX_ali.mrc
+      - tiltstack/TS_XXX/TS_XXX.tlt
+      - tiltstack/TS_XXX/TS_XXX.xf
+    pre_checks:
+      - "Phase 2 outputs exist"
+      - "AreTomo2 executable exists at $ARETOMO_EXE"
+      - "tiltstack/ contains .st files per tomostar"
+    per_tomostar_outputs:
+      - "_ali.mrc"
+      - ".tlt"
+      - ".xf"
+
+  3a:
+    description: "Export tilt stacks from WARP"
+    requires_species: false
+    scripts:
+      - warp_export_stacks.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - BINNING_FACTOR
+    required_tools:
+      - WarpTools
+    required_conda:
+      - WARP_ENV
+    outputs:
+      - tiltstack/TS_XXX/TS_XXX.st
+      - tiltstack/TS_XXX/TS_XXX.rawtlt
+
+  3b:
+    description: "AreTomo2 alignment and tilt-angle negation"
+    requires_species: false
+    scripts:
+      - warp_aretomo_align_negate.slurm
+    required_vars:
+      - WORK_DIR
+      - ARETOMO_EXE
+      - BINNING_FACTOR
+      - TOMO_DIM_Z
+    required_tools:
+      - AreTomo2
+      - headerPyTom
+    required_conda:
+      - PYTOM_ENV
+    outputs:
+      - tiltstack/TS_XXX/TS_XXX_ali.mrc
+      - tiltstack/TS_XXX/TS_XXX.tlt
+      - tiltstack/TS_XXX/TS_XXX.xf
+
+  "3.5":
+    description: "Update TOMO_DIMS in settings from AreTomo output ★ REQUIRED"
+    requires_species: false
+    scripts:
+      - warp_update_tomo_dims.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - BINNING_FACTOR
+      - ANGPIX
+      - EXPOSURE
+    required_tools:
+      - WarpTools
+      - headerPyTom
+    required_conda:
+      - PYTOM_ENV
+      - WARP_ENV
+    outputs:
+      - "Updated warp_tiltseries.settings"
+    pre_checks:
+      - "AreTomo _ali.mrc outputs exist"
+      - "Phase 2 settings file exists"
+
+  4:
+    description: "Import AreTomo alignments into WARP"
+    requires_species: false
+    scripts:
+      - warp_import_alignments.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - BINNING_FACTOR
+    required_tools:
+      - WarpTools
+    required_conda:
+      - WARP_ENV
+    outputs:
+      - "warp_tiltseries/*.xml (with alignment data)"
+    pre_checks:
+      - "Phase 3 outputs exist (.tlt, .xf)"
+      - "Phase 3.5 settings are updated"
+
+  5:
+    description: "CTF estimation + tomogram reconstruction"
+    requires_species: false
+    scripts:
+      - warp_ts_ctf.slurm
+      - warp_ts_reconstruct.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - BINNING_FACTOR
+      - CTF_RANGE_MAX
+      - CTF_DEFOCUS_MAX
+      - CTF_WINDOW
+    required_tools:
+      - WarpTools
+    required_conda:
+      - WARP_ENV
+    outputs:
+      - reconstruction/TS_XXX_*Apx.mrc
+    pre_checks:
+      - "Phase 4 alignment data imported"
+      - "Compare AreTomo vs WARP reconstruction dims (must match)"
+    per_tomostar_outputs:
+      - "_*Apx.mrc"
+
+  5a:
+    description: "Tilt-series CTF estimation"
+    requires_species: false
+    scripts:
+      - warp_ts_ctf.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - CTF_RANGE_MAX
+      - CTF_DEFOCUS_MAX
+      - CTF_WINDOW
+    required_tools:
+      - WarpTools
+    required_conda:
+      - WARP_ENV
+    outputs:
+      - "warp_tiltseries/*.xml (with CTF data)"
+
+  5b:
+    description: "Tomogram reconstruction"
+    requires_species: false
+    scripts:
+      - warp_ts_reconstruct.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - BINNING_FACTOR
+    required_tools:
+      - WarpTools
+    required_conda:
+      - WARP_ENV
+    outputs:
+      - reconstruction/TS_XXX_*Apx.mrc
+
+  6:
+    description: "Template matching — template, mask, jobs, TM, extract, convert"
+    requires_species: true
+    scripts:
+      - gen_template_from_mrc.slurm
+      - gen_sphere_mask.slurm
+      - gen_tm_jobs_aretomo.slurm
+      - run_tm_sequential.slurm
+      - extract_tm_candidates_parallel.slurm
+      - convert_to_star.slurm
+      - convert_pytom_to_warp.slurm
+    required_vars:
+      # pipeline.conf
+      - WORK_DIR
+      - ANGPIX
+      - BINNING_FACTOR
+      - ALIGN_ANGPIX
+      # species.conf
+      - TM_LABEL
+      - DIAMETER
+      - TM_BOX_SIZE
+      - INPUT_MRC
+      - MAP_ANGPIX
+      - NUM_CANDIDATES
+      - TEMPLATE
+    optional_vars:
+      - MASK_RADIUS
+    required_tools:
+      - create_template.py
+      - headerPyTom
+      - create_mask.py
+      - localization.py
+      - convert.py
+      - dsdsh
+    required_conda:
+      - PYTOM_ENV
+      - OPUSET_ENV
+    outputs:
+      - templates/${TM_LABEL}_tm.mrc
+      - templates/${TM_LABEL}_mask.mrc
+      - template_matching/${TM_LABEL}/jobs/TS_XXX/job.xml
+      - template_matching/${TM_LABEL}/jobs/TS_XXX/scores_*.em
+      - template_matching/${TM_LABEL}/jobs/TS_XXX/angles_*.em
+      - template_matching/${TM_LABEL}/particles/TS_XXX_particles.xml
+      - template_matching/${TM_LABEL}/particles/TS_XXX_extraction.log
+      - template_matching/${TM_LABEL}/star_files/TS_XXX.star
+      - template_matching/${TM_LABEL}/warp_star/TS_XXX_warp.star
+    per_tomostar_outputs:
+      - "job.xml (in TM_JOBS_DIR/TS_XXX/)"
+      - "scores_*.em + angles_*.em (in TM_JOBS_DIR/TS_XXX/)"
+      - "_particles.xml + _extraction.log (in TM_PARTICLES_DIR/)"
+      - ".star (in TM_STAR_DIR/)"
+      - "_warp.star (in TM_WARP_DIR/)"
+    pre_checks:
+      - "Phase 5 outputs exist"
+      - "Phase 3b _ali.mrc files exist (TM runs on AreTomo tomo, not WARP recon)"
+      - "templates/${TM_LABEL}_tm.mrc exists (run 6a first)"
+      - "templates/${TM_LABEL}_mask.mrc exists (run 6b before 6c)"
+
+  6a:
+    description: "Generate PyTOM-ready template from user MRC"
+    requires_species: true
+    scripts:
+      - gen_template_from_mrc.slurm
+    required_vars:
+      - WORK_DIR
+      - ANGPIX
+      - BINNING_FACTOR
+      - TM_LABEL
+      - INPUT_MRC
+      - MAP_ANGPIX
+      - TM_BOX_SIZE
+    required_tools:
+      - create_template.py
+    required_conda:
+      - PYTOM_ENV
+    outputs:
+      - templates/${TM_LABEL}_tm.mrc
+
+  6b:
+    description: "Generate template-matching sphere mask"
+    requires_species: true
+    scripts:
+      - gen_sphere_mask.slurm
+    required_vars:
+      - WORK_DIR
+      - TEMPLATE_MRC
+      - TM_MASK_MRC
+      - DIAMETER
+      - MASK_SIGMA
+    optional_vars:
+      - MASK_RADIUS
+    required_tools:
+      - headerPyTom
+      - create_mask.py
+    required_conda:
+      - PYTOM_ENV
+    outputs:
+      - templates/${TM_LABEL}_mask.mrc
+
+  6c:
+    description: "Generate PyTOM template-matching job XMLs"
+    requires_species: true
+    scripts:
+      - gen_tm_jobs_aretomo.slurm
+    required_vars:
+      - WORK_DIR
+      - TOMOSTAR_DIR
+      - TILTSTACK_DIR
+      - TEMPLATE_MRC
+      - TM_MASK_MRC
+      - ANGLE_LIST
+      - DEFAULT_Z_START
+      - TM_LABEL
+    required_tools:
+      - headerPyTom
+    required_conda:
+      - PYTOM_ENV
+    outputs:
+      - template_matching/${TM_LABEL}/jobs/TS_XXX/job.xml
+
+  6d:
+    description: "Run PyTOM template matching sequentially"
+    requires_species: true
+    scripts:
+      - run_tm_sequential.slurm
+    required_vars:
+      - WORK_DIR
+      - TM_JOBS_DIR
+      - TM_SPLIT_X
+      - TM_SPLIT_Y
+      - TM_SPLIT_Z
+    required_tools:
+      - localization.py
+    required_conda:
+      - PYTOM_ENV
+    outputs:
+      - template_matching/${TM_LABEL}/jobs/TS_XXX/scores_*.em
+      - template_matching/${TM_LABEL}/jobs/TS_XXX/angles_*.em
+
+  6e:
+    description: "Extract template-matching candidates"
+    requires_species: true
+    scripts:
+      - extract_tm_candidates_parallel.slurm
+    required_vars:
+      - WORK_DIR
+      - TM_JOBS_DIR
+      - TM_PARTICLES_DIR
+      - NUM_CANDIDATES
+      - EXTRACT_MASK_RADIUS
+      - TEMPLATE
+      - MIN_SCORE
+    required_tools:
+      - extractCandidates.py
+    required_conda:
+      - PYTOM_ENV
+    outputs:
+      - template_matching/${TM_LABEL}/particles/TS_XXX_particles.xml
+      - template_matching/${TM_LABEL}/particles/TS_XXX_extraction.log
+
+  6f:
+    description: "Convert PyTOM XML candidates to STAR"
+    requires_species: true
+    scripts:
+      - convert_to_star.slurm
+    required_vars:
+      - WORK_DIR
+      - TM_PARTICLES_DIR
+      - TM_STAR_DIR
+      - ANGPIX
+      - BINNING_FACTOR
+    required_tools:
+      - convert.py
+    required_conda:
+      - PYTOM_ENV
+    outputs:
+      - template_matching/${TM_LABEL}/star_files/TS_XXX.star
+
+  6g:
+    description: "Convert PyTOM STAR to WARP-compatible STAR"
+    requires_species: true
+    scripts:
+      - convert_pytom_to_warp.slurm
+    required_vars:
+      - WORK_DIR
+      - TM_STAR_DIR
+      - TM_WARP_DIR
+      - OPUSET_ENV
+    required_tools:
+      - dsdsh
+    required_conda:
+      - OPUSET_ENV
+    outputs:
+      - template_matching/${TM_LABEL}/warp_star/TS_XXX_warp.star
+
+  7:
+    description: "Export subtomograms for OPUS-ET training"
+    requires_species: true
+    scripts:
+      - warp_export_particles.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - TM_LABEL
+      - SUBTOMO_BOX_SIZE
+      - DIAMETER
+      - OUTPUT_ANGPIX
+      - COORDS_ANGPIX
+    required_tools:
+      - WarpTools
+    required_conda:
+      - WARP_ENV
+    outputs:
+      - warp_tiltseries/${TM_LABEL}_matching.star
+      - subtomo/TS_XXX/*.mrc
+    pre_checks:
+      - "Phase 6g warp_star files exist"
+      - "WarpTools ts_export_particles supports --dont_correct_ctf_3d and --output_ctf_csv (alncat fork)"
+    per_tomostar_outputs:
+      - "*.mrc (in DATADIR/TS_XXX/)"
+
+  8:
+    description: "OPUS-ET training — heterogeneity + fixed-mode averaging"
+    requires_species: true
+    scripts:
+      - gen_training_mask.slurm
+      - train_opuset.slurm
+      - train_opuset_fixed.slurm
+    required_vars:
+      # pipeline.conf
+      - WORK_DIR
+      - NUM_GPUS
+      # species.conf
+      - TM_LABEL
+      - SUBTOMO_BOX_SIZE
+      - TEMPLATERES
+      - ZDIM
+      - ZAFFINEDIM
+      - NUM_EPOCHS
+      - BATCH_SIZE
+      - LEARNING_RATE
+      - BETA_CONTROL
+      - LAMB
+      - BFACTOR
+      - VAL_FRAC
+      - MASK_SOFT_EDGE
+      - MASK_RADIUS_FRACTION
+    optional_vars:
+      - TILT_RANGE
+      - TILT_STEP
+    required_tools:
+      - dsdsh
+      - torchrun
+    required_conda:
+      - OPUSET_ENV
+    outputs:
+      - templates/${TM_LABEL}_training_mask.mrc
+      - opuset/${TM_LABEL}/z${ZDIM}/weights.*.pkl
+      - opuset/${TM_LABEL}/z${ZDIM}/config.pkl
+      - opuset/${TM_LABEL}/fixed_subset1/weights.*.pkl
+    pre_checks:
+      - "Phase 7 export STAR exists"
+      - "Phase 7 subtomograms exist"
+      - "For fixed mode: run dsdsh convert_star --subset-label 1 first"
+
+  8a:
+    description: "Generate training mask from subtomogram sample"
+    requires_species: true
+    scripts:
+      - gen_training_mask.slurm
+    required_vars:
+      - WORK_DIR
+      - TM_LABEL
+      - MASK_SOFT_EDGE
+      - MASK_RADIUS_FRACTION
+      - DATADIR
+    required_tools:
+      - dsdsh
+    required_conda:
+      - OPUSET_ENV
+    outputs:
+      - templates/${TM_LABEL}_training_mask.mrc
+    pre_checks:
+      - "Phase 7 subtomograms exist under DATADIR"
+
+  8b:
+    description: "OPUS-ET heterogeneity training (grad mode)"
+    requires_species: true
+    scripts:
+      - train_opuset.slurm
+    required_vars:
+      - WORK_DIR
+      - NUM_GPUS
+      - TM_LABEL
+      - SUBTOMO_BOX_SIZE
+      - TEMPLATERES
+      - ZDIM
+      - ZAFFINEDIM
+      - NUM_EPOCHS
+      - BATCH_SIZE
+      - LEARNING_RATE
+      - BETA_CONTROL
+      - LAMB
+      - BFACTOR
+      - VAL_FRAC
+    required_tools:
+      - torchrun
+    required_conda:
+      - OPUSET_ENV
+    outputs:
+      - opuset/${TM_LABEL}/z${ZDIM}/weights.*.pkl
+      - opuset/${TM_LABEL}/z${ZDIM}/config.pkl
+
+  8c:
+    description: "OPUS-ET fixed-mode averaging (half-maps)"
+    requires_species: true
+    scripts:
+      - train_opuset_fixed.slurm
+    required_vars:
+      - WORK_DIR
+      - NUM_GPUS
+      - TM_LABEL
+      - SUBTOMO_BOX_SIZE
+      - TEMPLATERES
+    required_tools:
+      - torchrun
+    required_conda:
+      - OPUSET_ENV
+    outputs:
+      - opuset/${TM_LABEL}/fixed_subset1/weights.*.pkl
+
+  "M":
+    description: "MTools refinement — population, species, MCore, mask, export"
+    requires_species: true
+    scripts:
+      - warp_m_setup.slurm
+      - warp_m_create_species.slurm
+      - warp_m_refine.slurm
+      - warp_m_update_mask.slurm
+      - warp_m_export.slurm
+    required_vars:
+      - WORK_DIR
+      - WARP_DIR
+      - CONDA_LIB
+      - WARP_ENV
+      - POPULATION_NAME
+      - SOURCE_NAME
+      - SPECIES_BASE
+      - DIAMETER
+      - SYM
+      - LOWPASS
+      - ANGPIX_RESAMPLE
+      - M_HALF1
+      - M_HALF2
+      - M_MASK
+      - M_PARTICLES_STAR
+      - M_MASK_THRESHOLD
+      - SUBTOMO_BOX_SIZE
+      - OUTPUT_ANGPIX
+      - COORDS_ANGPIX
+    required_tools:
+      - MTools
+      - MCore
+      - WarpTools
+      - dsdsh
+    required_conda:
+      - WARP_ENV
+      - OPUSET_ENV
+    outputs:
+      - m/<population>.population
+      - m/species/<species>_*/<species>_half1.mrc
+      - m/species/<species>_*/<species>_half2.mrc
+      - warp_tiltseries/<species>_matching_refined.star
+    pre_checks:
+      - "Phase 8b fixed-mode half-maps exist"
+      - "MTools and MCore are on PATH"

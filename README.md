@@ -8,7 +8,7 @@
    2. [reconstruct volumes](#reconstruct)
    3. [select particles](#select)
    4. [Interactive filtering with cryoDRGN_filtering_template.ipynb](#filtering)
-5. [OPUS-ET Analysis Skill for Kimi Code CLI](#skill)
+5. [AI Skills](#skill)
 
 # OPUS-ET <div id="opustomo">
 
@@ -456,11 +456,87 @@ pip install notebook plotly anywidget ipywidgets
 **Tip:** The interactive filtering notebook is particularly useful for cleaning template matching results, removing outliers, and selecting homogeneous particle subsets for high-resolution refinement.
 
 
-## OPUS-ET Analysis Skill for Kimi Code CLI <div id="skill">
+## AI Skills <div id="skill">
+
+### WARP/OPUS-ET Processing Skill for Coding Agents
+
+This repository includes an Agent Skills directory at `warp-opus-et/`. It helps an AI coding agent prepare and validate the WARP -> AreTomo2 -> PyTOM -> OPUS-ET cryo-ET workflow, including SLURM scripts, `pipeline.conf` / `species.conf`, template matching, subtomogram export, OPUS-ET training, and optional WARP/M refinement.
+
+Install it by copying the whole skill directory, not just `SKILL.md`.
+
+For Codex:
+
+```bash
+mkdir -p ~/.codex/skills
+rsync -av warp-opus-et/ ~/.codex/skills/warp-opus-et/
+```
+
+For Kimi Code CLI, the recommended cross-agent user directory is `~/.config/agents/skills/`:
+
+```bash
+mkdir -p ~/.config/agents/skills
+rsync -av warp-opus-et/ ~/.config/agents/skills/warp-opus-et/
+```
+
+Kimi can also load from a custom directory:
+
+```bash
+kimi --skills-dir "$(pwd)/warp-opus-et"
+```
+
+For Claude Code personal skills:
+
+```bash
+mkdir -p ~/.claude/skills
+rsync -av warp-opus-et/ ~/.claude/skills/warp-opus-et/
+```
+
+For Claude Code project skills, copy it inside the project and commit it:
+
+```bash
+mkdir -p .claude/skills
+rsync -av warp-opus-et/ .claude/skills/warp-opus-et/
+git add .claude/skills/warp-opus-et
+```
+
+Restart the agent session after installation so the skill list is refreshed. The installed skill name is `warp-opus-et`.
+
+After installation, you can ask the agent questions such as:
+
+```
+"Use warp-opus-et to set up a WARP to OPUS-ET pipeline for my tilt series"
+"Validate Phase 6 template matching for species ribo"
+"Generate the pipeline.conf and species_ribo.conf I need before submitting SLURM jobs"
+```
+
+The skill ships these files:
+
+```
+warp-opus-et/
+├── SKILL.md
+├── pipeline.example.conf
+├── species.example.conf
+├── validate.sh
+├── pipeline_flowchart.html
+├── references/
+└── scripts/
+    └── manifest.yml
+```
+
+For a real project, copy and edit the example configs before running the validator:
+
+```bash
+cd /path/to/installed/warp-opus-et
+cp pipeline.example.conf pipeline.conf
+cp species.example.conf species_ribo.conf
+bash validate.sh --phase 6 --species species_ribo.conf --dry-run
+```
+
+### OPUS-ET Analysis Skill for Kimi Code CLI
 
 OPUS-ET includes a skill file `opus-et-analysis.skill` that provides AI-assisted analysis workflows when using Kimi Code CLI. This skill encapsulates best practices for processing training results and can guide you through complex analysis pipelines including PCA/k-means clustering, volume generation, pose parsing, and STAR file manipulation.
 
-### Installing the Skill
+#### Installing the Kimi Skill
 
 To use the skill in Kimi Code CLI:
 

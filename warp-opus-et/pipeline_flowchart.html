@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WARP → OPUS-ET Cryo-ET Pipeline</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 20px;
+    background: #f8f9fa;
+    color: #1a1a2e;
+  }
+  h1 { font-size: 1.4em; margin-bottom: 2px; }
+  .subtitle { color: #666; margin-bottom: 20px; font-size: 0.9em; }
+  .chart-container {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    overflow-x: auto;
+  }
+  .chart-container h2 {
+    font-size: 1em;
+    margin: 0 0 14px 0;
+    color: #333;
+    border-bottom: 2px solid #4a90d9;
+    padding-bottom: 5px;
+  }
+  .mermaid { display: flex; justify-content: center; }
+  .row { display: flex; gap: 20px; flex-wrap: wrap; }
+  .row .chart-container { flex: 1; min-width: 440px; }
+  .note {
+    background: #fff8e1;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin-top: 10px;
+    font-size: 0.85em;
+  }
+  .note strong { color: #856404; }
+  .dirtable { font-size: 0.87em; line-height: 1.7; border-collapse: collapse; }
+  .dirtable td { padding: 0 4px; white-space: nowrap; }
+  .dirtable .ts { color: #2c5f8a; font-weight: 600; }
+  .dirtable .spc { color: #5e2d75; font-weight: 600; }
+  .dirtable .cmt { color: #888; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>WARP → AreTomo2 → PyTOM → OPUS-ET Pipeline</h1>
+<p class="subtitle">
+<span style="color:#4a90d9">■</span> WARP &nbsp;
+<span style="color:#e67e22">■</span> AreTomo &nbsp;
+<span style="color:#27ae60">■</span> TM &nbsp;
+<span style="color:#8e44ad">■</span> OPUS-ET &nbsp;
+<span style="color:#e74c3c">■</span> M &nbsp;&nbsp;
+<b>Res:</b> <span style="color:#e74c3c">⬤</span>4GPU <span style="color:#e67e22">⬤</span>1GPU <span style="color:#27ae60">⬤</span>CPU &nbsp;&nbsp;
+<b>Config:</b> pipeline.conf + species.conf &nbsp;
+<b>Validate:</b> <code>validate.sh --phase N</code>
+</p>
+
+<!-- ================================================================== -->
+<div class="chart-container">
+<h2>1. Full Pipeline — Phase‑by‑Phase Data Flow</h2>
+<div class="mermaid">
+flowchart TD
+    PRE["🔍 Pre-flight<br/>validate.sh --phase N<br/>placeholders, paths, tools<br/>per-tomostar completion, --dry-run"]
+    PRE -.-> P1
+
+    P1_IN1["📁 Raw Frames *.mrc|*.tif|*.eer"]
+    P1_IN2["⚙️ pipeline.conf: ANGPIX, EXPOSURE, GAIN"]
+    P1["🎮4 128G Phase 1<br/>warp_frameseries_import.slurm<br/>create_settings<br/>fs_ctf | fs_motion_and_ctf"]
+    P1_OUT1[("warp_frameseries/average/*.mrc")]
+    P1_OUT2[("warp_frameseries.settings")]
+    P1_OUT3[("warp_frameseries/*.xml CTF")]
+    P1_IN1 --> P1; P1_IN2 --> P1; P1 --> P1_OUT1; P1 --> P1_OUT2; P1 --> P1_OUT3
+
+    P2_IN1["📁 mdoc/*.mdoc"]
+    P2_IN2["⚙️ TOMO_DIMS unbinned X×Y×Z approx"]
+    P2["💻 128G Phase 2<br/>warp_tiltseries_setup.slurm<br/>create_settings<br/>ts_import"]
+    P2_OUT1[("tomostar/*.tomostar")]
+    P2_OUT2[("warp_tiltseries.settings<br/>ANGPIX, TOMO_DIMS")]
+    P1_OUT1 --> P2; P1_OUT2 --> P2; P2_IN1 --> P2; P2_IN2 --> P2; P2 --> P2_OUT1; P2 --> P2_OUT2
+
+    P3_IN["⚙️ BINNING_FACTOR → ALIGN_ANGPIX = ANGPIX×BIN"]
+    P3A["🎮1 64G Phase 3a<br/>warp_export_stacks.slurm<br/>ts_stack --angpix ALIGN_ANGPIX"]
+    P3A_OUT1[("tiltstack/TS_XXX/TS_XXX.st")]
+    P3A_OUT2[("tiltstack/TS_XXX/TS_XXX.rawtlt")]
+    P2_OUT2 --> P3A; P3_IN --> P3A; P3A --> P3A_OUT1; P3A --> P3A_OUT2
+
+    P3B["🎮1 32G Phase 3b<br/>warp_aretomo_align_negate.slurm<br/>① Negate .rawtlt → _neg.rawtlt<br/>② AreTomo2 -VolZ -AlignZ<br/>③ Negate .tlt back"]
+    P3B_OUT1[("tiltstack/TS_XXX/TS_XXX_ali.mrc<br/>binned at ALIGN_ANGPIX")]
+    P3B_OUT2[("tiltstack/TS_XXX/TS_XXX.tlt")]
+    P3B_OUT3[("tiltstack/TS_XXX/TS_XXX.xf")]
+    P3A_OUT1 --> P3B; P3A_OUT2 --> P3B; P3_IN --> P3B
+    P3B --> P3B_OUT1; P3B --> P3B_OUT2; P3B --> P3B_OUT3
+
+    P3_5["💻 16G Phase 3.5 ★ REQUIRED<br/>warp_update_tomo_dims.slurm<br/>headerPyTom _ali.mrc → binned dims<br/>× BINNING → unbinned TOMO_DIMS<br/>Read PixelSize from existing settings<br/>Re-run create_settings"]
+    P3_5_OUT[("warp_tiltseries.settings<br/>TOMO_DIMS = CORRECTED<br/>PixelSize preserved from Phase 2")]
+    P3B_OUT1 --> P3_5; P3_IN --> P3_5; P2_OUT2 --> P3_5; P3_5 --> P3_5_OUT
+
+    P4["💻 64G Phase 4<br/>warp_import_alignments.slurm<br/>ts_import_alignments<br/>--alignment_angpix ALIGN_ANGPIX"]
+    P3_5_OUT --> P4; P3B_OUT2 --> P4; P3B_OUT3 --> P4; P3_IN --> P4
+
+    P5A["🎮4 256G Phase 5a<br/>warp_ts_ctf.slurm<br/>ts_defocus_hand --set_auto<br/>ts_ctf"]
+    P5B["🎮4 256G Phase 5b<br/>warp_ts_reconstruct.slurm<br/>ts_reconstruct --angpix ALIGN_ANGPIX"]
+    P5B_OUT[("reconstruction/TS_XXX_apixApx.mrc<br/>binned at ALIGN_ANGPIX")]
+    P4 --> P5A; P5A --> P5B; P3_IN --> P5B; P5B --> P5B_OUT
+
+    P6A_IN["⚙️ INPUT_MRC, MAP_ANGPIX"]
+    P6A["💻 32G Phase 6a<br/>gen_template_from_mrc.slurm<br/>create_template.py<br/>Resample to ALIGN_ANGPIX -x TM_BOX_SIZE"]
+    P6A_OUT[("templates/TM_LABEL_tm.mrc<br/>at ALIGN_ANGPIX")]
+    P6A_IN --> P6A; P3_IN --> P6A; P6A --> P6A_OUT
+
+    P6B["💻 16G Phase 6b<br/>gen_sphere_mask.slurm<br/>create_mask.py<br/>MASK_RADIUS (11) with sigma MASK_SIGMA (1)<br/>ALIGN_ANGPIX auto-detected"]
+    P6B_OUT[("templates/TM_LABEL_mask.mrc")]
+    P6A_OUT --> P6B; P6B --> P6B_OUT
+
+    P6C["💻 16G Phase 6c<br/>gen_tm_jobs_aretomo.slurm<br/>Loop tomostar → job XML<br/>Target: _ali.mrc (AreTomo tomo)"]
+    P6C_OUT[("template_matching/TM_LABEL/jobs/TS_XXX/job.xml")]
+    P2_OUT1 --> P6C; P3B_OUT1 --> P6C; P6A_OUT --> P6C; P6B_OUT --> P6C; P6C --> P6C_OUT
+
+    P6D["🎮4 256G Phase 6d<br/>run_tm_sequential.slurm<br/>mpiexec localization.py<br/>-x TM_SPLIT_X -y TM_SPLIT_Y -z TM_SPLIT_Z<br/>Sequential to avoid GPU OOM"]
+    P6D_OUT[("jobs/TS_XXX/scores_TM_LABEL_tm.em<br/>angles_TM_LABEL_tm.em")]
+    P6C_OUT --> P6D; P6D --> P6D_OUT
+
+    P6E["💻32 256G Phase 6e<br/>extract_tm_candidates_parallel.slurm<br/>extractCandidates.py<br/>EXTRACT_MASK_RADIUS=14 (non-max suppr.)"]
+    P6E_OUT[("particles/TS_XXX_particles.xml<br/>TS_XXX_extraction.log")]
+    P6D_OUT --> P6E; P6E --> P6E_OUT
+
+    P6F["💻 64G Phase 6f<br/>convert_to_star.slurm<br/>convert.py<br/>--pixelSize ANGPIX (unbinned)<br/>--binPyTom BINNING_FACTOR"]
+    P6F_OUT[("star_files/TS_XXX.star")]
+    P6E_OUT --> P6F; P6F --> P6F_OUT
+
+    P6G["💻 32G Phase 6g<br/>convert_pytom_to_warp.slurm<br/>dsdsh convert_pytom<br/>→ WARP-compatible STAR"]
+    P6G_OUT[("warp_star/TS_XXX_warp.star")]
+    P6F_OUT --> P6G; P6G --> P6G_OUT
+
+    P7_IN["⚙️ species.conf: OUTPUT_ANGPIX, SUBTOMO_BOX_SIZE<br/>DIAMETER | pipeline.conf: COORDS_ANGPIX"]
+    P7["🎮4 128G Phase 7<br/>warp_export_particles.slurm<br/>ts_export_particles<br/>--output_ctf_csv<br/>--dont_correct_ctf_3d"]
+    P7_OUT1[("warp_tiltseries/subtomo/TS_XXX/*.mrc<br/>at OUTPUT_ANGPIX")]
+    P7_OUT2[("warp_tiltseries/TM_LABEL_matching.star")]
+    P3_5_OUT --> P7; P6G_OUT --> P7; P7_IN --> P7; P7 --> P7_OUT1; P7 --> P7_OUT2
+
+    P8A["💻 16G Phase 8a<br/>gen_training_mask.slurm<br/>dsdsh create_mask from subtomo sample<br/>output: SUBTOMO_BOX_SIZE at OUTPUT_ANGPIX<br/>MASK_SOFT_EDGE=2, MASK_RADIUS_FRACTION=0.85"]
+    P8A_OUT[("templates/TM_LABEL_training_mask.mrc")]
+    P8A --> P8A_OUT
+
+    P8B["🎮4 256G Phase 8b<br/>train_opuset.slurm<br/>torchrun train_tomo_dist<br/>--encode-mode grad --estpose<br/>TEMPLATERES ~ SUBTOMO_BOX_SIZE × downfrac / 0.75"]
+    P8B_OUT[("opuset/TM_LABEL/zZDIM/<br/>weights.pkl, z.pkl, config.pkl")]
+    P7_OUT1 --> P8B; P7_OUT2 --> P8B; P8A_OUT -.-> P8B; P8B --> P8B_OUT
+
+    P8C["🎮4 256G Phase 8c<br/>train_opuset_fixed.slurm<br/>torchrun train_tomo_dist<br/>--encode-mode fixed (SLURM: --ntasks=1)"]
+    P8C_OUT[("opuset/TM_LABEL/fixed_subset1/<br/>weights.pkl (half-map)")]
+    P7_OUT1 --> P8C; P7_OUT2 --> P8C; P8C --> P8C_OUT
+
+    P_M1["🎮4 16-256G M Refinement<br/>warp_m_setup → create_species<br/>→ refine (MCore) → update_mask<br/>→ warp_m_export"]
+    P8C_OUT --> P_M1
+
+    classDef warp fill:#4a90d9,color:#fff,stroke:#2c5f8a
+    classDef aretomo fill:#e67e22,color:#fff,stroke:#b85c1a
+    classDef tm fill:#27ae60,color:#fff,stroke:#1a7a40
+    classDef opuset fill:#8e44ad,color:#fff,stroke:#5e2d75
+    classDef mrefine fill:#e74c3c,color:#fff,stroke:#a82020
+    classDef input fill:#e8f4fd,color:#1a3a5c,stroke:#4a90d9,stroke-dasharray: 5 5
+
+    class P1,P1_OUT1,P1_OUT2,P1_OUT3,P2,P2_OUT1,P2_OUT2,P3A,P3A_OUT1,P3A_OUT2,P4,P5A,P5B,P5B_OUT,P7,P7_OUT1,P7_OUT2 warp
+    class P3B,P3B_OUT1,P3B_OUT2,P3B_OUT3,P3_5,P3_5_OUT aretomo
+    class P6A,P6B,P6C,P6D,P6E,P6F,P6G,P6A_OUT,P6B_OUT,P6C_OUT,P6D_OUT,P6E_OUT,P6F_OUT,P6G_OUT tm
+    class P8A,P8B,P8C,P8A_OUT,P8B_OUT,P8C_OUT opuset
+    class P_M1 mrefine
+    class P1_IN1,P1_IN2,P2_IN1,P2_IN2,P3_IN,P6A_IN,P7_IN input
+</div>
+</div>
+
+<!-- ================================================================== -->
+<div>
+<div class="chart-container">
+<h2>2. Configuration System</h2>
+<div class="mermaid">
+flowchart LR
+    EX["📄 .example.conf templates"] -->|cp| PC["pipeline.conf<br/>tilt-series-wide"]
+    EX -->|cp| SC["species.conf<br/>per-species, SPECIES_CONF= env override"]
+
+    PC -->|source| S15["Phase 1–5 8 scripts"]
+    PC -->|source| S68["Phase 6–M 16 scripts"]
+    SC -->|source| S68
+
+    MF["📋 manifest.yml"] --> VS["validate.sh<br/>--phase N --species .conf<br/>--dry-run"]
+    PC --> VS; SC --> VS
+    VS -.->|ready| S15; VS -.->|ready| S68
+
+    classDef conf fill:#4a90d9,color:#fff
+    classDef species fill:#8e44ad,color:#fff
+    classDef validate fill:#ff9800,color:#fff
+    classDef example fill:#e0e0e0,color:#666
+    classDef scripts fill:#e8e8e8,color:#333
+    class EX example; class PC conf; class SC species; class VS,MF validate; class S15,S68 scripts
+</div>
+</div>
+
+<div class="chart-container">
+<h2>3. Pixel‑Size Flow</h2>
+<div class="mermaid">
+flowchart LR
+    A["ANGPIX unbinned"] -->|× BINNING| C["ALIGN_ANGPIX"]
+    C --> E["Phase 3: ts_stack + AreTomo → _ali.mrc (binned)"]
+    E --> G["Phase 3.5 ★ unbinned TOMO_DIMS → settings"]
+    G --> H["Phase 4: ts_import_alignments --alignment_angpix ALIGN_ANGPIX"]
+    H --> I["Phase 5: ts_reconstruct --angpix ALIGN_ANGPIX"]
+    C --> J["Phase 6: Template/Mask at ALIGN_ANGPIX"]
+    J --> K["TM on _ali.mrc"]
+    K --> L["convert.py: --pixelSize ANGPIX --binPyTom BINNING → unbinned"]
+    I --> M["Phase 7: ts_export_particles --output_angpix OUTPUT_ANGPIX (species) --coords_angpix COORDS_ANGPIX (pipeline)"]
+    M --> N["Phase 8: train_tomo_dist → opuset/TM_LABEL/zZDIM/"]
+
+    classDef apix fill:#4a90d9,color:#fff
+    classDef critical fill:#e74c3c,color:#fff
+    class C,E,J,K,M,N apix
+    class G critical
+</div>
+</div>
+</div>
+
+<!-- ================================================================== -->
+<div>
+<div class="chart-container">
+<h2>4. Box Size / Mask Flow</h2>
+<div class="mermaid">
+flowchart TD
+    DIAM["⚙️ DIAMETER (Å) e.g. 320"]
+
+    subgraph TM6["Phase 6 — at ALIGN_ANGPIX"]
+        TB["TM_BOX_SIZE = round(DIAMETER / 0.75 / ALIGN_ANGPIX) e.g. 32 px"]
+        MR["gen_sphere_mask: MASK_RADIUS=11, MASK_SIGMA=1"]
+        EXR["extract_candidates: EXTRACT_MASK_RADIUS=14<br/>(non-max suppression)"]
+        SPLIT["run_tm_sequential: TM_SPLIT_X=2 Y=2 Z=1<br/>(GPU volume split per species)"]
+    end
+
+    subgraph EXP7["Phase 7 — at OUTPUT_ANGPIX (species.conf)"]
+        SB["SUBTOMO_BOX_SIZE = round(DIAMETER / 0.75 / OUTPUT_ANGPIX) e.g. 176 px"]
+    end
+
+    subgraph TR8["Phase 8 — OPUS-ET (species.conf)"]
+        TE["TEMPLATERES = decoder output size<br/>~ SUBTOMO_BOX_SIZE × downfrac / 0.75"]
+        TMK["gen_training_mask: MASK_SOFT_EDGE=2, TRAINING_MASK_DILATE=3<br/>MASK_RADIUS_FRACTION=0.85"]
+    end
+
+    DIAM --> TB; DIAM --> MR; DIAM --> SB
+    SB --> TR8; TE --> TR8; TMK --> TR8
+
+    classDef gather fill:#e8f4fd,color:#1a3a5c,stroke:#4a90d9
+    classDef tm fill:#27ae60,color:#fff
+    classDef exp fill:#4a90d9,color:#fff
+    classDef train fill:#8e44ad,color:#fff
+    class DIAM gather; class TB,MR,EXR,SPLIT tm; class SB exp; class TE,TMK train
+</div>
+<div class="note">
+<strong>Note:</strong> All species params are in <code>species.example.conf</code> (copy → <code>species_&lt;label&gt;.conf</code>). User must set: <b>TM_LABEL, DIAMETER, INPUT_MRC, MAP_ANGPIX, OUTPUT_ANGPIX, SUBTOMO_BOX_SIZE, TM_SPLIT_X/Y/Z</b>. Agent derives: <b>TM_BOX_SIZE, MASK_RADIUS</b>. The rest carry defaults that work for most cases but can be tuned per species.
+</div>
+</div>
+
+<div class="chart-container">
+<h2>5. Output Directory Layout</h2>
+<div style="margin-bottom:12px;font-size:0.85em">
+<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#4a90d9;vertical-align:middle;margin-right:4px"></span> Tilt-series-wide &nbsp;
+<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#8e44ad;vertical-align:middle;margin-right:4px"></span> Per-species (TM_LABEL)
+<span style="margin-left:16px;color:#888">📁 dir &nbsp; 📄 file</span>
+</div>
+
+<div style="font-size:0.88em;line-height:2;font-family:'SFMono-Regular',Consolas,monospace">
+
+<div style="border-left:3px solid #4a90d9;padding-left:10px;margin-bottom:10px">
+  <div style="font-weight:700;color:#2c5f8a;margin-bottom:2px">📁 warp_frameseries/</div>
+  <div style="padding-left:16px;color:#888">📄 average/*.mrc <span style="font-style:italic">— Phase 1</span></div>
+</div>
+
+<div style="border-left:3px solid #4a90d9;padding-left:10px;margin-bottom:10px">
+  <div style="font-weight:700;color:#2c5f8a;margin-bottom:2px">📁 warp_tiltseries/</div>
+  <div style="padding-left:16px">
+    <div style="font-weight:600">📁 tiltstack/TS_XXX/</div>
+    <div style="padding-left:16px">📄 TS_XXX.st, .rawtlt</div>
+    <div style="padding-left:16px">📄 TS_XXX_ali.mrc <span style="color:#888;font-style:italic">— AreTomo tomo (ALIGN_ANGPIX)</span></div>
+    <div style="padding-left:16px">📄 TS_XXX.xf, .tlt</div>
+    <div style="font-weight:600;margin-top:2px">📁 reconstruction/</div>
+    <div style="padding-left:16px">📄 TS_XXX_Apx.mrc</div>
+    <div style="font-weight:600;margin-top:2px">📁 subtomo/TS_XXX/</div>
+    <div style="padding-left:16px">📄 *.mrc <span style="color:#888;font-style:italic">— exported (OUTPUT_ANGPIX)</span></div>
+    <div style="margin-top:2px">📄 TM_LABEL_matching.star <span style="color:#888;font-style:italic">— Phase 7 output</span></div>
+  </div>
+</div>
+
+<div style="border-left:3px solid #8e44ad;padding-left:10px;margin-bottom:10px">
+  <div style="font-weight:700;color:#5e2d75;margin-bottom:2px">📁 templates/</div>
+  <div style="padding-left:16px">
+    <div>📄 TM_LABEL_tm.mrc <span style="color:#888;font-style:italic">— template (Phase 6a)</span></div>
+    <div>📄 TM_LABEL_mask.mrc <span style="color:#888;font-style:italic">— TM sphere mask (Phase 6b)</span></div>
+    <div>📄 TM_LABEL_training_mask.mrc <span style="color:#888;font-style:italic">— training mask (Phase 8)</span></div>
+  </div>
+</div>
+
+<div style="border-left:3px solid #8e44ad;padding-left:10px;margin-bottom:10px">
+  <div style="font-weight:700;color:#5e2d75;margin-bottom:2px">📁 template_matching/&lt;TM_LABEL&gt;/</div>
+  <div style="padding-left:16px">
+    <div style="font-weight:600">📁 jobs/TS_XXX/</div>
+    <div style="padding-left:16px">📄 job.xml</div>
+    <div style="padding-left:16px">📄 scores_&lt;TM_LABEL&gt;_tm.em</div>
+    <div style="padding-left:16px">📄 angles_&lt;TM_LABEL&gt;_tm.em</div>
+    <div style="font-weight:600;margin-top:2px">📁 particles/</div>
+    <div style="padding-left:16px">📄 TS_XXX_particles.xml</div>
+    <div style="padding-left:16px">📄 TS_XXX_extraction.log</div>
+    <div style="font-weight:600;margin-top:2px">📁 star_files/</div>
+    <div style="font-weight:600;margin-top:2px">📁 warp_star/</div>
+  </div>
+</div>
+
+<div style="border-left:3px solid #e0e0e0;padding-left:10px;margin-bottom:10px">
+  <div style="font-weight:700;color:#666;margin-bottom:2px">📁 m/ <span style="font-style:italic;font-weight:400">— M refinement</span></div>
+  <div style="padding-left:16px">
+    <div style="font-weight:600">📁 species/&lt;species&gt;_&lt;hash&gt;/</div>
+    <div style="padding-left:16px">📄 *_half1.mrc / *_half2.mrc</div>
+  </div>
+</div>
+
+<div style="border-left:3px solid #8e44ad;padding-left:10px">
+  <div style="font-weight:700;color:#5e2d75;margin-bottom:2px">📁 opuset/&lt;TM_LABEL&gt;/</div>
+  <div style="padding-left:16px">
+    <div style="font-weight:600">📁 z&lt;ZDIM&gt;/ <span style="color:#888;font-style:italic;font-weight:400">— heterogeneity model</span></div>
+    <div style="padding-left:16px">📄 weights.*.pkl, z.*.pkl, config.pkl</div>
+    <div style="font-weight:600;margin-top:2px">📁 fixed_subset1/ <span style="color:#888;font-style:italic;font-weight:400">— half-map reconstruction</span></div>
+    <div style="padding-left:16px">📄 weights.*.pkl, config.pkl</div>
+  </div>
+</div>
+
+</div>
+</div>
+</div>
+
+<script>
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'default',
+  flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis', nodeSpacing: 28, rankSpacing: 36 },
+  securityLevel: 'loose'
+});
+</script>
+
+</body>
+</html>
