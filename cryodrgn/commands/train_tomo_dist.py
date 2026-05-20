@@ -83,6 +83,7 @@ def add_args(parser):
     group = parser.add_argument_group('Training parameters')
     group.add_argument('-n', '--num-epochs', type=int, default=20, help='Number of training epochs (default: %(default)s)')
     group.add_argument('-b','--batch-size', type=int, default=20, help='Minibatch size (default: %(default)s)')
+    group.add_argument('-e','--epoch', type=int, default=0, help='Current Epoch (default: %(default)s)')
     group.add_argument('--wd', type=float, default=0, help='Weight decay in Adam optimizer (default: %(default)s)')
     group.add_argument('--lr', type=float, default=4e-5, help='Learning rate in Adam optimizer (default: %(default)s)')
     group.add_argument('--accum-step', type=int, default=1, help='gradient accumulation step for optimizer (default: %(default)s)')
@@ -666,7 +667,7 @@ def cleanup_distributed():
 def main(args):
     t1 = dt.now()
     if args.outdir is not None and not os.path.exists(args.outdir):
-        os.makedirs(args.outdir)
+        os.makedirs(args.outdir, exist_ok=True)
     LOG = f'{args.outdir}/run.log'
     def flog(msg): # HACK: switch to logging module
         return utils.flog(msg, LOG)
@@ -1015,6 +1016,7 @@ def main(args):
         #increasing bfactor slowly
         args.bfactor = bfactor*(1. + 0.05/(1. + 3.*math.exp(-0.1*epoch)))
         beta_max    = 1. #0.98 ** (epoch)
+        args.epoch = epoch
         log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
                         lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
 

@@ -64,6 +64,11 @@ for f in "$HALF1" "$HALF2" "$MASK" "$PARTICLES_STAR"; do
     if [ ! -f "$f" ]; then echo "ERROR: missing input: $f"; exit 1; fi
 done
 
+if ! [[ "$ANGPIX_RESAMPLE" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+    echo "ERROR: ANGPIX_RESAMPLE must be a number (got: $ANGPIX_RESAMPLE)"
+    exit 1
+fi
+
 # -----------------------------------------------------------------------------
 # Create species
 # -----------------------------------------------------------------------------

@@ -216,12 +216,19 @@ phase_scripts() {
         6f) echo "convert_to_star.slurm" ;;
         6g) echo "convert_pytom_to_warp.slurm" ;;
         7) echo "warp_export_particles.slurm" ;;
-        8) echo "gen_training_mask.slurm train_opuset.slurm train_opuset_fixed.slurm" ;;
+        8) echo "gen_training_mask.slurm train_opuset.slurm train_opuset_fixed.slurm prepare_m_halfmaps.slurm" ;;
         8a) echo "gen_training_mask.slurm" ;;
         8b) echo "train_opuset.slurm" ;;
         8c) echo "train_opuset_fixed.slurm" ;;
+        8d) echo "prepare_m_halfmaps.slurm" ;;
         M) echo "warp_m_setup.slurm warp_m_create_species.slurm warp_m_refine.slurm warp_m_update_mask.slurm warp_m_export.slurm" ;;
-        *) ls "$SCRIPTS"/*.slurm 2>/dev/null | xargs -n1 basename ;;
+        Ma) echo "warp_m_setup.slurm" ;;
+        Mb) echo "warp_m_create_species.slurm" ;;
+        Mc) echo "warp_m_refine.slurm" ;;
+        Md) echo "warp_m_update_mask.slurm" ;;
+        Me) echo "warp_m_export.slurm" ;;
+        ""|all) echo "warp_frameseries_import.slurm warp_tiltseries_setup.slurm warp_export_stacks.slurm warp_aretomo_align_negate.slurm warp_update_tomo_dims.slurm warp_import_alignments.slurm warp_ts_ctf.slurm warp_ts_reconstruct.slurm gen_template_from_mrc.slurm gen_sphere_mask.slurm gen_tm_jobs_aretomo.slurm run_tm_sequential.slurm extract_tm_candidates_parallel.slurm convert_to_star.slurm convert_pytom_to_warp.slurm warp_export_particles.slurm gen_training_mask.slurm train_opuset.slurm train_opuset_fixed.slurm prepare_m_halfmaps.slurm warp_m_setup.slurm warp_m_create_species.slurm warp_m_refine.slurm warp_m_update_mask.slurm warp_m_export.slurm" ;;
+        *) echo "ERROR: unknown phase '$phase'" >&2 ;;
     esac
 }
 
@@ -236,7 +243,7 @@ phase_requires_species() {
 
     case "$phase" in
         ""|all) echo "true" ;;
-        6|6a|6b|6c|6d|6e|6f|6g|7|8|8a|8b|8c|M) echo "true" ;;
+        6|6a|6b|6c|6d|6e|6f|6g|7|8|8a|8b|8c|8d|M|Ma|Mb|Mc|Md|Me) echo "true" ;;
         *) echo "false" ;;
     esac
 }
@@ -565,6 +572,7 @@ if need_species; then
     echo "  DIAMETER:         $DIAMETER Å"
     echo "  TM_BOX_SIZE:      $TM_BOX_SIZE px (at ALIGN_ANGPIX)"
     echo "  SUBTOMO_BOX_SIZE: $SUBTOMO_BOX_SIZE px (at OUTPUT_ANGPIX)"
+    echo "  ANGPIX_RESAMPLE:  $ANGPIX_RESAMPLE Å (M refinement working px; default=ANGPIX, set coarser for speed)"
     echo "  TEMPLATERES:      $TEMPLATERES px"
 fi
 
@@ -779,6 +787,10 @@ if [ "$DRY_RUN" != "1" ]; then
 
         check_phase_output "8b" "training output" \
             "$WORK_DIR/$OUTPUT_DIR"/weights.*.pkl
+
+        check_phase_output "8d" "half-maps for M" \
+            "$WORK_DIR/opuset/$TM_LABEL/half1.mrc" \
+            "$WORK_DIR/opuset/$TM_LABEL/half2.mrc"
     fi
 else
     info "Skipped in --dry-run mode"
@@ -903,12 +915,40 @@ if [ "$DRY_RUN" = "1" ]; then
             ;;
         8c)
             echo "  torchrun --nproc_per_node=$NUM_GPUS -m cryodrgn.commands.train_tomo_dist \\"
-            echo "    ... --encode-mode fixed --valfrac 0.0 → '$WORK_DIR/opuset/$TM_LABEL/fixed_subset1/'"
+            echo "    ... --encode-mode fixed --downfrac 1. --valfrac 0.0 → '$WORK_DIR/opuset/$TM_LABEL/fixed_subset${FIXED_SUBSET_LABEL:-1}/'"
+            ;;
+        8d)
+            echo "  Find half-maps: opuset/$TM_LABEL/fixed_*subset*/tmp0.mrc"
+            echo "    → link to opuset/$TM_LABEL/half1.mrc, half2.mrc"
+            echo "  dsdsh create_mask half1.mrc --threshold ${M_HALFMAP_THRESHOLD:-<user-set>} 
+"
+            echo "    → opuset/$TM_LABEL/halfmap_mask.mrc"
             ;;
         8)
             echo "  dsdsh create_mask (sample subtomo from DATADIR) -o '$TRAINING_MASK_MRC' --sphere-radius ${SPHERE_RADIUS:-<auto>} --soft-edge $MASK_SOFT_EDGE"
             echo "  torchrun --nproc_per_node=$NUM_GPUS -m cryodrgn.commands.train_tomo_dist --encode-mode grad ..."
             echo "  torchrun --nproc_per_node=$NUM_GPUS -m cryodrgn.commands.train_tomo_dist --encode-mode fixed ..."
+            echo "  prepare_m_halfmaps.slurm (8d): link half-maps + create mask → ready for M refinement"
+            ;;
+        Ma)
+            echo "  WarpTools create_population --name $POPULATION_NAME"
+            echo "  WarpTools create_source --population $POPULATION_NAME --name $SOURCE_NAME --angpix $ANGPIX_RESAMPLE"
+            ;;
+        Mb)
+            echo "  MTools create_species --population m/$POPULATION_NAME.population"
+            echo "    --name $SPECIES_BASE --diameter $DIAMETER --sym $SYM --lowpass $LOWPASS"
+            echo "    --half1 $M_HALF1 --half2 $M_HALF2 --mask $M_MASK"
+            echo "    --particles $M_PARTICLES_STAR"
+            ;;
+        Mc) echo "  MTools refine --population m/$POPULATION_NAME.population --source $SOURCE_NAME  (iterative, re-submit each pass)" ;;
+        Md) echo "  MTools update_mask --population m/$POPULATION_NAME.population --species $SPECIES_BASE --threshold $M_MASK_THRESHOLD" ;;
+        Me) echo "  WarpTools ts_export_particles --output_angpix $OUTPUT_ANGPIX --box $SUBTOMO_BOX_SIZE --diameter $DIAMETER" ;;
+        M)
+            echo "  Ma: WarpTools create_population + create_source (one-time setup)"
+            echo "  Mb: MTools create_species (per species)"
+            echo "  Mc: MTools refine (iterative)"
+            echo "  Md: MTools update_mask (between passes)"
+            echo "  Me: WarpTools ts_export_particles (re-export)"
             ;;
     esac
     echo ""

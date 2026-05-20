@@ -155,12 +155,25 @@ flowchart TD
     P8B_OUT[("opuset/TM_LABEL/zZDIM/<br/>weights.pkl, z.pkl, config.pkl")]
     P7_OUT1 --> P8B; P7_OUT2 --> P8B; P8A_OUT -.-> P8B; P8B --> P8B_OUT
 
-    P8C["🎮4 256G Phase 8c<br/>train_opuset_fixed.slurm<br/>torchrun train_tomo_dist<br/>--encode-mode fixed (SLURM: --ntasks=1)"]
-    P8C_OUT[("opuset/TM_LABEL/fixed_subset1/<br/>weights.pkl (half-map)")]
+    P8C["🎮4 256G Phase 8c<br/>train_opuset_fixed.slurm<br/>torchrun train_tomo_dist<br/>--encode-mode fixed --downfrac 1. (SLURM: --ntasks=1)"]
+    P8C_OUT[("opuset/TM_LABEL/fixed_subsetN/<br/>tmp0.mrc (half-maps)")]
     P7_OUT1 --> P8C; P7_OUT2 --> P8C; P8C --> P8C_OUT
 
-    P_M1["🎮4 16-256G M Refinement<br/>warp_m_setup → create_species<br/>→ refine (MCore) → update_mask<br/>→ warp_m_export"]
-    P8C_OUT --> P_M1
+    P8D["💻 16G Phase 8d<br/>prepare_m_halfmaps.slurm<br/>Find fixed_*subset*/tmp0.mrc<br/>→ link half1/half2.mrc<br/>→ dsdsh create_mask --threshold"]
+    P8D_OUT[("opuset/TM_LABEL/<br/>half1.mrc, half2.mrc<br/>halfmap_mask.mrc")]
+    P8C_OUT --> P8D; P8D --> P8D_OUT
+
+    P_MA["💻 16G Phase Ma<br/>warp_m_setup.slurm<br/>create_population + create_source<br/>(one-time setup per project)"]
+
+    P_MB["💻 64G Phase Mb<br/>warp_m_create_species.slurm<br/>MTools create_species<br/>half1 + half2 + mask + particles"]
+
+    P_MC["🎮4 256G Phase Mc<br/>warp_m_refine.slurm<br/>MTools refine (MCore)<br/>iterative — re-submit each pass"]
+
+    P_MD["💻 32G Phase Md<br/>warp_m_update_mask.slurm<br/>MTools update_mask --threshold<br/>(between MCore passes)"]
+
+    P_ME["🎮4 128G Phase Me<br/>warp_m_export.slurm<br/>ts_export_particles<br/>re-export refined particles"]
+
+    P8D_OUT --> P_MA; P_MA --> P_MB; P_MB --> P_MC; P_MC --> P_MD; P_MD -.-> P_MC; P_MD --> P_ME
 
     classDef warp fill:#4a90d9,color:#fff,stroke:#2c5f8a
     classDef aretomo fill:#e67e22,color:#fff,stroke:#b85c1a
@@ -172,8 +185,8 @@ flowchart TD
     class P1,P1_OUT1,P1_OUT2,P1_OUT3,P2,P2_OUT1,P2_OUT2,P3A,P3A_OUT1,P3A_OUT2,P4,P5A,P5B,P5B_OUT,P7,P7_OUT1,P7_OUT2 warp
     class P3B,P3B_OUT1,P3B_OUT2,P3B_OUT3,P3_5,P3_5_OUT aretomo
     class P6A,P6B,P6C,P6D,P6E,P6F,P6G,P6A_OUT,P6B_OUT,P6C_OUT,P6D_OUT,P6E_OUT,P6F_OUT,P6G_OUT tm
-    class P8A,P8B,P8C,P8A_OUT,P8B_OUT,P8C_OUT opuset
-    class P_M1 mrefine
+    class P8A,P8B,P8C,P8D,P8A_OUT,P8B_OUT,P8C_OUT,P8D_OUT opuset
+    class P_MA,P_MB,P_MC,P_MD,P_ME mrefine
     class P1_IN1,P1_IN2,P2_IN1,P2_IN2,P3_IN,P6A_IN,P7_IN input
 </div>
 </div>
@@ -185,7 +198,7 @@ flowchart TD
 <div class="mermaid">
 flowchart LR
     EX["📄 .example.conf templates"] -->|cp| PC["pipeline.conf<br/>tilt-series-wide"]
-    EX -->|cp| SC["species.conf<br/>per-species, SPECIES_CONF= env override"]
+    EX -->|cp| SC["species.conf<br/>TM_LABEL, DIAMETER, box sizes, DATADIR<br/>DOWNSAMPLE_FRAC, training params"]
 
     PC -->|source| S15["Phase 1–5 8 scripts"]
     PC -->|source| S68["Phase 6–M 16 scripts"]
@@ -261,7 +274,7 @@ flowchart TD
     class DIAM gather; class TB,MR,EXR,SPLIT tm; class SB exp; class TE,TMK train
 </div>
 <div class="note">
-<strong>Note:</strong> All species params are in <code>species.example.conf</code> (copy → <code>species_&lt;label&gt;.conf</code>). User must set: <b>TM_LABEL, DIAMETER, INPUT_MRC, MAP_ANGPIX, OUTPUT_ANGPIX, SUBTOMO_BOX_SIZE, TM_SPLIT_X/Y/Z</b>. Agent derives: <b>TM_BOX_SIZE, MASK_RADIUS</b>. The rest carry defaults that work for most cases but can be tuned per species.
+<strong>Note:</strong> All species params are in <code>species.example.conf</code> (copy → <code>species_&lt;label&gt;.conf</code>). User must set: <b>TM_LABEL, DIAMETER, INPUT_MRC, MAP_ANGPIX, OUTPUT_ANGPIX, SUBTOMO_BOX_SIZE, DATADIR, TM_SPLIT_X/Y/Z, M_PARTICLES_STAR</b>. Agent derives: <b>TM_BOX_SIZE, MASK_RADIUS</b>. Advanced (defaults work): <b>DOWNSAMPLE_FRAC, TEMPLATERES, MASK_SIGMA, EXTRACT_MASK_RADIUS, training mask morph params</b>.
 </div>
 </div>
 
@@ -332,8 +345,11 @@ flowchart TD
   <div style="padding-left:16px">
     <div style="font-weight:600">📁 z&lt;ZDIM&gt;/ <span style="color:#888;font-style:italic;font-weight:400">— heterogeneity model</span></div>
     <div style="padding-left:16px">📄 weights.*.pkl, z.*.pkl, config.pkl</div>
-    <div style="font-weight:600;margin-top:2px">📁 fixed_subset1/ <span style="color:#888;font-style:italic;font-weight:400">— half-map reconstruction</span></div>
+    <div style="font-weight:600;margin-top:2px">📁 fixed_subset&lt;N&gt;/ <span style="color:#888;font-style:italic;font-weight:400">— half-map reconstruction</span></div>
+    <div style="padding-left:16px">📄 tmp0.mrc <span style="color:#888;font-style:italic">— half-map (Phase 8c)</span></div>
     <div style="padding-left:16px">📄 weights.*.pkl, config.pkl</div>
+    <div style="margin-top:2px">📄 half1.mrc, half2.mrc <span style="color:#888;font-style:italic">— linked (Phase 8d)</span></div>
+    <div style="margin-top:2px">📄 halfmap_mask.mrc <span style="color:#888;font-style:italic">— mask (Phase 8d)</span></div>
   </div>
 </div>
 

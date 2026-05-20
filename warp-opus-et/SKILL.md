@@ -5,6 +5,17 @@ description: "Cryo-ET data processing pipeline using WARP, AreTomo2, PyTOM, and 
 
 # WARP/OPUS-ET Cryo-ET Processing Workflow
 
+## Agent Rules — read before acting
+
+- **Do only what the user asks.** Don't anticipate, extend, or fix unreported issues — even obvious ones. One change at a time.
+- **Read before editing.** Always read the current file/script before describing or modifying it. Don't rely on remembered content — the codebase changes.
+- **Verify before asserting.** If uncertain how a tool, flag, or script behaves, check (`--help`, API docs, actual output) rather than inferring from naming. Wrong documentation is worse than no documentation.
+- **Enumerate scope before acting.** For multi-file changes, use `grep` to find all affected files and confirm scope with the user before making any edits.
+- **Show before and after for every edit.** Before modifying a script or config, quote the relevant current lines. After editing, summarize exactly what changed — not just "done."
+- **Don't chain changes.** Renaming a variable in one place does NOT mean you should rename it everywhere — confirm scope first.
+- **Don't redesign.** Apparent inconsistencies may be intentional. Respect the existing pattern unless the user asks to change it.
+- **When in doubt, show the current state and ask.** "Here's what I see. Do you want me to change X, Y, or both?"
+
 ## IMPORTANT: Gather Experimental Settings First
 
 **Before generating any commands**, collect the parameters below. Do NOT use placeholder values — wait for actual answers. Only ask about phases the user needs.
@@ -81,6 +92,12 @@ Try to determine frame type automatically before asking (see Frame Type below).
 22. **Training subtomogram directory** (`DATADIR`) — the subtomogram export directory (e.g. `$WORK_DIR/warp_tiltseries/subtomo`, or per-species like `subtomo_ribo`). The training scripts pass `--datadir $(dirname "$DATADIR")` to OPUS-ET because the STAR file's `_rlnImageName` entries already include the subdirectory prefix. For mask creation, `$DATADIR` is used directly to find a sample subtomogram.
 23. **Training mask** (`TRAINING_MASK_MRC`) — required by OPUS-ET training. Default: `$WORK_DIR/templates/${TM_LABEL}_training_mask.mrc`. For template-matching filtering, a broad centered sphere mask is acceptable: run `gen_training_mask.slurm` with `MODE="sphere"` (the default, soft edge 2 voxels, 3 dilate iterations), which samples an exported subtomogram from `DATADIR` for shape/header (so the output mask matches `SUBTOMO_BOX_SIZE` at `OUTPUT_ANGPIX`). The default sphere diameter is 85% of the box (`MASK_RADIUS_FRACTION=0.85`). Use `MODE="density"` only when a clean consensus map should define a tighter molecular mask. If the mask is missing at training time and `AUTO_CREATE_TRAINING_MASK=1`, `train_opuset.slurm` and `train_opuset_fixed.slurm` can still create a fallback spherical mask from an exported subtomogram using `dsdsh create_mask --sphere-radius`.
 24. **Training geometry overrides** (`ANGPIX`, `TILT_RANGE`, `TILT_STEP`) — in `train_opuset.slurm` and `train_opuset_fixed.slurm`, leave `ANGPIX` blank to auto-detect only from `_rlnDetectorPixelSize` in the input particle STAR file. Do not infer training `ANGPIX` from `OUTPUT_ANGPIX` in `warp_export_particles.slurm` or from `warp_tiltseries.settings`. Tilt range/step are read from the first `.tlt` file under `TILTSTACK_DIR`, normally `warp_tiltseries/tiltstack`. Set them manually only when the auto-detected values are wrong or the dataset uses non-standard metadata.
+25. **Fixed-mode subset split** — Phase 8c needs two independent particle halves for half-map reconstruction. The input is a **selected** subset of particles (e.g., from OPUS-ET analysis picking a specific conformational state), not a blind split of the full matching STAR. Once the user has a selected STAR (`sel.star`), split it with:
+    ```bash
+    dsdsh convert_star sel.star --subset-label 1 --angpix <ANGPIX> -o sel_subset1.star
+    dsdsh convert_star sel.star --subset-label 2 --angpix <ANGPIX> -o sel_subset2.star
+    ```
+    Run 8c twice, once per subset, with `FIXED_SUBSET_LABEL=1` and `FIXED_SUBSET_LABEL=2`.
 
 ### Environment Paths
 **These are required for ALL phases — collect them first before anything else.**
@@ -111,6 +128,14 @@ Try to determine frame type automatically before asking (see Frame Type below).
 
 ### Optional
 33. **Output directory prefix** (`OUTPUT_DIR`) — e.g., `opuset/${TM_LABEL}/z${ZDIM}`
+
+### M Refinement
+34. **Half-maps** (`M_HALF1`, `M_HALF2`) — after Phase 8d, these default to `opuset/<TM_LABEL>/half1.mrc` and `half2.mrc`. User can also provide externally generated half-maps if skipping Phase 8c/8d.
+35. **Resample pixel size** (`ANGPIX_RESAMPLE`) — MCore working pixel size for species creation. Defaults to `$ANGPIX` (unbinned detector pixel size). Set to a coarser value for faster refinement with lower memory usage.
+36. **Half-map mask** (`M_MASK`) — defaults to `opuset/<TM_LABEL>/halfmap_mask.mrc` from Phase 8d. User can provide a custom mask.
+37. **Half-map mask threshold** (`M_HALFMAP_THRESHOLD`) — density threshold for creating the half-map mask in Phase 8d. Only positive density above this value is kept. User must provide this.
+38. **RELION particles STAR** (`M_PARTICLES_STAR`) — RELION-format particle STAR file for MTools create_species. User must provide this.
+39. **M mask threshold** (`M_MASK_THRESHOLD`) — density threshold for MTools update_mask between MCore passes (optional, only needed if running Md).
 
 ---
 
@@ -257,6 +282,7 @@ sbatch --export=ALL,SKILL_DIR="$(pwd)" scripts/warp_export_particles.slurm
 sbatch --export=ALL,SKILL_DIR="$(pwd)" scripts/gen_training_mask.slurm  # Phase 8a — optional explicit mask
 sbatch --export=ALL,SKILL_DIR="$(pwd)" scripts/train_opuset.slurm        # Phase 8b — heterogeneity
 sbatch --export=ALL,SKILL_DIR="$(pwd)" scripts/train_opuset_fixed.slurm   # Phase 8c — fixed half-maps
+sbatch --export=ALL,SKILL_DIR="$(pwd)" scripts/prepare_m_halfmaps.slurm    # Phase 8d — link half-maps + mask
 ```
 
 **For detailed per-phase commands:** read `references/phases.md`
@@ -278,6 +304,12 @@ sbatch --export=ALL,SKILL_DIR="$(pwd)" scripts/train_opuset_fixed.slurm   # Phas
 | 8a: Training mask | Generate sphere/density mask at `OUTPUT_ANGPIX` from subtomo sample | `gen_training_mask.slurm` |
 | 8b: Train (grad) | Train OPUS-ET heterogeneity model | `train_opuset.slurm` |
 | 8c: Train (fixed) | Fixed-mode averaging → half-maps for M refinement | `train_opuset_fixed.slurm` |
+| 8d: Prep half-maps | Link half-maps + create mask for M refinement | `prepare_m_halfmaps.slurm` |
+| Ma: M setup | create_population + create_source (one-time) | `warp_m_setup.slurm` |
+| Mb: M species | create_species with half-maps + mask + particles | `warp_m_create_species.slurm` |
+| Mc: M refine | MCore iterative refinement (re-submit each pass) | `warp_m_refine.slurm` |
+| Md: M mask | update_mask between MCore passes | `warp_m_update_mask.slurm` |
+| Me: M export | Re-export refined particles | `warp_m_export.slurm` |
 
 ---
 
@@ -397,7 +429,7 @@ WORK_DIR/
         │   ├── weights.*.pkl
         │   ├── z.*.pkl
         │   └── config.pkl
-        └── fixed_subset1/        #   fixed-mode half-map reconstruction
+        └── fixed_subset<N>/      #   fixed-mode half-map reconstruction
             ├── weights.*.pkl
             └── config.pkl
 ```

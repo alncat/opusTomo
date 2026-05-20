@@ -247,7 +247,7 @@ class HetOnlyVAE(nn.Module):
             #x3d_center = encout["rotated_x"]
             #diff = (x3d_center.unsqueeze(1) - x3d_center.unsqueeze(0)).pow(2).sum(dim=(-1,-2))
             diff = (z.unsqueeze(1) - z.unsqueeze(0)).pow(2).sum(dim=(-1))
-            top = torch.topk(diff, k=3, dim=-1, largest=False, sorted=True)
+            top = torch.topk(diff, k=min(4, diff.shape[-1]), dim=-1, largest=False, sorted=True)
             #print(top.values)
             #print(top.indices[:, 1:], mu)
             encout["z_knn"] = mu[top.indices[:, 1:],:]#self.zdim]
@@ -1130,7 +1130,8 @@ class VanillaDecoder(nn.Module):
         self.ctf_alpha = ctf_alpha
         self.ctf_beta = ctf_beta
         self.normalize_ctf = normalize_ctf
-        self.estimate_pose= estimate_pose
+        self.estimate_pose = estimate_pose
+        self.rank = rank
         log("decoder: correct ctf using alpha {}, beta {}, and normalize ctf {}".format(self.ctf_alpha, self.ctf_beta, self.normalize_ctf))
 
         if symm_group is not None:
@@ -2359,6 +2360,4 @@ class SO3reparameterize(nn.Module):
         logvar = z[:,6:]
         z_std = torch.exp(.5*logvar) # or could do softplus
         return z_mu, z_std
-
-
 

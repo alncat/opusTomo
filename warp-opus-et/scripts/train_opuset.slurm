@@ -37,7 +37,13 @@ POSE_PKL=""                                                 # Pose pickle (auto-
 
 # Multi-body (optional)
 MASK_PARAMS=""                                         # Path to mask_params.pkl (optional)
-SPLIT_PKL="${OUTPUT_DIR}/deep.pkl"                     # Train/val split pickle (in output directory)
+if [[ "${OUTPUT_DIR}" = /* ]]; then
+    OPUSET_TRAIN_DIR="${OUTPUT_DIR}"
+else
+    OPUSET_TRAIN_DIR="${WORK_DIR}/${OUTPUT_DIR}"
+fi
+OUTPUT_DIR="${OPUSET_TRAIN_DIR}"
+SPLIT_PKL="${OUTPUT_DIR}/deep.pkl"                     # Train/val split pickle (absolute path)
 
 # -----------------------------------------------------------------------------
 # Setup Environment
@@ -176,16 +182,11 @@ if [ -z "$POSE_PKL" ] || [ ! -f "$POSE_PKL" ]; then
     POSE_PKL="${EXPORT_STAR%.star}_pose.pkl"
     if ! dsd parse_pose_star "$EXPORT_STAR" \
     -D "$TEMPLATERES" \
-    --Apix $ANGPIX \
-    -o "$POSE_PKL"; then
-    echo "ERROR: Failed to generate pose pickle"
-    exit 1
-fi
-    
-if [ ! -f "$POSE_PKL" ]; then
-    echo "ERROR: Pose pickle generation failed - file not created: $POSE_PKL"
-    exit 1
-fi
+    --Apix "$ANGPIX" \
+    -o "$POSE_PKL" || [ ! -f "$POSE_PKL" ]; then
+        echo "ERROR: Failed to generate pose pickle: $POSE_PKL"
+        exit 1
+    fi
 echo "  Generated: $POSE_PKL"
 fi
 echo "  Poses: $POSE_PKL"
@@ -222,7 +223,7 @@ echo "============================================================"
 echo ""
 
 echo "Command:"
-echo "  torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist \\"
+echo "  torchrun --nproc_per_node=$NUM_GPUS -m cryodrgn.commands.train_tomo_dist \\"
 echo "      $EXPORT_STAR \\"
 echo "      --poses $POSE_PKL \\"
 echo "      -n $NUM_EPOCHS \\"
@@ -230,7 +231,7 @@ echo "      -b $BATCH_SIZE \\"
 echo "      --zdim $ZDIM \\"
 echo "      --zaffinedim $ZAFFINEDIM \\"
 echo "      --lr $LEARNING_RATE \\"
-echo "      --num-gpus 4 \\"
+echo "      --num-gpus $NUM_GPUS \\"
 echo "      --multigpu \\"
 echo "      --beta-control $BETA_CONTROL \\"
 echo "      -o $OUTPUT_DIR \\"
@@ -244,7 +245,7 @@ echo "      --templateres $TEMPLATERES \\"
 echo "      --tmp-prefix tmp \\"
 echo "      --datadir \$(dirname $DATADIR) \\"
 echo "      --angpix $ANGPIX \\"
-echo "      --downfrac "${DOWNSAMPLE_FRAC:-1.}" \\"
+echo "      --downfrac ${DOWNSAMPLE_FRAC:-1.} \\"
 echo "      --warp \\"
 echo "      --tilt-range $TILT_RANGE \\"
 echo "      --tilt-step $TILT_STEP \\"
@@ -253,7 +254,7 @@ echo "      --ctfbeta 1. \\"
 echo "      --estpose"
 echo ""
 
-torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist \
+torchrun --nproc_per_node="$NUM_GPUS" -m cryodrgn.commands.train_tomo_dist \
 "$EXPORT_STAR" \
 --poses "$POSE_PKL" \
 -n "$NUM_EPOCHS" \
@@ -261,7 +262,7 @@ torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist \
 --zdim "$ZDIM" \
 --zaffinedim "$ZAFFINEDIM" \
 --lr "$LEARNING_RATE" \
---num-gpus 4 \
+--num-gpus "$NUM_GPUS" \
 --multigpu \
 --beta-control "$BETA_CONTROL" \
 -o "$OUTPUT_DIR" \

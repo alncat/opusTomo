@@ -495,6 +495,7 @@ phases:
     optional_vars:
       - TILT_RANGE
       - TILT_STEP
+      - FIXED_SUBSET_LABEL
     required_tools:
       - dsdsh
       - torchrun
@@ -504,7 +505,7 @@ phases:
       - templates/${TM_LABEL}_training_mask.mrc
       - opuset/${TM_LABEL}/z${ZDIM}/weights.*.pkl
       - opuset/${TM_LABEL}/z${ZDIM}/config.pkl
-      - opuset/${TM_LABEL}/fixed_subset1/weights.*.pkl
+      - opuset/${TM_LABEL}/fixed_subset${FIXED_SUBSET_LABEL}/weights.*.pkl
     pre_checks:
       - "Phase 7 export STAR exists"
       - "Phase 7 subtomograms exist"
@@ -569,12 +570,27 @@ phases:
       - TM_LABEL
       - SUBTOMO_BOX_SIZE
       - TEMPLATERES
+      - ZDIM
+      - ZAFFINEDIM
+      - NUM_EPOCHS
+      - BATCH_SIZE
+      - LEARNING_RATE
+      - BETA_CONTROL
+      - LAMB
+      - BFACTOR
+      - DATADIR
+      - MASK_SOFT_EDGE
+      - MASK_RADIUS_FRACTION
+    optional_vars:
+      - TILT_RANGE
+      - TILT_STEP
+      - FIXED_SUBSET_LABEL
     required_tools:
       - torchrun
     required_conda:
       - OPUSET_ENV
     outputs:
-      - opuset/${TM_LABEL}/fixed_subset1/weights.*.pkl
+      - opuset/${TM_LABEL}/fixed_subset${FIXED_SUBSET_LABEL}/weights.*.pkl
 
   "M":
     description: "MTools refinement — population, species, MCore, mask, export"

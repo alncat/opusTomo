@@ -34,9 +34,10 @@ SPECIES_CONF="${SPECIES_CONF:-${SCRIPT_DIR}/species.conf}"
 source "$SPECIES_CONF" 2>/dev/null || { echo "ERROR: $SPECIES_CONF not found. Set SKILL_DIR or copy species.example.conf -> species.conf and edit."; exit 1; }
 
 # Script-specific overrides (uncomment to override pipeline.conf/species.conf defaults)
-STAR_FILE="${WORK_DIR}/warp_tiltseries/${TM_LABEL}_matching_subset1.star"  # From dsdsh convert_star --subset-label 1
+FIXED_SUBSET_LABEL="${FIXED_SUBSET_LABEL:-1}"       # From dsdsh convert_star --subset-label <N>
+STAR_FILE="${WORK_DIR}/warp_tiltseries/${TM_LABEL}_matching_subset${FIXED_SUBSET_LABEL}.star"
 POSE_PKL=""                                      # Pose pickle; auto-generated if empty
-OUTPUT_DIR="${WORK_DIR}/opuset/${TM_LABEL}/fixed_subset1"
+OUTPUT_DIR="${WORK_DIR}/opuset/${TM_LABEL}/fixed_subset${FIXED_SUBSET_LABEL}"
 
 echo "Configuration:"
 echo "  Star file:     ${STAR_FILE}"
@@ -45,6 +46,7 @@ echo "  Mask:          ${TRAINING_MASK_MRC}"
 echo "  Output dir:    ${OUTPUT_DIR}"
 echo "  Data dir:      ${DATADIR}"
 echo "  Zdim:          ${ZDIM}"
+echo "  Zaffinedim:    ${ZAFFINEDIM}"
 echo "  Epochs:        ${NUM_EPOCHS}"
 echo "  Batch size:    ${BATCH_SIZE}"
 echo "  GPUs:          ${NUM_GPUS}"
@@ -111,6 +113,40 @@ if [ -z "${ANGPIX}" ]; then
 fi
 echo "Resolved ANGPIX: ${ANGPIX} A"
 
+if [ -z "${TILT_RANGE}" ] || [ -z "${TILT_STEP}" ]; then
+    echo "Auto-detecting tilt range/step..."
+    # Tilt range: scan ALL .tlt files, take the max absolute angle across all tilt series.
+    if [ -z "${TILT_RANGE}" ]; then
+        TILT_RANGE=$(find "${TILTSTACK_DIR}" -name "*.tlt" -type f -exec awk '
+        NF { a=$1 < 0 ? -$1 : $1; if (a > max) max = a }
+        END { if (max != "") print max }
+        ' {} \; 2>/dev/null | sort -rn | head -1)
+    fi
+    # Tilt step: read from the first .tlt file; it should be consistent across the dataset.
+    if [ -z "${TILT_STEP}" ]; then
+        TLT_FILE=$(find "${TILTSTACK_DIR}" -name "*.tlt" -type f -print -quit 2>/dev/null)
+        if [ -n "${TLT_FILE}" ]; then
+            echo "  Tilt file (step): ${TLT_FILE}"
+            TILT_STEP=$(awk '
+            NF && seen {
+            d=$1 - prev
+            if (d < 0) d = -d
+            if (d > 0 && (min == 0 || d < min)) min = d
+            }
+            NF { prev=$1; seen=1 }
+            END { if (min > 0) printf "%.0f", min }
+            ' "${TLT_FILE}")
+        fi
+    fi
+    if [ -z "${TILT_RANGE}" ] || [ -z "${TILT_STEP}" ]; then
+        echo "ERROR: Could not parse tilt range/step from .tlt files under ${TILTSTACK_DIR}."
+        echo "       Set TILT_RANGE and TILT_STEP manually in species.conf."
+        exit 1
+    fi
+fi
+echo "Resolved tilt range: +/-${TILT_RANGE} degrees"
+echo "Resolved tilt step: ${TILT_STEP} degrees"
+
 if [ -z "${POSE_PKL}" ]; then
     POSE_PKL="${OUTPUT_DIR}/$(basename "${STAR_FILE%.star}")_pose.pkl"
 fi
@@ -125,15 +161,10 @@ if [ ! -f "${POSE_PKL}" ]; then
     if ! dsd parse_pose_star "${STAR_FILE}" \
     -D "${TEMPLATERES}" \
     --Apix "${ANGPIX}" \
-    -o "${POSE_PKL}"; then
-    echo "ERROR: Failed to generate pose pickle"
-    exit 1
-fi
-    
-if [ ! -f "${POSE_PKL}" ]; then
-    echo "ERROR: Pose pickle generation failed - file not created: ${POSE_PKL}"
-    exit 1
-fi
+    -o "${POSE_PKL}" || [ ! -f "${POSE_PKL}" ]; then
+        echo "ERROR: Failed to generate pose pickle: ${POSE_PKL}"
+        exit 1
+    fi
     
 echo "Pose pickle generated successfully: ${POSE_PKL}"
 echo ""
@@ -161,10 +192,10 @@ if [ ! -f "${TRAINING_MASK_MRC}" ]; then
         exit 1
     fi
 
-    MASK_RADIUS=$(awk "BEGIN {printf \"%.3f\", (${TEMPLATERES} * ${MASK_RADIUS_FRACTION}) / 2}")
+    MASK_RADIUS=$(awk "BEGIN {printf \"%.3f\", (${SUBTOMO_BOX_SIZE} * ${MASK_RADIUS_FRACTION}) / 2}")
     echo "  Input subtomogram: ${SAMPLE_SUBTOMO}"
     echo "  Output mask: ${TRAINING_MASK_MRC}"
-    echo "  Subtomogram box size: ${TEMPLATERES} voxels"
+    echo "  Subtomogram box size: ${SUBTOMO_BOX_SIZE} voxels"
     echo "  Mask diameter fraction: ${MASK_RADIUS_FRACTION}"
     echo "  Sphere radius: ${MASK_RADIUS} voxels"
     echo "  Soft edge: ${MASK_SOFT_EDGE} voxels"
@@ -215,21 +246,22 @@ echo "      --poses ${POSE_PKL} \\"
 echo "      -n ${NUM_EPOCHS} \\"
 echo "      -b ${BATCH_SIZE} \\"
 echo "      --zdim ${ZDIM} \\"
+echo "      --zaffinedim ${ZAFFINEDIM} \\"
 echo "      --lr ${LEARNING_RATE} \\"
 echo "      --num-gpus ${NUM_GPUS} \\"
 echo "      --multigpu \\"
-echo "      --beta-control 0.5 \\"
+echo "      --beta-control ${BETA_CONTROL} \\"
 echo "      -o ${OUTPUT_DIR} \\"
 echo "      ${MASK_ARG} \\"
 echo "      --split ${SPLIT_FILE} \\"
-echo "      --lamb 0.5 \\"
-echo "      --bfactor 4. \\"
+echo "      --lamb ${LAMB} \\"
+echo "      --bfactor ${BFACTOR} \\"
 echo "      --valfrac 0.0 \\"
 echo "      --templateres ${TEMPLATERES} \\"
 echo "      --tmp-prefix tmp \\"
 echo "      --datadir $(dirname "${DATADIR}") \\"
 echo "      --angpix ${ANGPIX} \\"
-echo "      --downfrac "${DOWNSAMPLE_FRAC:-1.}" \\"
+echo "      --downfrac 1. \\"
 echo "      --warp \\"
 echo "      --ctfalpha 0. \\"
 echo "      --ctfbeta 1. \\"
@@ -245,21 +277,22 @@ torchrun --nproc_per_node=${NUM_GPUS} -m cryodrgn.commands.train_tomo_dist \
 -n "${NUM_EPOCHS}" \
 -b "${BATCH_SIZE}" \
 --zdim "${ZDIM}" \
+--zaffinedim "${ZAFFINEDIM}" \
 --lr "${LEARNING_RATE}" \
 --num-gpus "${NUM_GPUS}" \
 --multigpu \
---beta-control 0.5 \
+--beta-control "${BETA_CONTROL}" \
 -o "${OUTPUT_DIR}" \
 ${MASK_ARG} \
 --split "${SPLIT_FILE}" \
---lamb 0.5 \
---bfactor 4. \
+--lamb "${LAMB}" \
+--bfactor "${BFACTOR}" \
 --valfrac 0.0 \
 --templateres "${TEMPLATERES}" \
 --tmp-prefix tmp \
 --datadir "$(dirname "$DATADIR")" \
 --angpix "${ANGPIX}" \
---downfrac "${DOWNSAMPLE_FRAC:-1.}" \
+--downfrac 1. \
 --warp \
 --ctfalpha 0. \
 --ctfbeta 1. \

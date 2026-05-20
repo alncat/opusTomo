@@ -86,14 +86,14 @@ def run_umap(z, **kwargs):
 
 ### Clustering ###
 
-def cluster_kmeans(z, K, on_data=True, reorder=True):
+def cluster_kmeans(z, K, on_data=True, reorder=True, random_state=0):
     '''
     Cluster z by K means clustering
     Returns cluster labels, cluster centers
     If reorder=True, reorders clusters according to agglomerative clustering of cluster centers
     '''
     kmeans = KMeans(n_clusters=K,
-                    random_state=0,
+                    random_state=random_state,
                     max_iter=100)
     labels = kmeans.fit_predict(z)
     centers = kmeans.cluster_centers_

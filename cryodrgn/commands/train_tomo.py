@@ -39,8 +39,8 @@ def add_args(parser):
     parser.add_argument('particles', type=os.path.abspath, help='Input particles (.mrcs, .star, .cs, or .txt)')
     parser.add_argument('-o', '--outdir', type=os.path.abspath, required=True, help='Output directory to save model')
     parser.add_argument('-r', '--ref_vol', type=os.path.abspath, help='Input volume (.mrcs)')
-    parser.add_argument('--zdim', type=int, required=False, help='Dimension of compositional latent variable')
-    parser.add_argument('--zaffinedim', type=int, default=4, required=False, help='Dimension of conformational latent variable')
+    parser.add_argument('--zdim', type=int, required=False, help='Dimension of composition latent variable')
+    parser.add_argument('--zaffinedim', type=int, default=4, required=False, help='Dimension of conformation latent variable')
     parser.add_argument('--poses', type=os.path.abspath, required=True, help='Image poses (.pkl)')
     parser.add_argument('--masks', type=os.path.abspath, required=False, help='Masks related parameters (.pkl)')
     parser.add_argument('--ctf', metavar='pkl', type=os.path.abspath, help='CTF parameters (.pkl)')
@@ -81,6 +81,7 @@ def add_args(parser):
     group = parser.add_argument_group('Training parameters')
     group.add_argument('-n', '--num-epochs', type=int, default=20, help='Number of training epochs (default: %(default)s)')
     group.add_argument('-b','--batch-size', type=int, default=20, help='Minibatch size (default: %(default)s)')
+    group.add_argument('-e','--epoch', type=int, default=0, help='Current Epoch (default: %(default)s)')
     group.add_argument('--wd', type=float, default=0, help='Weight decay in Adam optimizer (default: %(default)s)')
     group.add_argument('--lr', type=float, default=4e-5, help='Learning rate in Adam optimizer (default: %(default)s)')
     group.add_argument('--accum-step', type=int, default=1, help='gradient accumulation step for optimizer (default: %(default)s)')
@@ -978,6 +979,7 @@ def main(args):
         #increasing bfactor slowly
         args.bfactor = bfactor*(1. + 0.25/(1. + 3.*math.exp(-0.1*epoch)))
         beta_max    = 1. #0.98 ** (epoch)
+        args.epoch = epoch
         log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
                         lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
 
