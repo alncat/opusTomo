@@ -532,11 +532,11 @@ cp species.example.conf species_ribo.conf
 bash validate.sh --phase 6 --species species_ribo.conf --dry-run
 ```
 
-### OPUS-ET Analysis Skill for Kimi Code CLI
+### OPUS-ET Analysis Skill for AI Coding Agents
 
-OPUS-ET includes a skill file `opus-et-analysis.skill` that provides AI-assisted analysis workflows when using Kimi Code CLI. This skill encapsulates best practices for processing training results and can guide you through complex analysis pipelines including PCA/k-means clustering, volume generation, pose parsing, and STAR file manipulation.
+OPUS-ET includes a skill file `opus-et-analysis.skill` that provides AI-assisted analysis workflows. This skill encapsulates best practices for processing training results and can guide you through complex analysis pipelines including PCA/k-means clustering, volume generation, pose parsing, and STAR file manipulation.
 
-#### Installing the Kimi Skill
+#### Installing the Analysis Skill
 
 To use the skill in Kimi Code CLI:
 
@@ -548,9 +548,26 @@ kimi skill import opus-et-analysis.skill
 cp opus-et-analysis.skill ~/.kimi/skills/
 ```
 
+For Claude Code personal skills, extract the `.skill` archive into Claude's skills directory:
+
+```bash
+mkdir -p ~/.claude/skills
+python3 -m zipfile -e opus-et-analysis.skill ~/.claude/skills/
+```
+
+For Claude Code project skills, extract it inside the project and commit it:
+
+```bash
+mkdir -p .claude/skills
+python3 -m zipfile -e opus-et-analysis.skill .claude/skills/
+git add .claude/skills/opus-et-analysis
+```
+
+Restart the agent session after installation so the skill list is refreshed. The installed skill name is `opus-et-analysis`.
+
 ### Quick Start with the Skill
 
-Once installed, you can ask Kimi Code CLI to help with analysis tasks:
+Once installed, you can ask the agent to help with analysis tasks:
 
 ```
 "Analyze epoch 39 with 10 PCs and 20 clusters"
