@@ -107,7 +107,7 @@ fi
 PROCESSED=0
 FAILED=0
 
-mapfile -t stack_files < <(ls "$TILTSTACK_DIR"/*/TS_*.st 2>/dev/null | sort)
+mapfile -t stack_files < <(ls "$TILTSTACK_DIR"/*/*.st 2>/dev/null | sort)
 if [ "${MAX_TS:-0}" -gt 0 ] && [ "${#stack_files[@]}" -gt "$MAX_TS" ]; then
     echo "MAX_TS=$MAX_TS — limiting to first $MAX_TS tilt series (subset test)"
     stack_files=("${stack_files[@]:0:$MAX_TS}")
