@@ -1684,7 +1684,7 @@ class VanillaDecoder(nn.Module):
                 ##rotate the images around z axis by -(-euler2) == euler2 counter-clockwise
                 ref_i = self.transformer.rotate_2d(ref_i, -euler2, mode='bicubic') #.unsqueeze(0)
                 #applying 3d mask to reference here
-                ref = ref_i*(valid>0)
+                ref = ref_i*(valid.clamp(min=0.))
                 ref = ref.squeeze(1)
                 #randomly change contrast
                 ref *= (1. + (np.random.rand() - 0.5)*snr)
