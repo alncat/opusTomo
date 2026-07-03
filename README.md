@@ -464,6 +464,21 @@ This repository includes an Agent Skills directory at `warp-opus-et/`. It helps 
 
 Install it by copying the whole skill directory, not just `SKILL.md`.
 
+For Claude Code personal skills:
+
+```bash
+mkdir -p ~/.claude/skills
+rsync -av warp-opus-et/ ~/.claude/skills/warp-opus-et/
+```
+
+For Claude Code project skills, copy it inside the project and commit it:
+
+```bash
+mkdir -p .claude/skills
+rsync -av warp-opus-et/ .claude/skills/warp-opus-et/
+git add .claude/skills/warp-opus-et
+```
+
 For Codex:
 
 ```bash
@@ -482,21 +497,6 @@ Kimi can also load from a custom directory:
 
 ```bash
 kimi --skills-dir "$(pwd)/warp-opus-et"
-```
-
-For Claude Code personal skills:
-
-```bash
-mkdir -p ~/.claude/skills
-rsync -av warp-opus-et/ ~/.claude/skills/warp-opus-et/
-```
-
-For Claude Code project skills, copy it inside the project and commit it:
-
-```bash
-mkdir -p .claude/skills
-rsync -av warp-opus-et/ .claude/skills/warp-opus-et/
-git add .claude/skills/warp-opus-et
 ```
 
 Restart the agent session after installation so the skill list is refreshed. The installed skill name is `warp-opus-et`.
@@ -534,33 +534,45 @@ bash validate.sh --phase 6 --species species_ribo.conf --dry-run
 
 ### OPUS-ET Analysis Skill for AI Coding Agents
 
-OPUS-ET includes a skill file `opus-et-analysis.skill` that provides AI-assisted analysis workflows. This skill encapsulates best practices for processing training results and can guide you through complex analysis pipelines including PCA/k-means clustering, volume generation, pose parsing, and STAR file manipulation.
+OPUS-ET includes an Agent Skills directory at `opus-et-analysis/` that provides AI-assisted analysis workflows. This skill encapsulates best practices for processing training results and can guide you through complex analysis pipelines including PCA/k-means clustering, volume generation, pose parsing, and STAR file manipulation.
 
 #### Installing the Analysis Skill
 
-To use the skill in Kimi Code CLI:
+Install it by copying the whole skill directory, not just `SKILL.md`.
 
-```bash
-# Import the skill into Kimi Code CLI
-kimi skill import opus-et-analysis.skill
-
-# Or copy to the skills directory manually
-cp opus-et-analysis.skill ~/.kimi/skills/
-```
-
-For Claude Code personal skills, extract the `.skill` archive into Claude's skills directory:
+For Claude Code personal skills:
 
 ```bash
 mkdir -p ~/.claude/skills
-python3 -m zipfile -e opus-et-analysis.skill ~/.claude/skills/
+rsync -av opus-et-analysis/ ~/.claude/skills/opus-et-analysis/
 ```
 
-For Claude Code project skills, extract it inside the project and commit it:
+For Claude Code project skills, copy it inside the project and commit it:
 
 ```bash
 mkdir -p .claude/skills
-python3 -m zipfile -e opus-et-analysis.skill .claude/skills/
+rsync -av opus-et-analysis/ .claude/skills/opus-et-analysis/
 git add .claude/skills/opus-et-analysis
+```
+
+For Codex:
+
+```bash
+mkdir -p ~/.codex/skills
+rsync -av opus-et-analysis/ ~/.codex/skills/opus-et-analysis/
+```
+
+For Kimi Code CLI, the recommended cross-agent user directory is `~/.config/agents/skills/`:
+
+```bash
+mkdir -p ~/.config/agents/skills
+rsync -av opus-et-analysis/ ~/.config/agents/skills/opus-et-analysis/
+```
+
+Kimi can also load from a custom directory:
+
+```bash
+kimi --skills-dir "$(pwd)/opus-et-analysis"
 ```
 
 Restart the agent session after installation so the skill list is refreshed. The installed skill name is `opus-et-analysis`.

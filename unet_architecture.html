@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OPUS-ET UNet Architecture</title>
+<style>
+  :root {
+    --enc: #3a7bd5;
+    --enc-light: #e8f0fb;
+    --dec: #e67e22;
+    --dec-light: #fef5ec;
+    --skip: #e74c3c;
+    --latent: #16a085;
+    --out: #27ae60;
+    --fuse: #c0392b;
+    --bg: #f8f9fa;
+    --text: #2c3e50;
+    --border: #dee2e6;
+    --shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    line-height: 1.5;
+  }
+  h1 { text-align: center; font-size: 20px; margin-bottom: 4px; }
+  .subtitle { text-align: center; font-size: 12px; color: #666; margin-bottom: 20px; }
+  .diagram-wrapper {
+    position: relative;
+    display: flex; gap: 20px; justify-content: center;
+    max-width: 1100px; margin: 0 auto;
+  }
+  .column { flex: 1; min-width: 360px; max-width: 520px; position: relative; z-index: 2; }
+
+  .section-title {
+    font-size: 14px; font-weight: 700; text-align: center;
+    padding: 8px 16px; border-radius: 6px 6px 0 0;
+    letter-spacing: 0.5px;
+  }
+  .enc-title { background: var(--enc); color: #fff; }
+  .dec-title { background: var(--dec); color: #fff; }
+
+  .pipeline {
+    background: #fff; border-radius: 0 0 8px 8px; overflow: visible;
+    border: 1px solid var(--border); border-top: none;
+    padding: 12px 8px; margin-bottom: 20px;
+  }
+
+  .block {
+    position: relative;
+    margin: 2px 0;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    display: flex; align-items: center; gap: 8px;
+    white-space: nowrap;
+    cursor: default;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .block:hover {
+    transform: translateX(2px);
+    box-shadow: var(--shadow);
+    z-index: 10;
+  }
+  .block .op { font-weight: 600; font-size: 10px; }
+  .block .shape { font-size: 9.5px; color: #555; margin-left: auto; }
+
+  .enc-block { background: var(--enc-light); border-left: 3px solid var(--enc); }
+  .dec-block { background: var(--dec-light); border-left: 3px solid var(--dec); }
+
+  /* Resolution-matched colors for skip-connected pairs */
+  .res-x0 { background: #fdedec; border-left: 3px solid #e74c3c; }  /* 24³ — x0 & t4_fuse */
+  .res-x1 { background: #f4ecf7; border-left: 3px solid #8e44ad; }  /* 12³ — x1 & t3_fuse */
+  .res-x2 { background: #eaf2f8; border-left: 3px solid #2980b9; }  /*  1³ — x2 & t1_fuse */
+  .skip-block { background: #fdecea; border-left: 3px solid var(--skip); }
+  .latent-block { background: #e8f8f5; border-left: 3px solid var(--latent); }
+  .fuse-block { background: #fdedec; border-left: 3px solid var(--fuse); font-weight: 600; }
+  .out-block { background: #eafaf1; border-left: 3px solid var(--out); font-weight: 600; }
+  .io-block { background: #eaecee; border-left: 3px solid #7f8c8d; }
+
+  .arrow-down {
+    text-align: center; font-size: 14px; color: #95a5a6;
+    padding: 2px 0; margin: 0;
+  }
+
+  .skip-label {
+    display: inline-block;
+    background: var(--skip);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 4px;
+  }
+
+  .legend {
+    display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;
+    margin: 16px 0; font-size: 11px;
+  }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  .legend .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  .tooltip {
+    position: absolute; left: 105%;
+    background: #2c3e50; color: #fff; font-size: 10px;
+    padding: 6px 10px; border-radius: 4px;
+    pointer-events: none; opacity: 0;
+    white-space: nowrap; z-index: 100;
+    transition: opacity 0.15s;
+  }
+  .block:hover .tooltip { opacity: 1; }
+
+  /* SVG overlay for skip arrows */
+  #skip-svg {
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; z-index: 3;
+  }
+  .skip-arrow-path {
+    fill: none;
+    stroke-width: 2.5;
+    opacity: 0.7;
+  }
+
+  /* Port circles on the edges */
+  .port {
+    position: absolute;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .port-out { right: -5px; background: var(--skip); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--skip); }
+  .port-in  { left: -5px;  background: var(--fuse); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--fuse); }
+
+</style>
+</head>
+<body>
+
+<h1>OPUS-ET UNet Architecture</h1>
+<p class="subtitle">encode_mode='unet' + template_type='unet' &nbsp;|&nbsp; D=129, render=140, crop=96, encres=12, templateres=160</p>
+
+<div class="legend">
+  <span><i class="swatch" style="background:var(--enc)"></i> Encoder (3D CNN)</span>
+  <span><i class="swatch" style="background:var(--dec)"></i> Decoder (ConvTemplate)</span>
+  <span><i class="swatch" style="background:var(--skip)"></i> Skip Connection</span>
+  <span><i class="swatch" style="background:var(--fuse)"></i> U-Net Fuse (Conv3d)</span>
+  <span><i class="swatch" style="background:var(--latent)"></i> Latent</span>
+  <span><i class="swatch" style="background:var(--out)"></i> Output</span>
+</div>
+
+<div class="diagram-wrapper" id="diagram-wrapper">
+
+  <!-- SVG overlay for arrows -->
+  <svg id="skip-svg"></svg>
+
+  <!-- ENCODER COLUMN -->
+  <div class="column" id="enc-col">
+  <div class="section-title enc-title">ENCODER &nbsp;—&nbsp; class Encoder (models.py:601)</div>
+  <div class="pipeline" id="enc-pipeline">
+
+    <div class="block io-block">
+      <span class="op">INPUT</span>
+      <span class="shape">(B, 1, 96³)</span>
+      <div class="tooltip">3D subtomogram after FFT crop + translate + bfactor blur</div>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block enc-block">
+      <span class="op">Conv3d(1→32, k4,s2,p1) + LReLU</span>
+      <span class="shape">(B, 32, 48³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block enc-block skip-src res-x0" id="enc-x0">
+      <span class="op">Conv3d(32→64, k4,s2,p1) + LReLU</span>
+      <span class="skip-label">x0</span>
+      <span class="shape">(B, 64, 24³)</span>
+      <div class="port port-out"></div>
+      <div class="tooltip">Fine details — fused after template4[0]</div>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block enc-block">
+      <span class="op">Conv3d(64→128, k4,s2,p1) + LReLU</span>
+      <span class="shape">(B, 128, 12³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block enc-block skip-src res-x1" id="enc-x1">
+      <span class="op">F.interpolate → 12³</span>
+      <span class="skip-label">x1</span>
+      <span class="shape">(B, 128, 12³)</span>
+      <div class="port port-out"></div>
+      <div class="tooltip">Mid-level structure — fused after template3</div>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block enc-block">
+      <span class="op">Conv3d(128→256, k4,s2,p1) + LReLU</span>
+      <span class="shape">(B, 256, 6³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block enc-block">
+      <span class="op">Conv3d(256→512, k4,s2,p1) + LReLU</span>
+      <span class="shape">(B, 512, 3³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block enc-block skip-src res-x2" id="enc-x2">
+      <span class="op">Conv3d(512→512, k4,s2,p1) + LReLU</span>
+      <span class="skip-label">x2</span>
+      <span class="shape">(B, 512, 1³)</span>
+      <div class="port port-out"></div>
+      <div class="tooltip">Global context — fused after template1</div>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block enc-block">
+      <span class="op">AdaptiveMaxPool3d(1)</span>
+      <span class="shape">(B, 512)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block enc-block">
+      <span class="op">Linear(512→512) + LReLU</span>
+      <span class="shape">(B, 512)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block latent-block">
+      <span class="op">μ: Linear(512→12)</span>
+      <span class="shape">(B, 12)</span>
+    </div>
+    <div class="block latent-block">
+      <span class="op">logσ: Linear(512→12)</span>
+      <span class="shape">(B, 12)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block latent-block" style="font-weight:700;">
+      <span class="op">z = μ + exp(logσ) · N(0,I)</span>
+      <span class="shape">(B, 12)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block latent-block">
+      <span class="op">z[:8] → template &nbsp;│&nbsp; z[8:] → affine pose</span>
+      <span class="shape">(B, 8) + (B, 4)</span>
+    </div>
+  </div>
+  </div>
+
+  <!-- DECODER COLUMN (reversed: output at top, z at bottom so arrows don't cross) -->
+  <div class="column" id="dec-col">
+  <div class="section-title dec-title">DECODER &nbsp;—&nbsp; class ConvTemplate (models.py:404) &nbsp;<small>(top-down = backprop direction)</small></div>
+  <div class="pipeline" id="dec-pipeline">
+
+    <div class="block io-block">
+      <span class="op">OUTPUT: 3D Density Template</span>
+      <span class="shape">(B, 1, 160³)</span>
+      <div class="tooltip">Saved as .mrc for downstream analysis</div>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block out-block">
+      <span class="op">ConvTranspose3d(32→1, k4,s2,p1)</span>
+      <span class="shape">(B, 1, 160³)</span>
+      <div class="tooltip">Final upsampling: 80³ → 160³</div>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block dec-block">
+      <span class="op">F.interpolate → 80³ (templateres/2)</span>
+      <span class="shape">(B, 32, 80³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block dec-block">
+      <span class="op">└ template4[1]: ConvTranspose3d(64→32, k4,s2,p1) + LReLU</span>
+      <span class="shape">(B, 32, 48³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block fuse-block skip-dst res-x0" id="dec-x0">
+      <span class="op">┌─ t4_fuse: cat(x0, template4) → Conv3d(<b>128→64</b>, k3,p1)</span>
+      <span class="shape">(B, 64, 24³)</span>
+      <div class="port port-in"></div>
+      <div class="tooltip">cat x0 (64ch @ 16³) → fuse fine details</div>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block dec-block res-x0">
+      <span class="op">└ template4[0]: ConvTranspose3d(128→64, k4,s2,p1) + LReLU</span>
+      <span class="shape">(B, 64, 24³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block fuse-block skip-dst res-x1" id="dec-x1">
+      <span class="op">┌─ t3_fuse: cat(x1, template3) → Conv3d(<b>256→128</b>, k3,p1)</span>
+      <span class="shape">(B, 128, 12³)</span>
+      <div class="port port-in"></div>
+      <div class="tooltip">F.interpolate(16³→12³) then cat x1 (128ch @ 12³) → fuse mid-level features</div>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block dec-block res-x1">
+      <span class="op">└ template3[1]: ConvTranspose3d(256→128, k4,s2,p1) + LReLU</span>
+      <span class="shape">(B, 128, 16³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block dec-block">
+      <span class="op">└ template3[0]: ConvTranspose3d(512→256, k4,s2,p1) + LReLU</span>
+      <span class="shape">(B, 256, 8³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block dec-block">
+      <span class="op">└ template2[1]: ConvTranspose3d(1024→512, k2,s2) + LReLU</span>
+      <span class="shape">(B, 512, 4³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block dec-block">
+      <span class="op">└ template2[0]: ConvTranspose3d(512→1024, k2,s2) + LReLU</span>
+      <span class="shape">(B, 1024, 2³)</span>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block fuse-block skip-dst res-x2" id="dec-x2">
+      <span class="op">┌─ t1_fuse: cat(x2, template1) → Conv3d(<b>1024→512</b>, k3,p1)</span>
+      <span class="shape">(B, 512, 1³)</span>
+      <div class="port port-in"></div>
+      <div class="tooltip">x2 (512ch @ 1³) + template1 (512ch @ 1³) → fused global context</div>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block dec-block res-x2">
+      <span class="op">└ template1: Linear(8→512) + LReLU → Linear(512→512) + LReLU</span>
+      <span class="shape">(B, 512, 1³)</span>
+      <div class="tooltip">template1_out_dim=512 in UNet mode (2048 without UNet)</div>
+    </div>
+    <div class="arrow-down" data-col="dec">▼</div>
+
+    <div class="block latent-block">
+      <span class="op">z[:8]</span>
+      <span class="shape">(B, 8)</span>
+      <div class="tooltip">Latent from encoder (first zdim=8 dims)</div>
+    </div>
+  </div>
+  </div>
+
+</div>
+
+<!-- SKIP CONNECTION SUMMARY -->
+<div style="max-width:1060px;margin:20px auto;">
+<div class="section-title" style="background:var(--skip);color:#fff;border-radius:6px;">SKIP CONNECTION DETAIL</div>
+<table style="width:100%;border-collapse:collapse;font-size:11px;background:#fff;border-radius:0 0 8px 8px;overflow:hidden;border:1px solid var(--border);">
+<thead>
+<tr style="background:#fdecea;text-align:left;">
+  <th style="padding:8px 12px;">Skip</th>
+  <th style="padding:8px 12px;">Encoder Source</th>
+  <th style="padding:8px 12px;">Encoder Shape</th>
+  <th style="padding:8px 12px;">Decoder Fuse Point</th>
+  <th style="padding:8px 12px;">Fuse Op</th>
+  <th style="padding:8px 12px;">Semantic Role</th>
+</tr>
+</thead>
+<tbody>
+<tr style="border-top:1px solid var(--border);">
+  <td style="padding:8px 12px;"><span class="skip-label" style="font-size:10px;">x0</span></td>
+  <td style="padding:8px 12px;">down1_layers[:4] (2 conv blocks)</td>
+  <td style="padding:8px 12px;font-family:monospace;">(B, 64, 24³)</td>
+  <td style="padding:8px 12px;">After template4[0] (128→64 ConvT)</td>
+  <td style="padding:8px 12px;font-family:monospace;">Conv3d(128→64, k3,p1)</td>
+  <td style="padding:8px 12px;">Fine-grained spatial detail</td>
+</tr>
+<tr style="border-top:1px solid var(--border);">
+  <td style="padding:8px 12px;"><span class="skip-label" style="font-size:10px;">x1</span></td>
+  <td style="padding:8px 12px;">down1_layers[4:] (3rd conv block)</td>
+  <td style="padding:8px 12px;font-family:monospace;">(B, 128, 12³)</td>
+  <td style="padding:8px 12px;">After template3 (full 2-block sequence)</td>
+  <td style="padding:8px 12px;font-family:monospace;">Conv3d(256→128, k3,p1)</td>
+  <td style="padding:8px 12px;">Mid-level structural features</td>
+</tr>
+<tr style="border-top:1px solid var(--border);">
+  <td style="padding:8px 12px;"><span class="skip-label" style="font-size:10px;">x2</span></td>
+  <td style="padding:8px 12px;">down2 full output (3 conv blocks)</td>
+  <td style="padding:8px 12px;font-family:monospace;">(B, 512, 1³)</td>
+  <td style="padding:8px 12px;">After template1 (Linear projection)</td>
+  <td style="padding:8px 12px;font-family:monospace;">Conv3d(1024→512, k3,p1)</td>
+  <td style="padding:8px 12px;">Global context / semantic embedding</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<!-- DATA FLOW SUMMARY -->
+<div style="max-width:1060px;margin:20px auto;">
+<div class="section-title" style="background:var(--text);color:#fff;border-radius:6px;">END-TO-END DATA FLOW</div>
+<div style="background:#fff;border:1px solid var(--border);border-top:none;border-radius:0 0 8px 8px;padding:16px;font-size:11px;font-family:monospace;line-height:1.8;">
+  subtomogram (B, 1, 140³) <span style="color:#95a5a6;">→ FFT crop/translate/blur → real-space crop</span> (B, 1, 96³)
+  <br>
+  &nbsp;&nbsp;<span style="color:#95a5a6;">→ rotate_2d(-euler2) → standardize → noise augment</span>
+  <br>
+  &nbsp;&nbsp;<span style="color:var(--enc);">→ Encoder.forward(return_activations=True)</span>
+  <br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--enc);">→ z (B,12), mu, logstd</span>
+  <br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--skip);">→ skip = {x0, x1, x2}</span>
+  <br>
+  &nbsp;&nbsp;<span style="color:var(--dec);">→ VanillaDecoder.forward(z, encoder_skip=skip)</span>
+  <br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--dec);">→ ConvTemplate(z[:8], encoder_skip)</span>
+  <br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--dec);">→ 3D template (B, 1, 160³)</span>
+  <br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--dec);">→ grid_sample at sampled euler angles → 2D projections</span>
+  <br>
+  &nbsp;&nbsp;<span style="color:var(--skip);">→ EM-weighted L2 loss: Σ prob[s] · Σ(recon[s] - ref)²</span>
+  <br>
+  &nbsp;&nbsp;<span style="color:var(--latent);">→ + β · KL(z || N(0,I)) + λ₁·TV(template) + λ₂·L1(template)</span>
+</div>
+</div>
+
+<script>
+(function() {
+  const svg  = document.getElementById('skip-svg');
+  const wrapper = document.getElementById('diagram-wrapper');
+
+  // Skip connections: source (encoder) → target (decoder)
+  const pairs = [
+    { src: 'enc-x0', dst: 'dec-x0', label: 'x0', color: '#e74c3c' },  // red  — fine details
+    { src: 'enc-x1', dst: 'dec-x1', label: 'x1', color: '#8e44ad' },  // purple — mid-level
+    { src: 'enc-x2', dst: 'dec-x2', label: 'x2', color: '#2980b9' },  // blue — deep/global
+  ];
+
+  // Arrowhead marker
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  pairs.forEach((p, i) => {
+    const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+    marker.setAttribute('id', `arrow-${i}`);
+    marker.setAttribute('markerWidth', '8');
+    marker.setAttribute('markerHeight', '6');
+    marker.setAttribute('refX', '8');
+    marker.setAttribute('refY', '3');
+    marker.setAttribute('orient', 'auto');
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', '0 0, 8 3, 0 6');
+    poly.setAttribute('fill', p.color);
+    marker.appendChild(poly);
+    defs.appendChild(marker);
+  });
+  svg.appendChild(defs);
+
+  // Create path + label elements
+  const elems = pairs.map((p, i) => {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', p.color);
+    path.setAttribute('stroke-width', '2.2');
+    path.setAttribute('stroke-dasharray', '6 3');
+    path.setAttribute('opacity', '0.65');
+    path.setAttribute('marker-end', `url(#arrow-${i})`);
+    g.appendChild(path);
+
+    const labelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    labelBg.setAttribute('rx', '8');
+    labelBg.setAttribute('ry', '8');
+    labelBg.setAttribute('fill', p.color);
+    labelBg.setAttribute('opacity', '0.9');
+    g.appendChild(labelBg);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('fill', '#fff');
+    label.setAttribute('font-size', '9');
+    label.setAttribute('font-weight', '700');
+    label.setAttribute('font-family', 'SF Mono, Fira Code, Consolas, monospace');
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('dominant-baseline', 'central');
+    label.textContent = p.label;
+    g.appendChild(label);
+
+    svg.appendChild(g);
+    return { g, path, labelBg, label };
+  });
+
+  function getCenter(el) {
+    const r = el.getBoundingClientRect();
+    const wr = wrapper.getBoundingClientRect();
+    return {
+      x: r.left + r.width  / 2 - wr.left,
+      y: r.top  + r.height / 2 - wr.top,
+      w: r.width,
+      h: r.height,
+      right: r.right  - wr.left,
+      left:  r.left   - wr.left,
+    };
+  }
+
+  function draw() {
+    const wh = wrapper.getBoundingClientRect();
+    const ph = wh.height - 32;
+
+    svg.setAttribute('width',  wh.width);
+    svg.setAttribute('height', wh.height);
+
+    pairs.forEach((p, i) => {
+      const srcEl = document.getElementById(p.src);
+      const dstEl = document.getElementById(p.dst);
+      if (!srcEl || !dstEl) return;
+
+      const src = getCenter(srcEl);
+      const dst = getCenter(dstEl);
+
+      const x1 = src.right;
+      const y1 = src.y;
+      const x4 = dst.left;
+      const y4 = dst.y;
+
+      const dx = Math.abs(x4 - x1) * 0.55;
+      const x2 = x1 + dx;
+      const y2 = y1;
+      const x3 = x4 - dx;
+      const y3 = y4;
+
+      const d = `M ${x1} ${y1} C ${x2} ${y2}, ${x3} ${y3}, ${x4} ${y4}`;
+      elems[i].path.setAttribute('d', d);
+
+      const mx = (x1 + x4) / 2;
+      const my = (y1 + y4) / 2;
+      elems[i].labelBg.setAttribute('x', mx - 12);
+      elems[i].labelBg.setAttribute('y', my - 9);
+      elems[i].labelBg.setAttribute('width', 24);
+      elems[i].labelBg.setAttribute('height', 18);
+      elems[i].label.setAttribute('x', mx);
+      elems[i].label.setAttribute('y', my);
+    });
+  }
+
+  // Flip arrows in the reversed decoder column to point upward
+  document.querySelectorAll('#dec-pipeline .arrow-down').forEach(el => {
+    el.textContent = '▲';
+    el.style.color = '#b7950b';  // gold tint to distinguish reversed flow
+  });
+
+  draw();
+  window.addEventListener('resize', draw);
+
+  // Redraw on font load
+  document.fonts && document.fonts.ready.then(draw);
+})();
+</script>
+
+</body>
+</html>
