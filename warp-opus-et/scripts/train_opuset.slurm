@@ -135,8 +135,15 @@ echo "  ANGPIX: $ANGPIX A"
 echo "  Tilt range: +/-$TILT_RANGE degrees"
 echo "  Tilt step: $TILT_STEP degrees"
 
-# Ensure training mask exists. If requested, create a default sphere mask from
-# one exported subtomogram; dsdsh create_mask uses the input MRC for shape/header.
+# Ensure training mask exists. If requested, create a default sphere mask sized
+# to one exported REAL-SPACE particle subtomogram. The subtomo dir also holds
+# per-particle 3D CTF volumes (*_ctf_*.mrc) and an *_average*.mrc. The CTF
+# volumes are half-Fourier and therefore NON-CUBIC (e.g. 104x104x53 = D x D x
+# D/2+1). If the glob picks one as the mask template, dsdsh create_mask
+# faithfully produces a non-cubic mask and cryodrgn aborts at load with
+# "Images must be cubic" -- so we exclude *_ctf_* and *_average* below. (This,
+# not any float16 mis-read, was the real cause of the wrong mask shape:
+# create_mask read the CTF volume's shape correctly.)
 if [ ! -f "$TRAINING_MASK_MRC" ]; then
     if [ "$AUTO_CREATE_TRAINING_MASK" != "1" ]; then
         echo "ERROR: Training mask not found: $TRAINING_MASK_MRC"
@@ -146,7 +153,10 @@ if [ ! -f "$TRAINING_MASK_MRC" ]; then
 
     echo "Training mask not found; creating default spherical mask."
     SAMPLE_SUBTOMO=""
-    SAMPLE_SUBTOMO=$(find "$DATADIR" -name "$SUBTOMO_GLOB" -type f -print -quit 2>/dev/null)
+    # Exclude 3D CTF volumes (*_ctf_*, half-Fourier -> non-cubic) and the
+    # *_average* map; only a real-space particle subtomogram is a valid template.
+    SAMPLE_SUBTOMO=$(find "$DATADIR" -name "$SUBTOMO_GLOB" -type f \
+        ! -name "*_ctf_*" ! -name "*_average*" -print -quit 2>/dev/null)
 
     if [ -z "$SAMPLE_SUBTOMO" ]; then
         echo "ERROR: Could not find an exported subtomogram under: $DATADIR"
