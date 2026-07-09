@@ -35,6 +35,13 @@ source "$SPECIES_CONF" 2>/dev/null || { echo "ERROR: $SPECIES_CONF not found. Se
 # Script-specific overrides (uncomment to override pipeline.conf/species.conf defaults)
 POSE_PKL=""                                                 # Pose pickle (auto-generated if empty)
 
+# CRITICAL: OPUS-ET computes the CTF at --angpix, so it MUST be the SUBTOMOGRAM pixel
+# size (OUTPUT_ANGPIX = the exported subtomos' rlnDetectorPixelSize), NOT the raw
+# tilt-series ANGPIX from pipeline.conf. A wrong pixel size mis-scales every CTF zero
+# and corrupts the reconstruction. Use OUTPUT_ANGPIX; if unset, fall through to the
+# STAR auto-detect below (rlnDetectorPixelSize) — never the raw tilt-series value.
+ANGPIX="${OUTPUT_ANGPIX:-}"
+
 # Multi-body (optional)
 MASK_PARAMS=""                                         # Path to mask_params.pkl (optional)
 if [[ "${OUTPUT_DIR}" = /* ]]; then
