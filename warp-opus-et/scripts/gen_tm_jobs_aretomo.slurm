@@ -151,31 +151,33 @@ for tomostar_file in "${tomostar_files[@]}"; do
     
     echo "  Dimensions: ${nx}x${ny}x${nz}"
     
-    # Get tilt angles for wedge calculation
+    # Missing-wedge angles for the PyTom job.
+    #
+    # PyTom convention (verified in pytom/gui/frameParticlePicking.py:461,1209 ->
+    # localizationJob.py --wedge1/--wedge2, and pytom/agnostic/filter.py
+    # create_asymmetric_wedge): wedge_angle = 90 - |tilt_limit|, and Angle1/Angle2 are
+    # DIRECTIONAL (never sorted) -- Angle1 <- most-negative tilt, Angle2 <- most-positive
+    # tilt in IMOD sign. These .tlt are WARP convention (tilt_WARP = -tilt_IMOD; the pipeline
+    # negates then negates back in warp_aretomo_align_negate.slurm), so in WARP terms:
+    #   Angle1 = 90 - |WARP max (most positive)| ; Angle2 = 90 - |WARP min (most negative)|
+    # NO swap: forcing Angle1<=Angle2 reverses the two on tomograms whose negative-tilt side
+    # is the more extreme (e.g. -50/+34), mis-orienting the asymmetric wedge.
     tlt_file="${TILTSTACK_DIR}/${ts_name}/${ts_name}.tlt"
     if [ -f "$tlt_file" ]; then
-        # Read first and last angles
-        min_angle=$(head -1 "$tlt_file" | awk '{print $1}')
-        max_angle=$(tail -1 "$tlt_file" | awk '{print $1}')
-        
-        # Calculate wedge angles (complement to tilt angles)
-        angle1=$(echo "$max_angle" | awk '{printf "%.0f", 90 - ($1 < 0 ? -$1 : $1)}')
-        angle2=$(echo "$min_angle" | awk '{printf "%.0f", 90 - ($1 < 0 ? -$1 : $1)}')
-        
-        # Ensure Angle1 <= Angle2
-        if [ "$angle1" -gt "$angle2" ]; then
-            tmp=$angle1
-            angle1=$angle2
-            angle2=$tmp
-        fi
+        # True extremes -- do NOT assume head/tail are sorted.
+        tilt_max=$(sort -n "$tlt_file" | tail -1 | awk '{print $1}')   # most positive (WARP)
+        tilt_min=$(sort -n "$tlt_file" | head -1 | awk '{print $1}')   # most negative (WARP)
+        angle1=$(awk -v t="$tilt_max" 'BEGIN{a=(t<0?-t:t); printf "%.0f", 90-a}')
+        angle2=$(awk -v t="$tilt_min" 'BEGIN{a=(t<0?-t:t); printf "%.0f", 90-a}')
     else
         # Use default wedge angles
+        tilt_min=""; tilt_max=""
         angle1=$DEFAULT_WEDGE1
         angle2=$DEFAULT_WEDGE2
         echo "  WARNING: Tilt file not found, using default wedge angles"
     fi
-    
-    echo "  Wedge angles: [$angle1, $angle2]"
+
+    echo "  Wedge angles: [$angle1, $angle2]  (tilt min=${tilt_min:-?} max=${tilt_max:-?})"
     
     # Determine subregion (PyTom format: " x_start,y_start,z_start,x_dim,y_dim,z_dim ")
     # First 3 numbers = starting coordinates (x,y,z)
