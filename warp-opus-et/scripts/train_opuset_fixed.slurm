@@ -39,6 +39,13 @@ STAR_FILE="${WORK_DIR}/warp_tiltseries/${TM_LABEL}_matching_subset${FIXED_SUBSET
 POSE_PKL=""                                      # Pose pickle; auto-generated if empty
 OUTPUT_DIR="${WORK_DIR}/opuset/${TM_LABEL}/fixed_subset${FIXED_SUBSET_LABEL}"
 
+# CRITICAL: OPUS-ET computes the CTF at --angpix, so it MUST be the SUBTOMOGRAM pixel
+# size (OUTPUT_ANGPIX = the exported subtomos' rlnDetectorPixelSize), NOT the raw
+# tilt-series ANGPIX from pipeline.conf. A wrong pixel size mis-scales every CTF zero
+# and corrupts the reconstruction. Use OUTPUT_ANGPIX; if unset, fall through to the
+# STAR auto-detect below (rlnDetectorPixelSize) — never the raw tilt-series value.
+ANGPIX="${OUTPUT_ANGPIX:-}"
+
 echo "Configuration:"
 echo "  Star file:     ${STAR_FILE}"
 echo "  Pose pkl:      ${POSE_PKL}"
@@ -155,11 +162,14 @@ if [ ! -f "${POSE_PKL}" ]; then
     echo "Pose pickle not found: ${POSE_PKL}"
     echo ""
     echo "Generating pose pickle automatically..."
-    echo "Command: dsd parse_pose_star ${STAR_FILE} -D ${TEMPLATERES} --Apix ${ANGPIX} -o ${POSE_PKL}"
+    echo "Command: dsd parse_pose_star ${STAR_FILE} -D ${SUBTOMO_BOX_SIZE} --Apix ${ANGPIX} -o ${POSE_PKL}"
     echo ""
-    
+
+    # -D is the SUBTOMOGRAM box (= lattice D-1, the box OPUS-ET's PoseTracker scales pose
+    # translations by), NOT TEMPLATERES (the decoder output size). Harmless for template-
+    # matching input (zero initial translations -> 0/D) but wrong for any non-zero shifts.
     if ! dsd parse_pose_star "${STAR_FILE}" \
-    -D "${TEMPLATERES}" \
+    -D "${SUBTOMO_BOX_SIZE}" \
     --Apix "${ANGPIX}" \
     -o "${POSE_PKL}" || [ ! -f "${POSE_PKL}" ]; then
         echo "ERROR: Failed to generate pose pickle: ${POSE_PKL}"
@@ -184,7 +194,11 @@ if [ ! -f "${TRAINING_MASK_MRC}" ]; then
     fi
 
     echo "Training mask not found; creating default spherical mask."
-    SAMPLE_SUBTOMO=$(find "${DATADIR}" -name "${SUBTOMO_GLOB}" -type f -print -quit 2>/dev/null)
+    # Exclude 3D CTF volumes (*_ctf_*, half-Fourier -> non-cubic D×D×D/2+1) and the
+    # *_average* map; only a real-space particle subtomogram is a valid mask template.
+    # (A CTF volume yields a non-cubic mask -> cryodrgn aborts with "Images must be cubic".)
+    SAMPLE_SUBTOMO=$(find "${DATADIR}" -name "${SUBTOMO_GLOB}" -type f \
+        ! -name "*_ctf_*" ! -name "*_average*" -print -quit 2>/dev/null)
 
     if [ -z "${SAMPLE_SUBTOMO}" ]; then
         echo "ERROR: Could not find an exported subtomogram under: ${DATADIR}"
