@@ -70,10 +70,17 @@ if [ -f "$TRAINING_MASK_MRC" ]; then
     exit 0
 fi
 
-# Use an exported subtomogram as the header source so the mask matches
-# training dimensions (OUTPUT_ANGPIX × SUBTOMO_BOX_SIZE).
+# Use an exported REAL-SPACE particle subtomogram as the header source so the
+# mask matches training dimensions (OUTPUT_ANGPIX × SUBTOMO_BOX_SIZE). The
+# subtomo dir also holds per-particle 3D CTF volumes (*_ctf_*.mrc) and an
+# *_average*.mrc; CTF volumes are half-Fourier and therefore NON-CUBIC (e.g.
+# 104x104x53 = D x D x D/2+1). If the glob picks one as the reference the mask
+# ends up non-cubic and cryodrgn aborts at load with "Images must be cubic",
+# and the sphere-mode radius (derived from the reference's min dimension) would
+# be wrong -- so exclude *_ctf_* and *_average* below.
 MASK_REFERENCE=""
-MASK_REFERENCE=$(find "$DATADIR" -name "$SUBTOMO_GLOB" -type f -print -quit 2>/dev/null)
+MASK_REFERENCE=$(find "$DATADIR" -name "$SUBTOMO_GLOB" -type f \
+    ! -name "*_ctf_*" ! -name "*_average*" -print -quit 2>/dev/null)
 
 if [ -z "$MASK_REFERENCE" ]; then
     echo "ERROR: No subtomograms found under DATADIR=$DATADIR (glob: $SUBTOMO_GLOB)"
