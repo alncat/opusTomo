@@ -415,11 +415,13 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         #l2_diff = l2_diff + y_recon2
         y_recon2 = losses["y_recon2"]
         l2_diff = losses["ycorr"] + y_recon2
+        resid = (l2_diff + losses["y2"]).detach()               # complete ‖image-ref‖² for weighting + temperature
         #print(l2_diff)
         #print(y_recon.shape, y.shape, mask_sum.shape, l2_diff)
-        var = torch.maximum(l2_diff.std(dim=-1)*0.5, torch.tensor([W*0.125]).to(l2_diff.get_device())).unsqueeze(-1)
+        #scale_mu = min(1.02**args.epoch*0.5, 1.0)
+        var = torch.maximum(resid.std(dim=-1)*0.5, torch.tensor([W*0.125]).to(l2_diff.get_device())).unsqueeze(-1)
         #var = W*0.125
-        probs = F.softmax(-l2_diff.detach()/var, dim=-1).detach()
+        probs = F.softmax(-resid/var, dim=-1).detach()
         #print(probs)
         #get argmax
         #inds = torch.argmax(probs, dim=-1, keepdim=True)
