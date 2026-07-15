@@ -206,17 +206,19 @@ OPUS-ET provides a ```--float16``` option, which converts input subtomograms to 
 To train OPUS-ET using distributed data parallel in pytorch, you can use the command,
 
 ```
-torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --poses ribotm_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.5e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o . -r ../zribotmt/mask.mrc --split deep.pkl --lamb 0.5 --bfactor 3.75 --valfrac 0.1 --templateres 128 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --estpose
+torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --poses ribotm_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.5e-5 --beta-control 0.5 -o . -r ../zribotmt/mask.mrc --split /work/deep.pkl --lamb 0.5 --bfactor 3.75 --valfrac 0.1 --templateres 128 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --estpose
 ```
 
 which invokes 4 processes on a 4gpu cluster, and might achieve faster training speed compared with data parallel.
+
+The number of GPUs is set by ```--nproc_per_node``` alone. Unlike ```dsd train_tomo```, this script does not use ```--num-gpus``` or ```--multigpu```; both are accepted but ignored. ```--split``` is required and should be an absolute path, since a relative one is resolved against the current directory. Each rank spawns ```--num-workers``` dataloader workers (16 by default), so the total worker count is ```--num-workers``` times ```--nproc_per_node``` — lower it if you run out of memory.
 
 The ```--encode-mode``` argument controls how latent codes are produced. ```grad``` (default) uses the encoder to produce per-particle latents and backpropagates through the encoder. ```fixed``` uses a single fixed latent code shared across particles and trains only the decoder.
 
 Example for fixed mode training:
 
 ```
-torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist pre18.star --poses pre18_pose_euler.pkl -n 120 -b 4 --zdim 12 --lr 3.e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o . -r ../zribo_test/mask.mrc --split deep_splt.pkl --lamb 0.5 --bfactor 4. --valfrac 0. --templateres 160 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/warp_DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --warp --ctfalpha 0 --ctfbeta 1 --encode-mode fixed --checkpoint 10
+torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist pre18.star --poses pre18_pose_euler.pkl -n 120 -b 4 --zdim 12 --lr 3.e-5 --beta-control 0.5 -o . -r ../zribo_test/mask.mrc --split /work/deep_splt.pkl --lamb 0.5 --bfactor 4. --valfrac 0. --templateres 160 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/warp_DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --warp --ctfalpha 0 --ctfbeta 1 --encode-mode fixed --checkpoint 10
 ```
 
 If you have installed horovod according to tutorial https://github.com/alncat/opusTomo/wiki/horovod-installation, you can train OPUS-ET using
@@ -285,7 +287,7 @@ dsd train_tomo /work/ribo.star --poses ./ribo_pose_euler.pkl -n 40 -b 12 --zdim 
 ,
 
 ```
-torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --poses ribotm_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.5e-5 --num-gpus 4 --multigpu --beta-control 0.5 -o . -r ../zribotmt/mask.mrc --split deep.pkl --lamb 0.5 --bfactor 4. --valfrac 0.1 --templateres 128 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --estpose --load weights.9.pkl --latents z.9.pkl
+torchrun --nproc_per_node=4 -m cryodrgn.commands.train_tomo_dist ribotm.star --poses ribotm_pose_euler.pkl -n 40 -b 12 --zdim 12 --lr 4.5e-5 --beta-control 0.5 -o . -r ../zribotmt/mask.mrc --split /work/deep.pkl --lamb 0.5 --bfactor 4. --valfrac 0.1 --templateres 128 --tmp-prefix tmp --datadir /work/jpma/luo/tomo/DEF/metadata/warp_tiltseries/ --angpix 3.37 --downfrac 1. --warp --tilt-range 50 --tilt-step 2 --ctfalpha 0. --ctfbeta 1. --estpose --load weights.9.pkl --latents z.9.pkl
 ```
 
 or
