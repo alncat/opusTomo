@@ -51,7 +51,8 @@ def add_args(parser):
     parser.add_argument('--group-stat', metavar='pkl', type=os.path.abspath, help='group statistics (.pkl)')
     parser.add_argument('--load', metavar='WEIGHTS.PKL', help='Initialize training from a checkpoint')
     parser.add_argument('--latents', type=os.path.abspath, help='Image latent encodings (.pkl)')
-    parser.add_argument('--split', metavar='pkl', help='Initialize training from a split checkpoint')
+    parser.add_argument('--split', metavar='pkl', type=os.path.abspath, required=True,
+                        help='Filename for storing the train-validation split, created if it does not exist')
     parser.add_argument('--valfrac', type=float, default=0.2, help='the fraction of images held for validation')
     parser.add_argument('--checkpoint', type=int, default=1, help='Checkpointing interval in N_EPOCHS (default: %(default)s)')
     parser.add_argument('--log-interval', type=int, default=1000, help='Logging interval in N_IMGS (default: %(default)s)')
@@ -68,6 +69,7 @@ def add_args(parser):
     group.add_argument('--lazy-single', default=True, action='store_true', help='Lazy loading if full dataset is too large to fit in memory')
     group.add_argument('--preprocessed', action='store_true', help='Skip preprocessing steps if input data is from cryodrgn preprocess_mrcs')
     group.add_argument('--max-threads', type=int, default=16, help='Maximum number of CPU cores for FFT parallelization (default: %(default)s)')
+    group.add_argument('--num-workers', type=int, default=16, help='Number of dataloader workers per rank; total across ranks is this times --nproc_per_node (default: %(default)s)')
 
     group = parser.add_argument_group('Tilt series')
     group.add_argument('--warp', default=False, action='store_true', help='using subtomograms from warp')
@@ -96,9 +98,9 @@ def add_args(parser):
     group.add_argument('--beta-control', default=0.5, type=float, help='restraint strength for KL target. (default: %(default)s)')
     group.add_argument('--norm', type=float, nargs=2, default=None, help='Data normalization as shift, 1/scale (default: 0, std of dataset)')
     group.add_argument('--tmp-prefix', type=str, default='tmp', help='prefix for naming intermediate reconstructions')
-    group.add_argument('--amp', action='store_true', help='Use mixed-precision training')
-    group.add_argument('--multigpu', action='store_true', help='Parallelize training across all detected GPUs')
-    group.add_argument('--num-gpus', type=int, default=4, help='number of gpus used for training')
+    group.add_argument('--amp', action='store_true', help='Use mixed-precision training (not supported by this script)')
+    group.add_argument('--multigpu', action='store_true', help='No-op: this script always uses DDP, one rank per GPU (accepted for compatibility)')
+    group.add_argument('--num-gpus', type=int, default=4, help='No-op: GPU count comes from torchrun --nproc_per_node (accepted for compatibility)')
     parser.add_argument('--write-ctf', default=False, action='store_true', help='save CTF as mrc')
     group = parser.add_argument_group('Pose SGD')
     group.add_argument('--do-pose-sgd', action='store_true', help='Refine poses with gradient descent')
@@ -125,7 +127,7 @@ def add_args(parser):
     group.add_argument('--dec-layers', dest='players', type=int, default=3, help='Number of hidden layers (default: %(default)s)')
     group.add_argument('--dec-dim', dest='pdim', type=int, default=256, help='Number of nodes in hidden layers (default: %(default)s)')
     group.add_argument('--pe-type', choices=('geom_ft','geom_full','geom_lowf','geom_nohighf','linear_lowf','none', 'vanilla'), default='vanilla', help='Type of positional encoding (default: %(default)s)')
-    group.add_argument('--template-type', choices=('conv'), default='conv', help='Type of template decoding method (default: %(default)s)')
+    group.add_argument('--template-type', choices=('conv',), default='conv', help='Type of template decoding method (default: %(default)s)')
     group.add_argument('--warp-type', choices=('blurmix', 'diffeo', 'deform'), help='Type of warp decoding method (default: %(default)s)')
     #group.add_argument('--symm', help='Type of symmetry of the 3D volume (default: %(default)s)')
     group.add_argument('--num-struct', type=int, default=1, help='Num of structures (default: %(default)s)')
@@ -168,7 +170,7 @@ def train_batch(model, lattice, y, yt, rot, trans, optim, beta,
                                         group_stat=group_stat, ind=ind, mask_sum=mask_sum,
                                         losses=losses, args=args, it=it, zs=z,
                                         mus=mus, neg_mus=neg_mus, y_recon_ori=y_recon_ori, euler_samples=euler_samples,
-                                        snr2=snr2, body_poses=body_poses, body_poses_pred=None)
+                                        snr2=snr2, body_poses=body_poses, body_poses_pred=None, rank=rank)
 
     #if top_euler is not None and not update_params:
     #    posetracker.set_euler(top_euler, ind)
@@ -245,7 +247,7 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
     #random_b = torch.randn_like(c[..., 0, -2])/3.
     #c[...,-2] = c[...,-2] + (args.bfactor+random_b.unsqueeze(-1))*(4*np.pi**2)
 
-    plot = args.plot and it % (args.log_interval) == B
+    plot = args.plot and it % (args.log_interval) == B and rank == 0
     if plot:
         f, axes = plt.subplots(2, 3)
     # decode
@@ -298,19 +300,24 @@ def run_batch(model, lattice, y, yt, rot, tilt=None, ind=None, ctf_params=None,
                                       ref_fft=y, ctf_param=c, encout=encout, mask=mask_real, body_poses=body_poses,
                                       ctf_grid=ctf_grid, estpose=args.estpose, ctf_filename=ctf_filename,
                                       write_ctf=args.write_ctf, bfactor=np.abs(args.bfactor), snr2=snr2)
-        z_local = encout["z_mu"]
-        z_global = [torch.zeros_like(z_local) for i in range(world_size)]
-        dist.all_gather(z_global, z_local)
-        z_global = torch.cat(z_global, dim=0)
-        ind_gpu = ind.to(z_local.get_device())
-        ind_global = [torch.zeros_like(ind_gpu) for i in range(world_size)]
-        dist.all_gather(ind_global, ind_gpu)
-        ind_global = torch.cat(ind_global, dim=0).cpu()
+        # gather the per-rank updates the posetracker needs. Both conditions below depend only
+        # on args/model config, so every rank agrees on which collectives run.
+        set_emb = args.encode_mode in ["grad"]
+        set_pose = decout["affine"] is not None
 
-        if args.encode_mode in ["grad"]:
-            posetracker.set_emb(z_global, ind_global)
+        if set_emb or set_pose:
+            ind_gpu = ind.to(rot.device)
+            ind_global = [torch.zeros_like(ind_gpu) for i in range(world_size)]
+            dist.all_gather(ind_global, ind_gpu)
+            ind_global = torch.cat(ind_global, dim=0).cpu()
 
-        if decout["affine"] is not None:
+        if set_emb:
+            z_local = encout["z_mu"].detach()
+            z_global = [torch.zeros_like(z_local) for i in range(world_size)]
+            dist.all_gather(z_global, z_local)
+            posetracker.set_emb(torch.cat(z_global, dim=0), ind_global)
+
+        if set_pose:
             rot_local = decout["affine"][0].detach()
             trans_local = decout["affine"][1].detach()
             rot_global = [torch.zeros_like(rot_local) for i in range(world_size)]
@@ -398,7 +405,7 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
                   group_stat=None, ind=None, mask_sum=None, losses=None,
                   args=None, it=None, y_ffts=None, zs=None, mus=None,
                   neg_mus=None, y_recon_ori=None, euler_samples=None, snr2=None,
-                  body_poses=None, body_poses_pred=None):
+                  body_poses=None, body_poses_pred=None, rank=0):
     # reconstruction error
     B = len(z_mu)
     C = losses["y_recon2"].size(1)
@@ -415,11 +422,13 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         #l2_diff = l2_diff + y_recon2
         y_recon2 = losses["y_recon2"]
         l2_diff = losses["ycorr"] + y_recon2
+        resid = (l2_diff + losses["y2"]).detach()               # complete ‖image-ref‖² for weighting + temperature
         #print(l2_diff)
         #print(y_recon.shape, y.shape, mask_sum.shape, l2_diff)
-        var = torch.maximum(l2_diff.std(dim=-1)*0.5, torch.tensor([W*0.125]).to(l2_diff.get_device())).unsqueeze(-1)
+        #scale_mu = min(1.02**args.epoch*0.5, 1.0)
+        var = torch.maximum(resid.std(dim=-1)*0.5, torch.tensor([W*0.125]).to(l2_diff.get_device())).unsqueeze(-1)
         #var = W*0.125
-        probs = F.softmax(-l2_diff.detach()/var, dim=-1).detach()
+        probs = F.softmax(-resid/var, dim=-1).detach()
         #print(probs)
         #get argmax
         #inds = torch.argmax(probs, dim=-1, keepdim=True)
@@ -452,9 +461,8 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
         em_l2_loss = em_l2_loss.mean() #(alpha*x)^2 sigma2
         #print(em_l2_loss)
     else:
-        em_l2_loss = (-2.*y_recon*y + y_recon**2).sum(dim=(-1,-2,-3))
-        #print(em_l2_loss.shape, mask_sum.shape)
-        em_l2_loss = torch.mean(em_l2_loss/mask_sum)#/(B*C)
+        # this branch never defined snr/y2, which are needed below and by the caller
+        raise NotImplementedError("loss_function requires more than one euler sample per particle, got C=1")
 
     gen_loss = em_l2_loss
     assert torch.isnan(gen_loss).item() is False
@@ -529,7 +537,7 @@ def loss_function(z_mu, z_logstd, y, y_recon, beta,
     #loss = loss/(1 + lamb*beta)
     #print(mmd)
 
-    if it % (args.log_interval) == B and args.plot:
+    if it % (args.log_interval) == B and args.plot and rank == 0:
         #group_stat.plot_variance(ind[0])
         log(f"mask_sum {mask_sum.detach().cpu()}, lamb {lamb}")
         torch.set_printoptions(precision=3, sci_mode=False, linewidth=120)
@@ -655,14 +663,18 @@ def get_latest(args):
 
 def setup_distributed():
     # torchrun usually passes these
+    local_rank = int(os.environ["LOCAL_RANK"])
+    # bind this process to its GPU before NCCL initializes, otherwise the process
+    # group may pick the wrong device
+    torch.cuda.set_device(local_rank)
     dist.init_process_group(backend="nccl")
     rank = dist.get_rank()
     world_size = dist.get_world_size()
-    local_rank = int(os.environ["LOCAL_RANK"])
     return rank, world_size, local_rank
 
 def cleanup_distributed():
-    dist.destroy_process_group()
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
 def main(args):
     t1 = dt.now()
@@ -679,7 +691,6 @@ def main(args):
     torch.manual_seed(args.seed)
 
     rank, world_size, local_rank = setup_distributed()
-    torch.cuda.set_device(local_rank)
     device = torch.device("cuda", local_rank)
 
     if rank == 0:
@@ -691,7 +702,8 @@ def main(args):
 
     # load index filter
     if args.ind is not None:
-        flog('Filtering image dataset with {}'.format(args.ind))
+        if rank == 0:
+            flog('Filtering image dataset with {}'.format(args.ind))
         ind = pickle.load(open(args.ind,'rb'))
     else: ind = None
 
@@ -734,13 +746,6 @@ def main(args):
 
     if args.encode_mode == 'conv':
         assert D-1 == 64, "Image size must be 64x64 for convolutional encoder"
-    # parallelize
-    if args.multigpu and torch.cuda.device_count() > 1:
-        if args.num_gpus is not None:
-            num_gpus = min(args.num_gpus, torch.cuda.device_count())
-        else:
-            num_gpus = torch.cuda.device_count()
-        #args.batch_size *= num_gpus
 
     # load poses
     #if args.do_pose_sgd: assert args.domain == 'hartley', "Need to use --domain hartley if doing pose SGD"
@@ -852,7 +857,8 @@ def main(args):
         model_parameters = list(model.decoder.parameters())
         #broadcast fixed encoding
         dist.broadcast(getattr(model.encoder, 'encoding1'), src=0)
-        log(f'reset fixed encoding to {model.encoder.encoding1}')
+        if rank == 0:
+            log(f'reset fixed encoding to {model.encoder.encoding1}')
     else:
         model_parameters = list(model.encoder.parameters()) + list(model.decoder.parameters()) #+ list(group_stat.parameters())
     pose_encoder = None
@@ -873,25 +879,18 @@ def main(args):
 
     # Mixed precision training with AMP
     if args.amp:
-        assert args.batch_size % 8 == 0, "Batch size must be divisible by 8 for AMP training"
-        assert (D-1) % 8 == 0, "Image size must be divisible by 8 for AMP training"
-        assert args.pdim % 8 == 0, "Decoder hidden layer dimension must be divisible by 8 for AMP training"
-        assert args.qdim % 8 == 0, "Encoder hidden layer dimension must be divisible by 8 for AMP training"
-        # Also check zdim, enc_mask dim? Add them as warnings for now.
-        if args.zdim % 8 != 0:
-            log('Warning: z dimension is not a multiple of 8 -- AMP training speedup is not optimized')
-        if in_dim % 8 != 0:
-            log('Warning: Masked input image dimension is not a mutiple of 8 -- AMP training speedup is not optimized')
-        model, optim = amp.initialize(model, optim, opt_level='O1')
+        raise NotImplementedError("--amp is not supported by train_tomo_dist: the apex/torch.cuda.amp "
+                                  "integration was never ported to distributed training")
 
     # parallelize
     if args.encode_mode != "fixed":
-        model.encoder = DDP(model.encoder, device_ids=[rank])
-    model.decoder = DDP(model.decoder, device_ids=[rank])
+        model.encoder = DDP(model.encoder, device_ids=[local_rank])
+    model.decoder = DDP(model.decoder, device_ids=[local_rank])
 
     # restart from checkpoint
     if args.load:
-        flog('Loading checkpoint from {} and mapping to {}'.format(args.load, local_rank))
+        if rank == 0:
+            flog('Loading checkpoint from {} and mapping to {}'.format(args.load, local_rank))
         map_location = {"cuda:0": f"cuda:{local_rank}"}
         checkpoint = torch.load(args.load, map_location=map_location)
         if rank == 0:
@@ -939,19 +938,6 @@ def main(args):
     else:
         start_epoch = 0
 
-    if args.multigpu and torch.cuda.device_count() > 1:
-        if args.num_gpus is not None:
-            num_gpus = min(args.num_gpus, torch.cuda.device_count())
-        else:
-            num_gpus = torch.cuda.device_count()
-        device_ids = [x for x in range(num_gpus)]
-        if rank == 0:
-            log(f'Found {num_gpus} GPUs!')
-        #model.encoder = nn.DataParallel(model.encoder, device_ids=device_ids)
-        #model.decoder = nn.DataParallel(model.decoder, device_ids=device_ids)
-    elif args.multigpu:
-        log(f'WARNING: --multigpu selected, but {torch.cuda.device_count()} GPUs detected')
-
     # create classwise sampler
     if not os.path.exists(args.split):
         rand_split = torch.randperm(Nimg, dtype=torch.int64, device=device)
@@ -974,8 +960,8 @@ def main(args):
     if rank == 0:
         log(f"Nimg_train: {Nimg_train} {len(train_split)}")
 
-    data_generator = DataLoader(data, batch_sampler=train_sampler, pin_memory=True, num_workers=16)#, persistent_workers=True)
-    val_data_generator = DataLoader(data, batch_sampler=val_sampler, pin_memory=True, num_workers=16)#, persistent_workers=True)
+    data_generator = DataLoader(data, batch_sampler=train_sampler, pin_memory=True, num_workers=args.num_workers)#, persistent_workers=True)
+    val_data_generator = DataLoader(data, batch_sampler=val_sampler, pin_memory=True, num_workers=args.num_workers)#, persistent_workers=True)
 
     #assert args.downfrac*(D-1) >= 128
     if rank == 0:
@@ -1017,10 +1003,12 @@ def main(args):
         args.bfactor = bfactor*(1. + 0.05/(1. + 3.*math.exp(-0.1*epoch)))
         beta_max    = 1. #0.98 ** (epoch)
         args.epoch = epoch
-        log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
-                        lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
+        if rank == 0:
+            log('learning rate {}, bfactor: {}, beta_max: {}, beta_control: {} for epoch {}'.format(
+                            lr_scheduler.get_last_lr(), args.bfactor, beta_max, beta_control, epoch))
 
-        loop = tqdm(enumerate(data_generator), total=len(data_generator), leave=True, colour='green', file=sys.stdout)
+        loop = tqdm(enumerate(data_generator), total=len(data_generator), leave=True, colour='green',
+                    file=sys.stdout, disable=(rank != 0))
         optim.zero_grad()
         for batch_idx, minibatch in loop:
         #for minibatch in data_generator:
@@ -1104,7 +1092,7 @@ def main(args):
             mmd_var_ema = ema_mu*(mmd_var_ema + (1-ema_mu)*delta**2)
             delta         = c_mmd - c_mmd_ema
             c_mmd_ema += (1-ema_mu)*delta
-            c_mmd_var_ema = ema_mu*(mmd_var_ema + (1-ema_mu)*delta**2)
+            c_mmd_var_ema = ema_mu*(c_mmd_var_ema + (1-ema_mu)*delta**2)
 
             gen_loss_accum += gen_loss*B
             snr_accum += snr*B
@@ -1122,7 +1110,7 @@ def main(args):
             #                                        mse_ema, np.sqrt(mse_var_ema), mmd_ema, np.sqrt(mmd_var_ema), c_mmd_ema, np.sqrt(c_mmd_var_ema)))
             loop.set_description(f'Train Epoch: [{epoch+1}/{num_epochs}]')
             loop.set_postfix(beta=beta, loss=loss, snr=snr, mu=np.sqrt(mu2), std=np.sqrt(std2),)
-            if batch_it % args.log_interval == 0:
+            if batch_it % args.log_interval == 0 and rank == 0:
                 tqdm.write("Additional info at {}, l1={:.5f}, tv={:.5f}, snr={:.4f}, mse={:.4f}, gen_loss={:.5f}".format(
                                         batch_it, l1_loss, tv_loss, snr_ema, mse_ema, gen_loss_ema), file=sys.stdout)
 
@@ -1135,7 +1123,7 @@ def main(args):
                 posetracker.save(out_pose)
         loss_statistics = torch.tensor([gen_loss_accum, snr_accum, loss_accum], device=device)
         dist.all_reduce(loss_statistics)
-        if epoch % world_size == rank:
+        if rank == 0:
             flog('# =====> Epoch: {} Average training gen_loss = {:.6}, SNR2 = {:.6f}, '\
              'total loss = {:.6f}; Finished in {}'.format(epoch+1,
                                                          loss_statistics[0].item()/Nimg_train,
@@ -1143,7 +1131,8 @@ def main(args):
 
         # validation
         gen_loss_accum, snr_accum, loss_accum = 0, 0, 0
-        loop = tqdm(enumerate(val_data_generator), total=len(val_data_generator), leave=True, file=sys.stdout)
+        loop = tqdm(enumerate(val_data_generator), total=len(val_data_generator), leave=True,
+                    file=sys.stdout, disable=(rank != 0))
         for batch_idx, minibatch in loop:
         #for minibatch in val_data_generator:
             ind = minibatch[-1]
@@ -1186,7 +1175,7 @@ def main(args):
 
         loss_statistics = torch.tensor([gen_loss_accum, snr_accum, loss_accum], device=device)
         dist.all_reduce(loss_statistics)
-        if epoch % world_size == rank:
+        if rank == 0:
             flog('# =====> Epoch: {} Average validation gen_loss = {:.6}, SNR2 = {:.6f}, '\
              'total loss = {:.6f}; Finished in {}'.format(epoch+1,
                                                          loss_statistics[0].item()/(Nimg_test+1),
@@ -1225,11 +1214,19 @@ def main(args):
     #    out_pose = '{}/pose.pkl'.format(args.outdir)
     #    posetracker.save(out_pose)
     td = dt.now()-t1
-    flog('Finsihed in {} ({} per epoch)'.format(td, td/(num_epochs-start_epoch)))
-    cleanup_distributed()
+    if rank == 0:
+        num_epochs_run = num_epochs - start_epoch
+        if num_epochs_run > 0:
+            flog('Finsihed in {} ({} per epoch)'.format(td, td/num_epochs_run))
+        else:
+            flog('Finsihed in {} (no epoch to run: start epoch {} >= num epochs {})'.format(td, start_epoch, num_epochs))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     args = add_args(parser).parse_args()
     utils._verbose = args.verbose
-    main(args)
+    try:
+        main(args)
+    finally:
+        # without this a crash on one rank leaves the others blocked until the NCCL timeout
+        cleanup_distributed()
