@@ -33,9 +33,9 @@ def add_args(parser):
     parser.add_argument('-o','--outdir', help='Output directory for analysis results (default: [workdir]/analyze.[epoch])')
     parser.add_argument('--skip-vol', action='store_true', help='Skip generation of volumes')
     parser.add_argument('--skip-umap', action='store_true', help='Skip running UMAP')
-    parser.add_argument('--vanilla', action='store_true', help='Skip running UMAP')
-    parser.add_argument('--D', type=int, help='Skip running UMAP')
-    parser.add_argument('--pose', help='directory for analysis results (default: [workdir]/analyze.[epoch])')
+    parser.add_argument('--vanilla', action='store_true', help='Load an OPUS-ET (real-space) result: read z from z.N.pkl and poses from --pose, rather than a cryoDRGN z.pkl')
+    parser.add_argument('--D', type=int, help='Box size of the images (pixels), used to load the pose tracker')
+    parser.add_argument('--pose', help='Pose pickle (pose.N.pkl) to load particle groups from (used with --vanilla)')
 
     group = parser.add_argument_group('Extra arguments for volume generation')
     group.add_argument('--Apix', type=float, default=1, help='Pixel size to add to .mrc header (default: %(default)s A/pix)')
@@ -43,8 +43,8 @@ def add_args(parser):
     group.add_argument('-d','--downsample', type=int, help='Downsample volumes to this box size (pixels)')
     group.add_argument('--pc', type=int, default=2, help='Number of principal component traversals to generate (default: %(default)s)')
     group.add_argument('--ksample', type=int, default=20, help='Number of kmeans samples to generate (default: %(default)s)')
-    group.add_argument('--kpc', type=str, default=None, help='Perform PCA within the kpc cluster (default: %(default)s)')
-    group.add_argument('--joint', action='store_true', help='Concat conformation latent codes to composition')
+    group.add_argument('--kpc', type=str, default=None, help='Re-cluster a subset of an existing KMeans run, as K:classes (e.g. 20:2-5,8): K is the cluster count of the previous analyze, classes selects clusters (x-y is an inclusive range) (default: %(default)s)')
+    group.add_argument('--joint', action='store_true', help='Also write centers_joint.txt: composition centers with the matching conformation (multi_mu) latents concatenated (needs a multi-body result)')
     return parser
 
 def analyze_z1(z, outdir, vg):
@@ -69,6 +69,9 @@ def analyze_z1(z, outdir, vg):
 
 def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=20, joint=False, multi_z=None):
     zdim = z.shape[1]
+    if joint and multi_z is None:
+        raise ValueError("joint=True needs multi_z: centers_joint is built by concatenating the "
+                         "conformation latents onto the composition centers")
 
     # Principal component analysis
     print(z[:4, :])
@@ -78,7 +81,7 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     print(pc[:4, :])
     log('Generating volumes...')
     for i in range(num_pcs):
-        start, end = np.percentile(pc[:,i],(1,99))
+        start, end = np.percentile(pc[:,i],(1.0,99.0))
         log(f'traversing pc {i} from {start} to {end}')
         z_pc = analysis.get_pc_traj(pca, z.shape[1], 10, i+1, start, end)
         if not os.path.exists(f'{outdir}/pc{i+1}'):
@@ -313,6 +316,9 @@ def main(args):
             multi_z = load_z["multi_mu"].cpu().numpy()
         else:
             multi_z = None
+        if args.joint and multi_z is None:
+            raise ValueError(f"--joint needs conformation latents, but {zfile} has no 'multi_mu'. "
+                             "It predates multi-body support; re-run analyze without --joint.")
     else:
         z = utils.load_pkl(zfile)
     zdim = z.shape[1]
@@ -330,9 +336,18 @@ def main(args):
             umap_file = f'{outdir}/umap.pkl'
             if os.path.exists(umap_file):
                 umap_emb = utils.load_pkl(umap_file)
+            elif zdim <= 2:
+                raise FileNotFoundError(
+                    f"--kpc needs a UMAP embedding at {umap_file}, but analyze only writes one when "
+                    f"zdim > 2 (here zdim={zdim}). Re-run this epoch with zdim > 2, or drop --kpc.")
             else:
-                raise FileNotFoundError(f"UMAP pickle not found: {umap_file}")
+                raise FileNotFoundError(
+                    f"--kpc needs a UMAP embedding at {umap_file}, which is missing. Run a plain "
+                    f"`analyze {E}` (without --kpc) first to produce it.")
             # kmeans clustering
+            if ':' not in args.kpc:
+                raise ValueError(f"--kpc must be K:classes, e.g. 20:2-5,8 -- the part before ':' is the "
+                                 f"number of clusters of the previous analysis (got {args.kpc!r})")
             K = args.kpc.split(':')[0]
             log(f'select K-means clustering for class {args.kpc} in {K}...')
 
@@ -380,6 +395,11 @@ def main(args):
             K = args.ksample
             kmeans_labels_filtered, centers = analysis.cluster_kmeans(z_k, args.ksample)
             _, centers_ind = analysis.get_nearest_point(z_k, centers)
+            #centers_ind indexes z_k, i.e. the selected subset. Keep it that way for multi_z
+            #and umap_emb, which are filtered the same way, but map it back to the original
+            #particle stack for centers_ind.txt -- that file is documented as particle indices,
+            #and labels.pkl below is written in the original numbering too.
+            centers_ind_orig = selected_ptcl_inds[centers_ind]
             #recover the original labels
             kmeans_labels[:] = args.ksample
             for i_k in range(args.ksample):
@@ -394,9 +414,30 @@ def main(args):
             utils.save_pkl(kmeans_labels, f'{outdir}/kmeans{K}/labels.pkl')
             utils.save_pkl(centers, f'{outdir}/kmeans{K}/centers.pkl')
             np.savetxt(f'{outdir}/kmeans{K}/centers.txt', centers)
-            np.savetxt(f'{outdir}/kmeans{K}/centers_ind.txt', centers_ind, fmt='%d')
+            np.savetxt(f'{outdir}/kmeans{K}/centers_ind.txt', centers_ind_orig, fmt='%d')
             if args.joint:
                 np.savetxt(f'{outdir}/kmeans{K}/centers_joint.txt', centers_joint)
+            # export the kpc-selected particles so they can be re-trained on their own:
+            #  - ind.filter.{E}.pkl: pass as --ind alongside the ORIGINAL star and pose; training
+            #    applies this same index filter to the stack, poses and ctf consistently. Preferred.
+            #  - pose.filter.{E}.pkl: a standalone subset pose tuple (re-indexed 0..M-1) matching a
+            #    stack filtered by the same indices, for callers that want a self-contained pose.
+            # selected_ptcl_inds is ascending, so both stay aligned with an ascending stack filter.
+            utils.save_pkl(selected_ptcl_inds, f'{outdir}/ind.filter.{E}.pkl')
+            log(f'saved {len(selected_ptcl_inds)} selected particle indices to {outdir}/ind.filter.{E}.pkl '
+                f'(re-train with the original star and pose plus --ind this file)')
+            if args.pose is not None and os.path.isfile(args.pose):
+                sub_poses = pickle.load(open(args.pose, 'rb'))
+                if not isinstance(sub_poses, tuple):
+                    sub_poses = (sub_poses,)
+                npose = len(sub_poses[0])
+                if npose != len(kmeans_labels):
+                    log(f'WARNING: pose {args.pose} has {npose} entries but the analysis has '
+                        f'{len(kmeans_labels)} particles; skipping subset pose (would be misaligned)')
+                else:
+                    sub_poses = tuple(np.asarray(p)[selected_ptcl_inds] for p in sub_poses)
+                    pickle.dump(sub_poses, open(f'{outdir}/pose.filter.{E}.pkl', 'wb'))
+                    log(f'saved subset pose ({len(selected_ptcl_inds)} particles) to {outdir}/pose.filter.{E}.pkl')
             xmax = np.max(umap_emb[:, 0])
             xmin = np.min(umap_emb[:, 0])
             ymax = np.max(umap_emb[:, 1])
