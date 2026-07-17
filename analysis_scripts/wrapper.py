@@ -7,8 +7,9 @@ class eval_vol:
     def add_args(cls, parser):
         parser.add_argument('resdir', type=os.path.abspath, help='result directory')
         parser.add_argument('N', type=str, help='epoch number')
-        parser.add_argument('method', choices=('kmeans','pc', 'dpc', 'joint'), default='kmeans', help='choosing an analysis method (default: %(default)s), \
-                            dpc is used to reconstruct multi-body dynamics')
+        parser.add_argument('method', choices=('kmeans','pc', 'dpc', 'joint'), default='kmeans', help='which latent codes to reconstruct (default: %(default)s): '
+                            'kmeans=KMeans cluster centers, pc=a PC traversal, joint=KMeans centers with concatenated conformation codes (centers_joint.txt), '
+                            'dpc=multi-body deformation dynamics along a PC')
         parser.add_argument('num', type=int, help='the number of KMeans clusters or PCs for reconstruction')
         parser.add_argument('apix', type=float, help='desired apix of the output volume')
         parser.add_argument('--num-bodies', default=0, type=int, required=False, help='the number of bodies defined in training (default: %(default)s)')
@@ -38,8 +39,8 @@ class analyze:
         parser.add_argument('numpc', type=int, help='number of PCs')
         parser.add_argument('numk', type=int, help='number of KMeans clusters')
         parser.add_argument('--skip-umap', action='store_true', required=False, help='instead of learn a umap embedding, loading one from umap.pkl (default: %(default)s)')
-        parser.add_argument('--kpc', type=str, required=False, help='perform PCA on classes selected in kpc (default: %(default)s)')
-        parser.add_argument('--joint', action='store_true', required=False, help='saving composition latent code together with conformation latent code (default: %(default)s)')
+        parser.add_argument('--kpc', type=str, required=False, help='re-cluster a subset of a previous KMeans run, as K:classes, e.g. 20:2-5,8 (K is the previous cluster count; x-y is an inclusive class range) (default: %(default)s)')
+        parser.add_argument('--joint', action='store_true', required=False, help='also write centers_joint.txt: composition centers with the matching conformation latents concatenated (default: %(default)s)')
     @classmethod
     def main(cls, args):
         script_path = os.path.join(os.path.dirname(__file__), 'analyze.sh')
