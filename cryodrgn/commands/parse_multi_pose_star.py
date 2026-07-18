@@ -36,10 +36,13 @@ def center_of_mass(volume):
     matrix = -centered.unsqueeze(-1) * centered.unsqueeze(-2)
     radius_sum = torch.eye(3) * (radius.sum(dim=-1, keepdim=True).unsqueeze(-1))
     matrix = ((-matrix)*vol.unsqueeze(-1)).sum(dim=(0, 1, 2))
-    eigvals, eigvecs = np.linalg.eig(matrix.numpy())
-    indices = np.argsort(eigvals)
+    # matrix is the (symmetric) second-moment / inertia tensor -> use eigh:
+    # guarantees real eigenvalues and an orthonormal eigenbasis (eig can return
+    # complex dtype and non-orthogonal vectors for near-degenerate/spherical bodies).
+    eigvals, eigvecs = np.linalg.eigh(matrix.numpy())
+    indices = np.argsort(eigvals)  # ascending; eigh is already sorted, kept for safety
     #print(matrix, eigvals[indices])
-    eigvecs = torch.from_numpy(eigvecs[:, indices].T) # eigvecs[0] is the first eigen vector with largest eigenvalues
+    eigvecs = torch.from_numpy(eigvecs[:, indices].T) # eigvecs[0] is the eigenvector with the smallest eigenvalue
     r = np.sqrt(eigvals[indices]/mass)
     print("r0 vs r: ", r0, r)
 
@@ -55,6 +58,7 @@ def add_args(parser):
     parser.add_argument('--masks', metavar='PKL', type=os.path.abspath, required=False, help='masks for multi-body')
     parser.add_argument('--volumes', metavar='PKL', type=os.path.abspath, required=False, help='Output label.pkl')
     parser.add_argument('--bodies', type=int, required=True, help='Number of bodies')
+    parser.add_argument('--origin-rel', type=int, default=1, help='0-based index of the anchor/origin body used for orientation alignment (default: %(default)s)')
     parser.add_argument('--outmasks', default="mask_params", help="the name of pkl file storing masks related parameters")
     parser.add_argument('--outdir', type=os.path.abspath)
     return parser
@@ -114,7 +118,7 @@ def main(args):
             log('Euler angles (Rot, Tilt, Psi):')
             log(euler_body[0])
             body_eulers.append(euler_body)
-            trans_body = np.empty((N,1,3))
+            trans_body = np.zeros((N,1,3))
             body_header = s.multibody_headers[b_i]
             if '_rlnOriginX' in body_header and '_rlnOriginY' in body_header:
                 trans_body[:,0,0] = body['_rlnOriginX']
@@ -254,7 +258,7 @@ def main(args):
     relats = []
     print("in_relatives: ", in_relatives)
     #print("com_bodies: ", com_bodies - vol_coms, "radii_bodies: ", radii_bodies)
-    origin_rel = 1 #np.bincount(in_relatives).argmax()
+    origin_rel = args.origin_rel #np.bincount(in_relatives).argmax()
     print("origin_rel:", origin_rel)
     for b_i in range(len(s_mask.df)):
         rotate_directions.append(com_bodies[in_relatives[b_i]] - com_bodies[b_i])
