@@ -6,6 +6,7 @@ import argparse
 import numpy as np
 import sys, os
 import pickle
+import json
 import shutil
 import healpy as hp
 import inspect
@@ -67,6 +68,19 @@ def analyze_z1(z, outdir, vg):
     ztraj = np.linspace(*np.percentile(z,(5,95)), 10) # or np.percentile(z, np.linspace(5,95,10)) ?
     vg.gen_volumes(outdir, ztraj)
 
+def save_pca(outdir, pc, pca):
+    '''Deposit the PCA projection and fitted model so downstream custom analysis
+    (arbitrary-PC particle selection, custom traversals, seeing which latent dims
+    drive each PC) needs no re-fitting -- run_pca otherwise discards both.
+      pc.pkl   : (N, zdim) projection of z onto the principal components
+      pca.pkl  : fitted sklearn PCA (components_, mean_, explained_variance_ratio_);
+                 drop-in for get_pc_traj / pca.transform / pca.inverse_transform
+      explained_variance_ratio.txt : human-readable per-PC variance share'''
+    os.makedirs(outdir, exist_ok=True)
+    utils.save_pkl(pc, f'{outdir}/pc.pkl')
+    utils.save_pkl(pca, f'{outdir}/pca.pkl')
+    np.savetxt(f'{outdir}/explained_variance_ratio.txt', pca.explained_variance_ratio_)
+
 def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=20, joint=False, multi_z=None):
     zdim = z.shape[1]
     if joint and multi_z is None:
@@ -78,6 +92,7 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     log('Perfoming principal component analysis...')
     pc, pca = analysis.run_pca(z)
     log(f'PCA transformed data shape {pc.shape}')
+    save_pca(outdir, pc, pca)
     print(pc[:4, :])
     log('Generating volumes...')
     for i in range(num_pcs):
@@ -279,6 +294,10 @@ def main(args):
     if not os.path.exists(outdir):
         os.mkdir(outdir)
 
+    # defined for all branches so the run manifest (and the non-vanilla path) stay robust;
+    # the vanilla branch below reassigns both from the loaded latents / pose tracker.
+    multi_z = None
+    groups = None
 
     if args.vanilla:
         if os.path.isfile(f"{workdir}/run.log"):
@@ -381,6 +400,7 @@ def main(args):
             log(f'Perfoming principal component analysis for class {args.kpc}...')
             pc, pca = analysis.run_pca(z_k)
             outdir = f'{workdir}/analyze.filter.{E}'
+            save_pca(outdir, pc, pca)
             for i in range(args.pc):
                 start, end = np.percentile(pc[:,i],(1,99))
                 log(f'traversing pc {i} from {start} to {end}')
@@ -455,6 +475,34 @@ def main(args):
             if not os.path.exists(outdir_multi):
                 os.mkdir(outdir_multi)
             analyze_zN(multi_z, outdir_multi, vg, groups, skip_umap=args.skip_umap, num_pcs=min(args.pc, multi_z.shape[1]), num_ksamples=args.ksample)
+
+    # run manifest -- makes the output dir self-describing so downstream custom
+    # analysis knows which latents/pose/config produced it without re-deriving.
+    manifest = {
+        'timestamp': dt.now().isoformat(),
+        'cryodrgn_version': cryodrgn.__version__,
+        'epoch': E,
+        'workdir': workdir,
+        'zfile': zfile,
+        'weights': weights,
+        'config': config,
+        'pose': poses,
+        'outdir': outdir,
+        'vanilla': bool(args.vanilla),
+        'zdim': int(zdim),
+        'num_particles': int(z.shape[0]),
+        'has_multi_z': multi_z is not None,
+        'multi_zdim': int(multi_z.shape[1]) if multi_z is not None else None,
+        'num_pcs': args.pc,
+        'num_ksamples': args.ksample,
+        'kpc': args.kpc,
+        'joint': bool(args.joint),
+        'Apix': args.Apix,
+        'downsample': args.downsample,
+    }
+    with open(f'{outdir}/analyze_config.json', 'w') as f:
+        json.dump(manifest, f, indent=2)
+    log(f'wrote run manifest to {outdir}/analyze_config.json')
 
     # copy over template if file doesn't exist
     out_ipynb = f'{outdir}/cryoDRGN_viz.ipynb'
