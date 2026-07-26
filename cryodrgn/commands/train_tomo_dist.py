@@ -1017,13 +1017,6 @@ def main(args):
             y = minibatch[0][0].to(device, non_blocking=True)
             ctf_param = minibatch[0][1].float().to(device, non_blocking=True)
             ctf_filename = minibatch[0][2]
-            #apixs = torch.ones(ctf_param.shape[:-1]).to(device)*args.angpix
-            #ctf_param = torch.cat([apixs.unsqueeze(-1), ctf_param], dim=-1)
-            # compute ctf!
-            freqs = ctf_grid.freqs2d.unsqueeze(0)/args.angpix #(1, (-x+1, x)*x, 2)
-            #res = torch.split(ctf_param, 1, -1)
-            #print(res, res[0].shape)
-            #ctf3d = ctf.compute_3dctf(y, ctf_grid.centered_freqs, freqs, *torch.split(ctf_param, 1, -1))#.view(B,D-1,-1) #(B, )
             yt = None
             B = len(ind)
             batch_it += B
