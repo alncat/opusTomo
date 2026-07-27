@@ -105,7 +105,9 @@ def main(args):
     lattice = Lattice(D, extent=0.5)
     downfrac = cfg['dataset_args']['downfrac']
     crop_vol_size = cfg['model_args']['down_vol_size']
-    Apix = cfg['model_args']['Apix']
+    # float() guards old configs that stored Apix as a (possibly CUDA) tensor; fov/render_apix
+    # and the mrc header below all need a plain python float.
+    Apix = float(cfg['model_args']['Apix'])
     templateres = cfg['model_args']['templateres']
     #args.Apix = down_vol_size/((D - 1)*downfrac*0.85)*Apix
     window_r = crop_vol_size/(int((D-1)*downfrac)//2*2)
