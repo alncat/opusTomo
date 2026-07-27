@@ -109,6 +109,11 @@ def main(args):
     templateres = cfg['model_args']['templateres']
     #args.Apix = down_vol_size/((D - 1)*downfrac*0.85)*Apix
     window_r = crop_vol_size/(int((D-1)*downfrac)//2*2)
+    # Physical field of view (A) is conserved through the Fourier resample + crop. Capture
+    # it before downfrac is mutated below, so the mrc header can carry the TRUE voxel spacing
+    # (fov/render_size) instead of the nominal --Apix. That absorbs the even-box rounding of
+    # render_size and keeps box*apix == physical size exactly.
+    fov = (D - 1) * Apix * downfrac
     downfrac *= Apix/args.Apix
 
     # load masks
@@ -151,6 +156,13 @@ def main(args):
                 num_bodies=args.num_bodies, z_affine_dim=z_affine_dim)
 
     vanilla = args.pe_type == "vanilla"
+
+    # true voxel spacing of the rendered (vanilla) volume = fov / render_size. Cropping to
+    # down_vol_size does not change the spacing, so this is exact regardless of the even-box
+    # rounding in render_size. The vanilla save calls below write this to the mrc header.
+    render_apix = fov / model.render_size
+    log("output: vanilla volumes will write true voxel apix {:.4f} to headers "
+        "(render_size={}, target --Apix={})".format(render_apix, model.render_size, args.Apix))
 
     if args.load:
         log('Loading checkpoint from {}'.format(args.load))
@@ -247,7 +259,7 @@ def main(args):
                 #null_z = torch.zeros(zdim).to(device)
                 zz = torch.cat([template_z, zz], dim=-1)
             if vanilla:
-                model.save_mrc(f'{args.o}/{args.prefix}'+str(i), enc=zz, Apix=args.Apix, flip=args.flip)
+                model.save_mrc(f'{args.o}/{args.prefix}'+str(i), enc=zz, Apix=render_apix, flip=args.flip)
             else:
                 if args.downsample:
                     extent = lattice.extent * (args.downsample/(D-1))
@@ -266,7 +278,7 @@ def main(args):
         z = torch.randn(1, args.zdim).to(device)
         log(z)
         if vanilla:
-            model.save_mrc(args.prefix, enc=z)
+            model.save_mrc(args.prefix, enc=z, Apix=render_apix)
             return
         if args.downsample:
             extent = lattice.extent * (args.downsample/(D-1))
