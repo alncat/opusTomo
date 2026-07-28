@@ -280,7 +280,7 @@ def main(args):
         z = torch.randn(1, args.zdim).to(device)
         log(z)
         if vanilla:
-            model.save_mrc(args.prefix, enc=z, Apix=render_apix)
+            model.save_mrc(args.prefix, enc=z, Apix=render_apix, flip=args.flip)
             return
         if args.downsample:
             extent = lattice.extent * (args.downsample/(D-1))
