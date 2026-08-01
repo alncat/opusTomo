@@ -2,9 +2,8 @@
 Evaluate the decoder at specified values of z
 '''
 import numpy as np
-import sys, os
+import os
 import argparse
-import pickle
 from datetime import datetime as dt
 import pprint
 
@@ -13,8 +12,6 @@ import torch.nn as nn
 
 from cryodrgn import mrc
 from cryodrgn import utils
-from cryodrgn import fft
-from cryodrgn import lie_tools
 from cryodrgn import config
 from cryodrgn.lattice import Lattice
 from cryodrgn.models import HetOnlyVAE
@@ -228,6 +225,19 @@ def main(args):
     ### Multiple z ###
     if args.z_start or args.zfile:
 
+        # --deform prepends a fixed template latent to every z below, so load it here for ALL
+        # z sources. It used to be loaded only on the --zfile + vanilla path, which left
+        # template_z undefined (NameError) for --z-start or non-vanilla runs.
+        template_z = None
+        if args.deform:
+            assert args.template_z is not None, "--deform requires --template-z"
+            assert args.template_z_ind is not None, "--deform requires --template-z-ind"
+            template_z = np.loadtxt(args.template_z)
+            len_template = template_z.shape[0]
+            assert args.template_z_ind < len_template, f"template-z-ind {args.template_z_ind} must be smaller than {len_template}"
+            template_z = torch.tensor(template_z[args.template_z_ind, :]).float().to(device)
+            log(template_z)
+
         ### Get z values
         if args.z_start:
             args.z_start = np.array(args.z_start)
@@ -238,15 +248,7 @@ def main(args):
         else:
             if vanilla:
                 #z = utils.load_pkl(args.zfile)
-                if not args.deform:
-                    z = np.loadtxt(args.zfile)
-                else:
-                    template_z = np.loadtxt(args.template_z)
-                    len_template = template_z.shape[0]
-                    assert args.template_z_ind < len_template, f"template-z-ind {args.template_z_ind} must be smaller than {len_template}"
-                    template_z = torch.tensor(template_z[args.template_z_ind, :]).float().to(device)
-                    log(template_z)
-                    z = np.loadtxt(args.zfile)
+                z = np.loadtxt(args.zfile)
                 z = torch.tensor(z).float().to(device)
             else:
                 z = np.loadtxt(args.zfile).reshape(-1, zdim)
@@ -259,6 +261,8 @@ def main(args):
             log(zz)
             if args.deform:
                 #null_z = torch.zeros(zdim).to(device)
+                if not torch.is_tensor(zz):  # --z-start yields numpy rows
+                    zz = torch.tensor(zz).float().to(device)
                 zz = torch.cat([template_z, zz], dim=-1)
             if vanilla:
                 model.save_mrc(f'{args.o}/{args.prefix}'+str(i), enc=zz, Apix=render_apix, flip=args.flip)

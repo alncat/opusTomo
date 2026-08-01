@@ -322,7 +322,9 @@ def main(args):
         log("loading {}, z shape {}".format(zfile, z.shape))
         Nimg = z.shape[0]
         zdim = z.shape[1]
-        if os.path.isfile(args.pose):
+        # args.pose may be None (it is optional): guard before os.path.isfile, which raises an
+        # opaque TypeError on None. Same guard style as the --kpc subset export below.
+        if args.pose is not None and os.path.isfile(args.pose):
             posetracker = PoseTracker.load(poses, Nimg, args.D, None, None,
                                        deform=True, deform_emb_size=zdim, latents=zfile, batch_size=4)# hp_order=2)
             groups = posetracker.euler_groups
@@ -330,6 +332,11 @@ def main(args):
             log("loading {}".format(poses))
         else:
             groups = None
+            if args.pose is None:
+                log('WARNING: no --pose given; UMAP plots will not be colored by tilt/euler group '
+                    'and groups.pkl will not be written')
+            else:
+                log(f'WARNING: pose file {args.pose} not found; continuing without particle groups')
         # loading z codes for deformation too
         if "multi_mu" in load_z:
             multi_z = load_z["multi_mu"].cpu().numpy()

@@ -60,7 +60,7 @@ def add_args(parser):
     parser.add_argument('--bodies', type=int, required=True, help='Number of bodies')
     parser.add_argument('--origin-rel', type=int, default=1, help='0-based index of the anchor/origin body used for orientation alignment (default: %(default)s)')
     parser.add_argument('--outmasks', default="mask_params", help="the name of pkl file storing masks related parameters")
-    parser.add_argument('--outdir', type=os.path.abspath)
+    parser.add_argument('--outdir', type=os.path.abspath, help='Directory to write the mask-params pkl into (default: the directory of --masks)')
     return parser
 
 def main(args):
@@ -124,6 +124,7 @@ def main(args):
                 trans_body[:,0,0] = body['_rlnOriginX']
                 trans_body[:,0,1] = body['_rlnOriginY']
             elif '_rlnOriginXAngst' in body_header and '_rlnOriginYAngst' in body_header:
+                assert args.Apix is not None, "Must provide --Apix argument to convert _rlnOriginXAngst and _rlnOriginYAngst translation units"
                 trans_body[:,0,0] = body['_rlnOriginXAngst']
                 trans_body[:,0,1] = body['_rlnOriginYAngst']
                 trans_body /= args.Apix
@@ -290,7 +291,12 @@ def main(args):
     #print("relats: ", relats)
     print("rotate_directions: ", rotate_directions_ori)
     print("orient_bodies: ", orient_bodies)
-    output_name = prefix + f"/{args.outmasks}.pkl"
+    # --outdir was previously accepted and silently ignored; honor it, falling back to the
+    # mask starfile's directory as before.
+    out_prefix = args.outdir if args.outdir else prefix
+    if args.outdir and not os.path.exists(args.outdir):
+        os.makedirs(args.outdir)
+    output_name = out_prefix + f"/{args.outmasks}.pkl"
     log(f'Writing {output_name}')
     if not args.volumes:
         print("principal_axes: ", axes)
