@@ -57,6 +57,7 @@ def add_args(parser):
     parser.add_argument('--labels', metavar='PKL', type=os.path.abspath, required=False, help='Output label.pkl')
     parser.add_argument('--masks', metavar='PKL', type=os.path.abspath, required=True, help='masks for multi-body')
     parser.add_argument('--volumes', metavar='PKL', type=os.path.abspath, required=False, help='Output label.pkl')
+    parser.add_argument('--num-volumes', type=int, default=10, help='Number of referenceN.mrc volumes to read from --volumes (default: %(default)s)')
     parser.add_argument('--bodies', type=int, required=True, help='Number of bodies')
     parser.add_argument('--origin-rel', type=int, default=1, help='0-based index of the anchor/origin body used for orientation alignment (default: %(default)s)')
     parser.add_argument('--outmasks', default="mask_params", help="the name of pkl file storing masks related parameters")
@@ -184,9 +185,14 @@ def main(args):
     rot_radii = None
     if args.volumes:
         #read in dynamics volumes
+        assert args.num_volumes >= 2, \
+            f"--num-volumes must be at least 2 (the first and last volume define the motion), got {args.num_volumes}"
         vols = []
-        for b_i in range(10):
+        scale = 1.0  # overwritten on the first volume below; kept for a defined default
+        for b_i in range(args.num_volumes):
             mask_name = args.volumes + "/reference" + str(b_i) + ".mrc"
+            assert os.path.isfile(mask_name), \
+                f"missing volume {mask_name} (expected {args.num_volumes} referenceN.mrc files; set --num-volumes)"
             print(mask_name)
             ref_vol = dataset.VolData(mask_name)
             vols.append(ref_vol.get())
@@ -195,6 +201,9 @@ def main(args):
                 scale = masks.shape[-1]/vols[-1].shape[-1]
                 masks = F.interpolate(masks.unsqueeze(0), vols[-1].shape, mode='trilinear').squeeze()
                 print(masks.sum(dim=(1,2,3)))
+        # the "consensus" frame used for coms/principal axes: middle of the series.
+        # (len-1)//2 reproduces the previously hardcoded index 4 for the default 10 volumes.
+        mid_vol = (len(vols) - 1)//2
 
         c0s = []
         c1s = []
@@ -210,7 +219,7 @@ def main(args):
             c0s.append(c0)
             c1s.append(c1)
             #print(c0, c1)
-            vol_com, _, p_axes = center_of_mass(vols[4]*masks[m_i])
+            vol_com, _, p_axes = center_of_mass(vols[mid_vol]*masks[m_i])
             vol_coms.append(vol_com*scale)
             principal_axes.append(p_axes)
 

@@ -105,12 +105,19 @@ class PoseTracker(nn.Module):
             if rank == 0:
                 print(self.ns, self.valid_poses)
 
+            # multi_mu is always allocated (sample_neighbors concatenates it unconditionally) but
+            # it is only ever *trained* on a multi-body run -- see set_emb. Track that, so
+            # save_emb does not persist a purely random multi_mu for non-multi-body runs, which
+            # downstream (analyze) would otherwise mistake for real conformation latents.
+            self.multi_mu_trained = False
             if latents is not None:
                 #self.mu = latents
                 self.mu = latents["mu"]
                 self.nearest_poses = latents["nn"]
                 if "multi_mu" in latents:
                     self.multi_mu = latents["multi_mu"]
+                    # came from a run that trained it (save_emb only writes it in that case)
+                    self.multi_mu_trained = True
                 else:
                     self.multi_mu = torch.randn(rots.shape[0], affine_dim)#None
             else:
@@ -307,11 +314,18 @@ class PoseTracker(nn.Module):
         if encodings.shape[-1] > self.deform_emb_size:
             self.mu[ind] = self.mu[ind]*mu + (1-mu)*encodings[:, :self.deform_emb_size].detach().cpu()
             self.multi_mu[ind] = self.multi_mu[ind]*mu + (1-mu)*encodings[:, self.deform_emb_size:].detach().cpu()
+            self.multi_mu_trained = True
         else:
             self.mu[ind] = self.mu[ind]*mu + (1-mu)*encodings.detach().cpu()
 
     def save_emb(self, filename):
-        torch.save({"mu": self.mu, "nn": self.nearest_poses, "multi_mu": self.multi_mu}, filename)
+        # Only persist multi_mu when it carries trained conformation latents. On a
+        # non-multi-body run it is still the random init from __init__, and writing it made
+        # analyze treat the noise as real (bogus defanalyze.N, bogus --joint centers).
+        emb = {"mu": self.mu, "nn": self.nearest_poses}
+        if self.multi_mu_trained:
+            emb["multi_mu"] = self.multi_mu
+        torch.save(emb, filename)
 
     @classmethod
     def load(cls, infile, Nimg, D, emb_type=None, ind=None, deform=False, deform_emb_size=2,

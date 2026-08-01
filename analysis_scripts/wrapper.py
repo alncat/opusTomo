@@ -339,6 +339,7 @@ class prepare_multi:
         parser.add_argument('masks', type=os.path.abspath, help='starfile storing mask definitions for multi-body refinement')
         parser.add_argument('numb', type=int, help='the number of bodies defined for multi-body refinement')
         parser.add_argument('--volumes', type=os.path.abspath, help='the path to the volume series generated from PCA for defining rotation axes')
+        parser.add_argument('--num-volumes', type=int, default=10, help='number of referenceN.mrc volumes in --volumes (default: %(default)s)')
         parser.add_argument('--relion31', action='store_true', help='whether the input starfile is of version 3.1')
         parser.add_argument('--outmasks', default='mask_params', help='the name of pkl file storing masks related parameters, \
                             you should omit the filetype name .pkl, (default: %(default)s)')
@@ -348,13 +349,9 @@ class prepare_multi:
     def main(cls, args):
         script_path = os.path.join(os.path.dirname(__file__), 'prepare_multi.sh')
         origin_rel = '--origin-rel ' + str(args.origin_rel)
+        # --num-volumes only means anything alongside --volumes
+        volumes = ('--volumes ' + args.volumes + ' --num-volumes ' + str(args.num_volumes)) if args.volumes else ''
         if args.relion31:
-            if args.volumes:
-                subprocess.call(['bash', script_path, args.starfile, str(args.D), str(args.apix), args.masks, str(args.numb), '--volumes ' + args.volumes, '--outmasks ' + args.outmasks, '--relion31', origin_rel])
-            else:
-                subprocess.call(['bash', script_path, args.starfile, str(args.D), str(args.apix), args.masks, str(args.numb), '', '--outmasks ' + args.outmasks, '--relion31', origin_rel])
+            subprocess.call(['bash', script_path, args.starfile, str(args.D), str(args.apix), args.masks, str(args.numb), volumes, '--outmasks ' + args.outmasks, '--relion31', origin_rel])
         else:
-            if args.volumes:
-                subprocess.call(['bash', script_path, args.starfile, str(args.D), str(args.apix), args.masks, str(args.numb), '--volumes ' + args.volumes, '--outmasks ' + args.outmasks, origin_rel])
-            else:
-                subprocess.call(['bash', script_path, args.starfile, str(args.D), str(args.apix), args.masks, str(args.numb), '--outmasks ' + args.outmasks, origin_rel])
+            subprocess.call(['bash', script_path, args.starfile, str(args.D), str(args.apix), args.masks, str(args.numb), volumes, '--outmasks ' + args.outmasks, origin_rel])
