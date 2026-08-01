@@ -23,6 +23,7 @@ def main():
     import cryodrgn.commands.eval_vol
     import cryodrgn.commands.eval_images
     import cryodrgn.commands.analyze
+    import cryodrgn.commands.analyze_dynamics
     import cryodrgn.commands.pc_traversal
     import cryodrgn.commands.graph_traversal
     import cryodrgn.commands.view_config
@@ -45,6 +46,7 @@ def main():
         cryodrgn.commands.prepare_subtomos,
         #cryodrgn.commands.eval_images,
         cryodrgn.commands.analyze,
+        cryodrgn.commands.analyze_dynamics,
         cryodrgn.commands.pc_traversal,
         cryodrgn.commands.graph_traversal,
         cryodrgn.commands.view_config,
