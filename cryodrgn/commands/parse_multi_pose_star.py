@@ -208,6 +208,7 @@ def main(args):
         c0s = []
         c1s = []
         vol_coms = []
+        vol_radii = []
         principal_axes = []
         for m_i in range(masks.shape[0]):
             c0, r0, p0 = center_of_mass(vols[0]*masks[m_i])
@@ -219,22 +220,48 @@ def main(args):
             c0s.append(c0)
             c1s.append(c1)
             #print(c0, c1)
-            vol_com, _, p_axes = center_of_mass(vols[mid_vol]*masks[m_i])
+            # radii and principal axes must come from the SAME center_of_mass call: models.py
+            # pairs radius[k] with principal_axes[k] in the anisotropic Gaussian body mask, and
+            # each call sorts its own eigenvalues. Taking radii from the mask loop (as before)
+            # while taking axes from the volume mismatched that pairing.
+            vol_com, vol_r, p_axes = center_of_mass(vols[mid_vol]*masks[m_i])
             vol_coms.append(vol_com*scale)
+            vol_radii.append(torch.as_tensor(vol_r).float()*scale)  # to mask-grid units, like the coms
             principal_axes.append(p_axes)
 
         rot_axes = []
         orientations = []
         rot_radii = []
-        origin_rel = np.bincount(in_relatives).argmax()
+        # honor --origin-rel here too; the default (non-volumes) path already does. The old
+        # auto-guess is still reported so a mismatch is visible.
+        auto_origin_rel = np.bincount(in_relatives).argmax()
+        origin_rel = args.origin_rel
+        print(f"origin_rel: {origin_rel} (--origin-rel; most common parent body would be {auto_origin_rel})")
         for m_i in range(masks.shape[0]):
             r0 = com_bodies[in_relatives[m_i]] - c0s[m_i]
             r1 = com_bodies[in_relatives[m_i]] - c1s[m_i]
             rot_axis = torch.cross(r0, r1, dim=-1)
+            # |r0 x r1| = |r0||r1| sin(theta): if the body's com barely moves relative to its
+            # parent (no motion, motion straight along the lever arm, or a spin about the body's
+            # own com -- which this method cannot see at all), the axis is undefined and
+            # normalizing it yields a non-orthonormal frame (det -> 0). Warn and fall back to an
+            # arbitrary axis perpendicular to the lever arm so the frame stays well-formed.
+            sin_theta = float(rot_axis.norm()/(r0.norm()*r1.norm()).clamp(min=1e-12))
+            if sin_theta < 1e-3:
+                log(f"WARNING: body {m_i} shows no resolvable rotation about body {in_relatives[m_i]} "
+                    f"(sin(angle)={sin_theta:.2e}); its rotation axis is undefined. Using an arbitrary "
+                    f"perpendicular axis -- check the volume series, or that this body is not simply "
+                    f"spinning about its own centre of mass (undetectable from centre-of-mass motion).")
+                probe = torch.tensor([1., 0., 0.]) if abs(float(F.normalize(r0, dim=0)[0])) < 0.9 else torch.tensor([0., 1., 0.])
+                rot_axis = torch.cross(r0, probe, dim=-1)
             rot_axis = F.normalize(rot_axis, dim=0)
             r0 = F.normalize(r0, dim=0)
             rot_axes.append(rot_axis)
-            r1 = torch.cross(r0, rot_axis, dim=-1)
+            # right-handed frame: rows map lever arm -> x, rot_axis -> z. Note the cross order:
+            # cross(rot_axis, r0) gives det=+1, whereas cross(r0, rot_axis) gives det=-1 (a
+            # reflection), which would flip the chirality of every learned body rotation and
+            # disagree with the default path's align_with_z (det=+1).
+            r1 = torch.cross(rot_axis, r0, dim=-1)
             r1 = F.normalize(r1, dim=0)
             mat = torch.stack([r0, r1, rot_axis], dim=0)
             orientations.append(mat)
@@ -251,6 +278,7 @@ def main(args):
         vols = torch.stack(vols, dim=0)
         rot_radii = torch.stack(rot_radii, dim=0)
         vol_coms = torch.stack(vol_coms, dim=0)
+        vol_radii = torch.stack(vol_radii, dim=0)
         principal_axes = torch.stack(principal_axes, dim=0)
         print("translate orientations: ", orientations)#, principal_axes)
 
@@ -315,7 +343,9 @@ def main(args):
     #            #"weights": weights, "consensus_mask": consensus_mask},
                output_name)
     else:
-        torch.save({"in_relatives": relats, "com_bodies": vol_coms, "radii_bodies": radii_bodies,
+        # radii and principal_axes both volume-derived so they stay index-paired (see models.py's
+        # exp(-0.2*sum(x_k^2/radius_k^2)) body mask); previously radii came from the mask instead.
+        torch.save({"in_relatives": relats, "com_bodies": vol_coms, "radii_bodies": vol_radii,
                 "orient_bodies": orientations, "rotate_directions": rot_radii, "principal_axes": principal_axes},  \
                 #"weights": weights, "consensus_mask": consensus_mask},
                output_name)
