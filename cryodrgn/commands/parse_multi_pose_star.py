@@ -9,44 +9,15 @@ from cryodrgn import utils
 from cryodrgn import lie_tools
 from cryodrgn import starfile
 from cryodrgn import dataset
+from cryodrgn import dynamics
 import torch.nn.functional as F
 import torch
 
 log = utils.log
 
-def center_of_mass(volume):
-    N = volume.shape[-1]
-    x_idx = torch.linspace(0, N-1, N) - N/2 #[-s, s)
-    grid = torch.meshgrid(x_idx, x_idx, x_idx, indexing='ij')
-    xgrid = grid[2]
-    ygrid = grid[1]
-    zgrid = grid[0]
-    grid = torch.stack([xgrid, ygrid, zgrid], dim=-1)
-    vol = ((volume > 0).float()*volume).unsqueeze(-1)
-    mass = vol.sum()
-    center = vol*grid
-    center = center.sum(dim=(0,1,2))
-    assert mass.item() > 0
-    center /= mass
-    #center = torch.where(center > 0, (center + 0.5).int(), (center - 0.5).int()).float()
-    centered = (grid - center)
-    radius = (centered).pow(2)*vol
-    r0 = torch.sqrt(radius.sum(dim=(0,1,2))/mass)
-    #principal axes
-    matrix = -centered.unsqueeze(-1) * centered.unsqueeze(-2)
-    radius_sum = torch.eye(3) * (radius.sum(dim=-1, keepdim=True).unsqueeze(-1))
-    matrix = ((-matrix)*vol.unsqueeze(-1)).sum(dim=(0, 1, 2))
-    # matrix is the (symmetric) second-moment / inertia tensor -> use eigh:
-    # guarantees real eigenvalues and an orthonormal eigenbasis (eig can return
-    # complex dtype and non-orthogonal vectors for near-degenerate/spherical bodies).
-    eigvals, eigvecs = np.linalg.eigh(matrix.numpy())
-    indices = np.argsort(eigvals)  # ascending; eigh is already sorted, kept for safety
-    #print(matrix, eigvals[indices])
-    eigvecs = torch.from_numpy(eigvecs[:, indices].T) # eigvecs[0] is the eigenvector with the smallest eigenvalue
-    r = np.sqrt(eigvals[indices]/mass)
-    print("r0 vs r: ", r0, r)
-
-    return center, r, eigvecs
+# the geometry lives in cryodrgn.dynamics so that this command and the
+# analyze_dynamics command derive axes with the same code
+center_of_mass = dynamics.center_of_mass
 
 def add_args(parser):
     parser.add_argument('input', help='RELION .star file')
@@ -205,28 +176,24 @@ def main(args):
         # (len-1)//2 reproduces the previously hardcoded index 4 for the default 10 volumes.
         mid_vol = (len(vols) - 1)//2
 
-        c0s = []
-        c1s = []
+        trajs = []
         vol_coms = []
         vol_radii = []
         principal_axes = []
         for m_i in range(masks.shape[0]):
-            c0, r0, p0 = center_of_mass(vols[0]*masks[m_i])
-            c1, r1, p1 = center_of_mass(vols[-1]*masks[m_i])
-            c0 *= scale
-            c1 *= scale
-            print(r0*scale, r1*scale)
-            print(p1@p0.T)
-            c0s.append(c0)
-            c1s.append(c1)
-            #print(c0, c1)
+            # the whole trajectory, not just the endpoints: the axis is fitted from every frame
+            traj = dynamics.com_trajectory(vols, masks[m_i], scale=scale)
+            trajs.append(traj)
+            st = dynamics.trajectory_stats(traj)
+            log("body {}: com moves {:.2f} px net over a {:.2f} px path (coherence {:.2f})".format(
+                m_i, st["displacement"], st["path_length"], st["coherence"]))
             # radii and principal axes must come from the SAME center_of_mass call: models.py
             # pairs radius[k] with principal_axes[k] in the anisotropic Gaussian body mask, and
             # each call sorts its own eigenvalues. Taking radii from the mask loop (as before)
             # while taking axes from the volume mismatched that pairing.
             vol_com, vol_r, p_axes = center_of_mass(vols[mid_vol]*masks[m_i])
             vol_coms.append(vol_com*scale)
-            vol_radii.append(torch.as_tensor(vol_r).float()*scale)  # to mask-grid units, like the coms
+            vol_radii.append(vol_r*scale)  # to mask-grid units, like the coms
             principal_axes.append(p_axes)
 
         rot_axes = []
@@ -238,33 +205,28 @@ def main(args):
         origin_rel = args.origin_rel
         print(f"origin_rel: {origin_rel} (--origin-rel; most common parent body would be {auto_origin_rel})")
         for m_i in range(masks.shape[0]):
-            r0 = com_bodies[in_relatives[m_i]] - c0s[m_i]
-            r1 = com_bodies[in_relatives[m_i]] - c1s[m_i]
-            rot_axis = torch.cross(r0, r1, dim=-1)
-            # |r0 x r1| = |r0||r1| sin(theta): if the body's com barely moves relative to its
-            # parent (no motion, motion straight along the lever arm, or a spin about the body's
-            # own com -- which this method cannot see at all), the axis is undefined and
-            # normalizing it yields a non-orthonormal frame (det -> 0). Warn and fall back to an
-            # arbitrary axis perpendicular to the lever arm so the frame stays well-formed.
-            sin_theta = float(rot_axis.norm()/(r0.norm()*r1.norm()).clamp(min=1e-12))
-            if sin_theta < 1e-3:
-                log(f"WARNING: body {m_i} shows no resolvable rotation about body {in_relatives[m_i]} "
-                    f"(sin(angle)={sin_theta:.2e}); its rotation axis is undefined. Using an arbitrary "
-                    f"perpendicular axis -- check the volume series, or that this body is not simply "
-                    f"spinning about its own centre of mass (undetectable from centre-of-mass motion).")
-                probe = torch.tensor([1., 0., 0.]) if abs(float(F.normalize(r0, dim=0)[0])) < 0.9 else torch.tensor([0., 1., 0.])
-                rot_axis = torch.cross(r0, probe, dim=-1)
-            rot_axis = F.normalize(rot_axis, dim=0)
-            r0 = F.normalize(r0, dim=0)
+            pivot = com_bodies[in_relatives[m_i]]
+            # Fit the axis to the whole trajectory (plane fit) rather than crossing the first and
+            # last lever arms, which uses two frames and is noise-dominated for small motions.
+            fit = dynamics.fit_rotation_axis(trajs[m_i], pivot=pivot)
+            rot_axis = fit["axis"]
+            log("body {}: axis {} | swept {:+.2f} deg | dispersion {:.1f} deg | "
+                "out-of-plane {:.2f} px | lever {:.1f} px".format(
+                    m_i, [round(float(x), 3) for x in rot_axis], fit["swept_angle"],
+                    fit["dispersion"], fit["out_of_plane"], fit["lever"]))
+            if not fit["well_defined"]:
+                log("WARNING: body {} has no reliable rotation axis about body {} "
+                    "(swept {:.2f} deg, dispersion {:.1f} deg across frame pairs). The motion is "
+                    "too small or too incoherent to define an axis; note a body spinning about "
+                    "its own centre of mass is invisible to this method entirely. Check the "
+                    "volume series -- `dsd analyze_dynamics` ranks them.".format(
+                        m_i, in_relatives[m_i], fit["swept_angle"], fit["dispersion"]))
+            lever = F.normalize(pivot - trajs[m_i][0], dim=0)
             rot_axes.append(rot_axis)
-            # right-handed frame: rows map lever arm -> x, rot_axis -> z. Note the cross order:
-            # cross(rot_axis, r0) gives det=+1, whereas cross(r0, rot_axis) gives det=-1 (a
-            # reflection), which would flip the chirality of every learned body rotation and
-            # disagree with the default path's align_with_z (det=+1).
-            r1 = torch.cross(rot_axis, r0, dim=-1)
-            r1 = F.normalize(r1, dim=0)
-            mat = torch.stack([r0, r1, rot_axis], dim=0)
-            orientations.append(mat)
+            # right-handed frame (det=+1) mapping the lever arm to x and the axis to z; a
+            # reflection here would flip the chirality of every learned body rotation and
+            # disagree with the default path's align_with_z.
+            orientations.append(dynamics.orientation_from_axis(lever, rot_axis))
             if m_i == origin_rel:
                 rot_radii.append(vol_coms[m_i] - vol_coms[m_i])
             else:
@@ -273,6 +235,14 @@ def main(args):
             #print(mat@rot_axis)
             #print(mat@mat.T)
 
+        if len(rot_axes) == 2:
+            ang, kind = dynamics.interpret_pair(rot_axes[0], rot_axes[1])
+            log("the two bodies' axes are {:.1f} deg apart: {}".format(ang, kind))
+            if kind != 'hinge (antiparallel)':
+                log("WARNING: for a two-body system the axes should be roughly antiparallel. "
+                    "Parallel axes mean the whole complex is drifting rather than flexing, and "
+                    "an uncorrelated angle means the motion is noise -- either way this series "
+                    "will not give a meaningful multi-body decomposition.")
         rot_axes = torch.stack(rot_axes, dim=0)
         orientations = torch.stack(orientations, dim=0)
         vols = torch.stack(vols, dim=0)
