@@ -10,6 +10,7 @@ from cryodrgn import lie_tools
 from cryodrgn import starfile
 from cryodrgn import dataset
 from cryodrgn import dynamics
+from cryodrgn.utils import ALIGN_CORNERS
 import torch.nn.functional as F
 import torch
 
@@ -145,13 +146,32 @@ def main(args):
         print(mask_name)
         ref_vol = dataset.VolData(mask_name)
         masks.append(ref_vol.get())
-        c, r, eigvecs = ref_vol.center_of_mass()
+        # cryodrgn.dynamics.center_of_mass rather than VolData.center_of_mass: the latter rounds
+        # the centre to the nearest voxel (~0.4 px here, and it also biases the radii/axes, which
+        # are measured relative to it), weights the inertia tensor by density^3, and uses eig
+        # instead of eigh.
+        c, r, eigvecs = dynamics.center_of_mass(ref_vol.get())
         com_bodies.append(c)
         radii.append(r)
         axes.append(eigvecs)
 
     masks = torch.stack(masks, dim=0)
     masks = (masks > 0)*masks
+
+    # models.py normalises every length by vol_size = D-1 (models.py:1119) and then multiplies by
+    # scale = render_size/(crop_vol_size-1)*2, which works out to "one unit = one voxel of the
+    # reconstruction grid". The body masks are measured on their own grid, so convert whenever the
+    # mask box differs from the reconstruction box. Verified against training: this dataset stores
+    # |com| = 43.37 mask voxels and the decoder logged com/vol_size*scale = 0.5455, i.e. it placed
+    # the pivots 43.37 instead of 41.97 reconstruction voxels out -- 3.8 A too far.
+    mask_box = masks.shape[-1]
+    to_vol = args.D/mask_box
+    if mask_box != args.D:
+        log(f"WARNING: body masks are {mask_box}^3 but the reconstruction box (-D) is {args.D}; "
+            f"rescaling body geometry by {to_vol:.4f}. Check that --masks belongs to this dataset "
+            f"(masks drawn on the reconstruction grid need no correction).")
+    com_bodies = [c*to_vol for c in com_bodies]
+    radii = [r*to_vol for r in radii]
     vol_coms = None
     rot_radii = None
     if args.volumes:
@@ -159,7 +179,6 @@ def main(args):
         assert args.num_volumes >= 2, \
             f"--num-volumes must be at least 2 (the first and last volume define the motion), got {args.num_volumes}"
         vols = []
-        scale = 1.0  # overwritten on the first volume below; kept for a defined default
         for b_i in range(args.num_volumes):
             mask_name = args.volumes + "/reference" + str(b_i) + ".mrc"
             assert os.path.isfile(mask_name), \
@@ -168,9 +187,23 @@ def main(args):
             ref_vol = dataset.VolData(mask_name)
             vols.append(ref_vol.get())
             if b_i == 0:
-                #interpolate mask
-                scale = masks.shape[-1]/vols[-1].shape[-1]
-                masks = F.interpolate(masks.unsqueeze(0), vols[-1].shape, mode='trilinear').squeeze()
+                # Register the masks to the rendered volume. The rendered box is NOT a rescaled
+                # reconstruction box: models.py samples it on grid_coarse spanning [-1,1] with
+                # scale = render_size/(crop_vol_size-1)*2, so one rendered voxel equals one
+                # reconstruction voxel and the box is the CENTRE CROP of the render box (the
+                # training log confirms crop fraction (160-1)/(180-1) = 0.888268). Interpolating
+                # the mask straight onto the rendered box, as this used to do, ignores that crop
+                # and shrinks the mask by 1/window_r -- about 12.5% here, i.e. 7-8 voxels of
+                # misregistration at the molecule's edge.
+                vol_box = vols[0].shape[-1]
+                assert vol_box <= args.D, \
+                    f"rendered volume box {vol_box} is larger than the reconstruction box -D {args.D}"
+                m = F.interpolate(masks.unsqueeze(0), size=(args.D,)*3, mode='trilinear',
+                                  align_corners=ALIGN_CORNERS)      # mask grid -> reconstruction grid
+                off = (args.D - vol_box)//2
+                masks = m[..., off:off+vol_box, off:off+vol_box, off:off+vol_box].squeeze(0)
+                log("registered masks {}^3 -> {}^3 (resample to -D) -> {}^3 (centre crop, "
+                    "matching the rendered box)".format(mask_box, args.D, vol_box))
                 print(masks.sum(dim=(1,2,3)))
         # the "consensus" frame used for coms/principal axes: middle of the series.
         # (len-1)//2 reproduces the previously hardcoded index 4 for the default 10 volumes.
@@ -182,7 +215,7 @@ def main(args):
         principal_axes = []
         for m_i in range(masks.shape[0]):
             # the whole trajectory, not just the endpoints: the axis is fitted from every frame
-            traj = dynamics.com_trajectory(vols, masks[m_i], scale=scale)
+            traj = dynamics.com_trajectory(vols, masks[m_i])   # 渲染体素 == 重构体素
             trajs.append(traj)
             st = dynamics.trajectory_stats(traj)
             log("body {}: com moves {:.2f} px net over a {:.2f} px path (coherence {:.2f})".format(
@@ -192,8 +225,8 @@ def main(args):
             # each call sorts its own eigenvalues. Taking radii from the mask loop (as before)
             # while taking axes from the volume mismatched that pairing.
             vol_com, vol_r, p_axes = center_of_mass(vols[mid_vol]*masks[m_i])
-            vol_coms.append(vol_com*scale)
-            vol_radii.append(vol_r*scale)  # to mask-grid units, like the coms
+            vol_coms.append(vol_com)
+            vol_radii.append(vol_r)
             principal_axes.append(p_axes)
 
         rot_axes = []
