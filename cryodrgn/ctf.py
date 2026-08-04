@@ -137,14 +137,14 @@ def compute_ctf(freqs, dfu, dfv, dfang, volt, cs, w, phase_shift=0, bfactor=None
     return -ctf
 
 def compute_3dctfaniso(y, centered_freqs, freqs, tilts, dfu, dfv, dfang, volt, cs, w, bfactor=None, scale=None,
-                       phase_shift=0, Apix=1., plot=True, use_warp=False):
+                       phase_shift=0, Apix=1., plot=False, use_warp=False):
     # compute a ctf in 3d volume
     # compute a stack of ctfs
     #print(freqs.shape, tilts.shape, dfu.shape, bfactor.shape)
     # consider only isotropic ctf so far
     # centered freqs are in the range [-Y//2+1, Y//2]
-    centered_freqs = centered_freqs.to(y.get_device())
-    freqs = freqs.to(y.get_device())
+    centered_freqs = centered_freqs.to(y.device)
+    freqs = freqs.to(y.device)
     dfu = dfu.unsqueeze(-1)
     volt = volt.unsqueeze(-1)
     cs = cs.unsqueeze(-1)
@@ -255,14 +255,14 @@ def compute_3dctfaniso(y, centered_freqs, freqs, tilts, dfu, dfv, dfang, volt, c
     return ctfs_3d
 
 def compute_3dctf(y, centered_freqs, freqs, tilts, dfu, volt, cs, w, bfactor=None, scale=None,
-                  phase_shift=0, Apix=1., plot=True, use_warp=True):
+                  phase_shift=0, Apix=1., plot=False, use_warp=True):
     # compute a ctf in 3d volume
     # compute a stack of ctfs
     #print(freqs.shape, tilts.shape, dfu.shape, bfactor.shape)
     # consider only isotropic ctf so far
     # centered freqs are in the range [-Y//2+1, Y//2]
-    centered_freqs = centered_freqs.to(y.get_device())
-    freqs = freqs.to(y.get_device())
+    centered_freqs = centered_freqs.to(y.device)
+    freqs = freqs.to(y.device)
     dfu = dfu.unsqueeze(-1)
     volt = volt.unsqueeze(-1)
     cs = cs.unsqueeze(-1)
