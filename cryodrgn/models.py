@@ -1001,7 +1001,7 @@ class SpatialTransformer(nn.Module):
 
     def save_mrc(self, template, filename, Apix=1., flip=False):
         with torch.no_grad():
-            dev_id = template.get_device()
+            dev_id = template.get_device() if template.is_cuda else 'cpu'
             template = template.squeeze()
             if flip:
                 template = template.flip(0)
@@ -1789,7 +1789,7 @@ class VanillaDecoder(nn.Module):
 
     def save_mrc(self, template, filename, flip=False):
         with torch.no_grad():
-            dev_id = template.get_device()
+            dev_id = template.get_device() if template.is_cuda else 'cpu'
             if self.use_fourier:
                 #template_FT = fft.torch_rfft3_center(template)
                 #the origin is at self.templateres//2 - 1
@@ -1817,7 +1817,7 @@ class VanillaDecoder(nn.Module):
                 body_trans_i = torch.cat([one, affine[1][0, ...]], dim=-1)
                 body_trans_i = lie_tools.quaternions_to_SO3_wiki(body_trans_i)
 
-                i_euler = torch.zeros(1, 2).to(body_quat_i.get_device())
+                i_euler = torch.zeros(1, 2).to(body_quat_i.device)
                 rot_i = lie_tools.hopf_to_SO3(i_euler).unsqueeze(1).unsqueeze(1)
 
                 rot_resi_i = lie_tools.quaternions_to_SO3_wiki(body_quat_i)
@@ -1829,7 +1829,7 @@ class VanillaDecoder(nn.Module):
                 body_trans_i = self.orient_bodiesT @ body_trans_i[:self.num_bodies, ...] @ self.orient_bodies
                 body_trans_i = (body_trans_i @ self.rotate_directions.unsqueeze(-1)) - self.rotate_directions.unsqueeze(-1) #+ self.in_relatives.unsqueeze(-1)
                 body_trans_i = body_trans_i.squeeze(-1)
-                zero_3d = torch.zeros(1, 3).to(body_quat_i.get_device())
+                zero_3d = torch.zeros(1, 3).to(body_quat_i.device)
                 # axes must be passed here exactly as in the training forward pass: without it
                 # multi_body_grid takes the branch that divides the k-th BOX-axis component by
                 # radius[k], which is the extent along the k-th PRINCIPAL axis -- the anisotropic
