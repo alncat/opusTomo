@@ -9,6 +9,7 @@ from cryodrgn import utils
 from cryodrgn import lie_tools
 from cryodrgn import starfile
 from cryodrgn import dataset
+from cryodrgn import mrc
 from cryodrgn import dynamics
 from cryodrgn.utils import ALIGN_CORNERS
 import torch.nn.functional as F
@@ -140,12 +141,14 @@ def main(args):
     radii = []
     masks = []
     axes = []
+    mask_apixs = []
     for b_i in range(len(s_mask.df)):
         mask_name = prefix + "/" + s_mask.df['_rlnBodyMaskName'][b_i]
         in_relatives.append(int(s_mask.df['_rlnBodyRotateRelativeTo'][b_i]) - 1)
         print(mask_name)
         ref_vol = dataset.VolData(mask_name)
         masks.append(ref_vol.get())
+        mask_apixs.append(float(mrc.MRCHeader.parse(mask_name).get_apix()))
         # cryodrgn.dynamics.center_of_mass rather than VolData.center_of_mass: the latter rounds
         # the centre to the nearest voxel (~0.4 px here, and it also biases the radii/axes, which
         # are measured relative to it), weights the inertia tensor by density^3, and uses eig
@@ -160,16 +163,33 @@ def main(args):
 
     # models.py normalises every length by vol_size = D-1 (models.py:1119) and then multiplies by
     # scale = render_size/(crop_vol_size-1)*2, which works out to "one unit = one voxel of the
-    # reconstruction grid". The body masks are measured on their own grid, so convert whenever the
-    # mask box differs from the reconstruction box. Verified against training: this dataset stores
-    # |com| = 43.37 mask voxels and the decoder logged com/vol_size*scale = 0.5455, i.e. it placed
-    # the pivots 43.37 instead of 41.97 reconstruction voxels out -- 3.8 A too far.
+    # reconstruction grid". Body geometry measured on the mask's own grid therefore has to be
+    # converted by the ratio of pixel sizes. Note the box ratio D/mask_box is NOT a substitute:
+    # it agrees only when mask and reconstruction span the same field of view, and is off by
+    # 9-12% for a mask that is padded, cropped or sampled at a different pixel size.
     mask_box = masks.shape[-1]
-    to_vol = args.D/mask_box
-    if mask_box != args.D:
-        log(f"WARNING: body masks are {mask_box}^3 but the reconstruction box (-D) is {args.D}; "
-            f"rescaling body geometry by {to_vol:.4f}. Check that --masks belongs to this dataset "
-            f"(masks drawn on the reconstruction grid need no correction).")
+    mask_apix = mask_apixs[0]
+    assert all(abs(a - mask_apix) < 1e-4 for a in mask_apixs), \
+        f"body masks disagree on pixel size: {mask_apixs}"
+    if args.Apix is not None and mask_apix > 0:
+        # physically correct: one mask voxel is mask_apix/Apix reconstruction voxels
+        to_vol = mask_apix/args.Apix
+        fov_mask, fov_rec = mask_box*mask_apix, args.D*args.Apix
+        if abs(fov_mask - fov_rec) > 0.01*fov_rec:
+            log(f"WARNING: the body masks span {fov_mask:.1f} A ({mask_box}^3 at {mask_apix:.4f} A/px) "
+                f"but the reconstruction spans {fov_rec:.1f} A ({args.D}^3 at {args.Apix} A/px). The "
+                f"geometry is rescaled by {to_vol:.4f}, but a different field of view also means the "
+                f"mask covers a different region -- check that --masks belongs to this dataset.")
+    else:
+        # no --Apix to compare against: fall back to the box ratio, which equals the apix ratio
+        # only when the mask and the reconstruction span the same field of view
+        to_vol = args.D/mask_box
+        if mask_box != args.D:
+            log(f"WARNING: body masks are {mask_box}^3 but the reconstruction box (-D) is {args.D}, "
+                f"and no --Apix was given to convert properly; assuming both span the same field of "
+                f"view and rescaling body geometry by {to_vol:.4f}.")
+    if abs(to_vol - 1.0) > 1e-6:
+        log(f"rescaling body geometry from the mask grid to the reconstruction grid by {to_vol:.4f}")
     com_bodies = [c*to_vol for c in com_bodies]
     radii = [r*to_vol for r in radii]
     vol_coms = None
@@ -196,14 +216,21 @@ def main(args):
                 # and shrinks the mask by 1/window_r -- about 12.5% here, i.e. 7-8 voxels of
                 # misregistration at the molecule's edge.
                 vol_box = vols[0].shape[-1]
-                assert vol_box <= args.D, \
-                    f"rendered volume box {vol_box} is larger than the reconstruction box -D {args.D}"
-                m = F.interpolate(masks.unsqueeze(0), size=(args.D,)*3, mode='trilinear',
-                                  align_corners=ALIGN_CORNERS)      # mask grid -> reconstruction grid
-                off = (args.D - vol_box)//2
-                masks = m[..., off:off+vol_box, off:off+vol_box, off:off+vol_box].squeeze(0)
-                log("registered masks {}^3 -> {}^3 (resample to -D) -> {}^3 (centre crop, "
-                    "matching the rendered box)".format(mask_box, args.D, vol_box))
+                # resample so a mask voxel matches a reconstruction voxel (to_vol is the pixel
+                # size ratio), then centre crop or pad onto the rendered box
+                resampled = max(2, int(round(mask_box*to_vol))//2*2)
+                m = F.interpolate(masks.unsqueeze(0), size=(resampled,)*3, mode='trilinear',
+                                  align_corners=ALIGN_CORNERS)
+                if resampled >= vol_box:
+                    off = (resampled - vol_box)//2
+                    masks = m[..., off:off+vol_box, off:off+vol_box, off:off+vol_box].squeeze(0)
+                    how = "centre crop"
+                else:
+                    pad = (vol_box - resampled)//2
+                    masks = F.pad(m, (pad,)*6).squeeze(0)
+                    how = "zero pad"
+                log("registered masks {}^3 -> {}^3 (match pixel size, x{:.4f}) -> {}^3 ({}, "
+                    "matching the rendered box)".format(mask_box, resampled, to_vol, vol_box, how))
                 print(masks.sum(dim=(1,2,3)))
         # the "consensus" frame used for coms/principal axes: middle of the series.
         # (len-1)//2 reproduces the previously hardcoded index 4 for the default 10 volumes.
