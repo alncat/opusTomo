@@ -1830,8 +1830,16 @@ class VanillaDecoder(nn.Module):
                 body_trans_i = (body_trans_i @ self.rotate_directions.unsqueeze(-1)) - self.rotate_directions.unsqueeze(-1) #+ self.in_relatives.unsqueeze(-1)
                 body_trans_i = body_trans_i.squeeze(-1)
                 zero_3d = torch.zeros(1, 3).to(body_quat_i.get_device())
+                # axes must be passed here exactly as in the training forward pass: without it
+                # multi_body_grid takes the branch that divides the k-th BOX-axis component by
+                # radius[k], which is the extent along the k-th PRINCIPAL axis -- the anisotropic
+                # body Gaussian ends up aligned to the box instead of the body. Two of this
+                # dataset's principal axes sit ~45 deg from the box axes, where the body weights
+                # differ by ~10% (up to 22%), so saved volumes did not blend bodies the way the
+                # trained model does.
                 affine_grid_i, valid, trans_img = self.transformer.multi_body_grid(rot_i, rot_resi_i, self.com_bodies/self.vol_size,
-                                                                                zero_3d, body_trans_i, radius=self.radius,)
+                                                                                zero_3d, body_trans_i, radius=self.radius,
+                                                                                axes=self.principal_axesT)
                 template = F.grid_sample(template, affine_grid_i, align_corners=ALIGN_CORNERS)
 
             elif self.transformer.templateres != self.templateres:
