@@ -117,7 +117,7 @@ def main(args):
 
     # load masks
     if args.masks:
-        masks_params = torch.load(args.masks)
+        masks_params = torch.load(args.masks, map_location=device)
     else:
         masks_params = None
 
@@ -133,7 +133,7 @@ def main(args):
 
     if args.load:
         log('Loading checkpoint from {}'.format(args.load))
-        checkpoint = torch.load(args.load)
+        checkpoint = torch.load(args.load, map_location=device)
         print(checkpoint.keys())
         pretrained_dict = checkpoint['model_state_dict']
         pretrained_dict = checkpoint['decoder_state_dict']
@@ -165,7 +165,7 @@ def main(args):
 
     if args.load:
         log('Loading checkpoint from {}'.format(args.load))
-        checkpoint = torch.load(args.load, map_location="cuda:0")
+        checkpoint = torch.load(args.load, map_location=device)
         print(checkpoint.keys())
         #pretrained_dict = checkpoint['model_state_dict']
         #model_dict = model.state_dict()
@@ -248,7 +248,9 @@ def main(args):
         else:
             if vanilla:
                 #z = utils.load_pkl(args.zfile)
-                z = np.loadtxt(args.zfile)
+                # atleast_2d: a single-row zfile loads as 1-D, and iterating it below would
+                # yield 0-d scalars instead of one z vector
+                z = np.atleast_2d(np.loadtxt(args.zfile))
                 z = torch.tensor(z).float().to(device)
             else:
                 z = np.loadtxt(args.zfile).reshape(-1, zdim)
