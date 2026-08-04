@@ -149,7 +149,11 @@ def compute_3dctfaniso(y, centered_freqs, freqs, tilts, dfu, dfv, dfang, volt, c
     volt = volt.unsqueeze(-1)
     cs = cs.unsqueeze(-1)
     w = w.unsqueeze(-1)
-    bfactor = -bfactor.unsqueeze(-1)
+    # no sign flip here: starfile.get_warp3dctfs already stores -Bwarp*1e20/4, which is
+    # positive for warp's negative dose-weighting B factors, and compute_ctf applies
+    # exp(-bfactor*s^2/4). Negating again turned the envelope into exp(+B*s^2/4), which
+    # amplifies high frequencies instead of damping them. Matches compute_3dctf.
+    bfactor = bfactor.unsqueeze(-1)
     scale = scale.unsqueeze(-1)
     #print(volt, cs, w, Apix)
     dfv = dfv.unsqueeze(-1)
