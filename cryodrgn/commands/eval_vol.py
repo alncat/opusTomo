@@ -232,7 +232,9 @@ def main(args):
         if args.deform:
             assert args.template_z is not None, "--deform requires --template-z"
             assert args.template_z_ind is not None, "--deform requires --template-z-ind"
-            template_z = np.loadtxt(args.template_z)
+            # atleast_2d for the same reason as the z file below: a single-row template
+            # loads as 1-D and the row index below would fail
+            template_z = np.atleast_2d(np.loadtxt(args.template_z))
             len_template = template_z.shape[0]
             assert args.template_z_ind < len_template, f"template-z-ind {args.template_z_ind} must be smaller than {len_template}"
             template_z = torch.tensor(template_z[args.template_z_ind, :]).float().to(device)
