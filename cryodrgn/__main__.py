@@ -25,6 +25,7 @@ def main():
     import cryodrgn.commands.analyze
     import cryodrgn.commands.disentangle
     import cryodrgn.commands.analyze_dynamics
+    import cryodrgn.commands.filter_star
     import cryodrgn.commands.pc_traversal
     import cryodrgn.commands.graph_traversal
     import cryodrgn.commands.view_config
@@ -49,6 +50,7 @@ def main():
         cryodrgn.commands.analyze,
         cryodrgn.commands.disentangle,
         cryodrgn.commands.analyze_dynamics,
+        cryodrgn.commands.filter_star,
         cryodrgn.commands.pc_traversal,
         cryodrgn.commands.graph_traversal,
         cryodrgn.commands.view_config,
