@@ -412,10 +412,8 @@ def main(args):
                 start, end = np.percentile(pc[:,i],(1,99))
                 log(f'traversing pc {i} from {start} to {end}')
                 z_pc = analysis.get_pc_traj(pca, z_k.shape[1], 10, i+1, start, end)
-                if not os.path.exists(f'{outdir}/pc{i+1}'):
-                    outdir = Path(outdir)
-                    pc_dir = outdir / f"pc{i+1}"
-                    pc_dir.mkdir(parents=True, exist_ok=True)
+                pc_dir = Path(outdir) / f"pc{i+1}"
+                pc_dir.mkdir(parents=True, exist_ok=True)
                 np.savetxt(f'{outdir}/pc{i+1}/z_pc.txt', z_pc)
             # kmeans clustering
             log(f'K-means clustering for class {args.kpc}...')
@@ -508,7 +506,9 @@ def main(args):
         'downsample': args.downsample,
     }
     with open(f'{outdir}/analyze_config.json', 'w') as f:
-        json.dump(manifest, f, indent=2)
+        # default=str keeps the manifest writable if a path-like or numpy scalar
+        # reaches one of the fields.
+        json.dump(manifest, f, indent=2, default=str)
     log(f'wrote run manifest to {outdir}/analyze_config.json')
 
     # copy over template if file doesn't exist
