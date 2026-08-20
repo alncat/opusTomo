@@ -24,6 +24,7 @@ import cryodrgn
 from cryodrgn import analysis
 from cryodrgn import utils
 from cryodrgn.pose import PoseTracker
+from cryodrgn.commands.filter_star import filter_star
 
 log = utils.log
 
@@ -451,6 +452,28 @@ def main(args):
             utils.save_pkl(selected_ptcl_inds, f'{outdir}/ind.filter.{E}.pkl')
             log(f'saved {len(selected_ptcl_inds)} selected particle indices to {outdir}/ind.filter.{E}.pkl '
                 f'(re-train with the original star and pose plus --ind this file)')
+            # ... and the matching star, sliced from the star recorded in config.pkl. The tomo
+            # datasets index the star row-for-row, so selected_ptcl_inds are star rows directly.
+            star_in = None
+            try:
+                with open(config, 'rb') as f:
+                    star_in = pickle.load(f)['dataset_args']['particles']
+            except Exception as e:
+                log(f'WARNING: could not read the input star from {config} ({e}); '
+                    f'skipping the filtered star')
+            if star_in is not None:
+                star_out = f'{outdir}/particles.filter.{E}.star'
+                if not os.path.isfile(star_in):
+                    log(f'WARNING: the star recorded in config.pkl is missing ({star_in}); '
+                        f'run `dsd filter_star <star> {outdir}/ind.filter.{E}.pkl -o {star_out}` '
+                        f'once it is available')
+                else:
+                    try:
+                        n_sel, n_total = filter_star(star_in, selected_ptcl_inds, star_out)
+                        log(f'saved {n_sel} of {n_total} particles to {star_out}')
+                    except Exception as e:
+                        log(f'WARNING: could not write {star_out} ({e})')
+
             if args.pose is not None and os.path.isfile(args.pose):
                 sub_poses = pickle.load(open(args.pose, 'rb'))
                 if not isinstance(sub_poses, tuple):
