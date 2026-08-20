@@ -9,6 +9,7 @@ import torch
 from cryodrgn import utils
 from cryodrgn import starfile
 from cryodrgn import lie_tools
+from cryodrgn.commands.filter_star import split_star
 log = utils.log
 
 def add_args(parser):
@@ -17,8 +18,8 @@ def add_args(parser):
     parser.add_argument('--relion31', action='store_true', help='Flag for relion3.1 star format')
     parser.add_argument('--Apix', type=float, help='Pixel size (A); Required if translations are specified in Angstroms')
     parser.add_argument('-o', metavar='PKL', type=os.path.abspath, required=False, help='Output pose.pkl')
-    parser.add_argument('--labels', metavar='PKL', type=os.path.abspath, required=False, help='Output label.pkl')
-    parser.add_argument('--outdir', type=os.path.abspath, help='The directory for storing starfiles for clusters')
+    parser.add_argument('--labels', metavar='PKL', type=os.path.abspath, required=False, help='Split the star by these cluster labels (kmeans{K}/labels.pkl), one entry per particle of THIS star; needs --outdir')
+    parser.add_argument('--outdir', type=os.path.abspath, help='Directory for the per-cluster star files written by --labels')
     parser.add_argument('--poses', metavar='PKL', type=os.path.abspath, required=False, help='Load poses from given pkl')
     parser.add_argument('--out-star', metavar='STAR', type=os.path.abspath, required=False,
                         help='Write updated STAR file (e.g., with perturbed or loaded poses)')
@@ -110,7 +111,8 @@ def main(args):
                                           seed=args.seed)
         log(f'Applied random pose perturbation: rot <= {args.perturb_rot} deg, trans <= {args.perturb_trans} px')
 
-    if args.poses or args.perturb_rot > 0 or args.perturb_trans > 0:
+    star_updated = bool(args.poses) or args.perturb_rot > 0 or args.perturb_trans > 0
+    if star_updated:
         update_star_with_poses(s, euler, trans)
 
     if args.out_star is not None:
@@ -125,12 +127,26 @@ def main(args):
     log('Converting to rotation matrix:')
     log(rot[0])
     if args.labels is not None:
-        labels = utils.load_pkl(args.labels)
+        assert args.outdir is not None, "--labels needs --outdir"
+        labels = np.asarray(utils.load_pkl(args.labels)).reshape(-1)
         log(f'Read labels from {args.labels}')
-        for i in range(labels.min(), labels.max()+1):
-            out_file = args.outdir + "/pre" + str(i) + ".star"
-            log(f'Writing {np.sum(labels==i)} particles in cluster {i} to {out_file}')
-            s.write_subset(out_file, labels==i)
+        assert len(labels) == N, \
+            f"{args.labels} has {len(labels)} entries but {args.input} has {N} particles -- " \
+            f"analyze writes labels in the ORIGINAL stack numbering, so split the star used " \
+            f"for training rather than an already-filtered one"
+        # splitting a star is filter_star's job; it keeps data_optics and every other block,
+        # which cryodrgn.starfile's writer drops. Fall back to the in-memory writer only when
+        # the poses here differ from what is on disk and there is no updated star to split.
+        split_src = args.input if not star_updated else args.out_star
+        if split_src is not None:
+            split_star(split_src, labels, args.outdir, prefix='pre')
+        else:
+            log('WARNING: poses were modified but --out-star was not given; splitting the '
+                'in-memory star, which drops data_optics and any other extra block')
+            for i in range(labels.min(), labels.max()+1):
+                out_file = args.outdir + "/pre" + str(i) + ".star"
+                log(f'Writing {np.sum(labels==i)} particles in cluster {i} to {out_file}')
+                s.write_subset(out_file, labels==i)
 
     log('Translations (pixels):')
     log(trans[0])
