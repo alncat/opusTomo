@@ -1608,7 +1608,15 @@ class VanillaDecoder(nn.Module):
                                                                      t_i_3d, body_trans_i, radius=self.radius, axes=self.principal_axesT)
 
                     #body_trans_pred.append(trans_img[..., :3]*self.vol_size/self.scale)
-                    pos = self.transformer.rotate(rot_i)
+                    # place the 3D mask with the same deformation field the model output uses
+                    # below, so the region kept in the data follows the bodies. transformer.rotate
+                    # here only carried the global rotation, so a body that swings out was masked
+                    # off the data while the model still rendered density there. same shape as
+                    # transformer.rotate(rot_i), so no extra memory -- affine_grid_i is already
+                    # computed. detached because valid multiplies the experimental data: letting
+                    # gradients reach the body poses through the mask would let the model move a
+                    # body to mask out data it cannot fit.
+                    pos = (affine_grid_i + global_trans_i/self.vol_size*self.scale).detach()
                     valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
                     #if save_mrc and i == 0:
                     #    self.save_mrc(valid, self.tmp_prefix+"mas")
