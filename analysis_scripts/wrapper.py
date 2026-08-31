@@ -13,7 +13,7 @@ class eval_vol:
         parser.add_argument('num', type=int, help='the number of KMeans clusters or PCs for reconstruction')
         parser.add_argument('apix', type=float, help='desired apix of the output volume')
         parser.add_argument('--num-bodies', default=0, type=int, required=False, help='the number of bodies defined in training (default: %(default)s)')
-        parser.add_argument('--masks', type=os.path.abspath, required=False, help='path to the pkl for masks params')
+        parser.add_argument('--masks', type=os.path.abspath, required=False, help='path to the pkl for masks params (optional for dpc: the body geometry is also stored in the checkpoint)')
         parser.add_argument('--kmeans', type=int, required=False, help='the kmeans folder to select the template to be deformed')
         parser.add_argument('--dfk', type=int, required=False, help='the kmeans center serving as the template to be deformed')
         parser.add_argument('--flip', action='store_true', required=False, help='invert handness of the reconstruction')
@@ -26,8 +26,21 @@ class eval_vol:
         else:
             flip=''
         if args.method == 'dpc':
-            assert args.kmeans is not None and args.dfk is not None
-            subprocess.call(['bash', script_path, args.resdir, str(args.N), args.method, str(args.num), str(args.apix), args.masks, str(args.kmeans), str(args.dfk), flip])
+            # these used to be a bare assert, and --masks was not checked at all -- a missing
+            # --masks reached subprocess.call as None and raised
+            # "TypeError: expected str, bytes or os.PathLike object, not NoneType",
+            # which names none of the arguments involved.
+            missing = [flag for flag, val in (('--kmeans', args.kmeans), ('--dfk', args.dfk))
+                       if val is None]
+            if missing:
+                raise SystemExit(
+                    "eval_vol dpc needs {}: --kmeans is the kmeans<K> folder under analyze.<N>/ "
+                    "holding the template centers.txt, --dfk the row of that file to "
+                    "deform".format(' and '.join(missing)))
+            if args.masks is not None and not os.path.isfile(args.masks):
+                raise SystemExit("--masks {} does not exist".format(args.masks))
+            # --masks is optional here; eval_vol rebuilds the body geometry from the checkpoint
+            subprocess.call(['bash', script_path, args.resdir, str(args.N), args.method, str(args.num), str(args.apix), args.masks or '', str(args.kmeans), str(args.dfk), flip])
         else:
             subprocess.call(['bash', script_path, args.resdir, str(args.N), args.method, str(args.num), str(args.apix), str(args.num_bodies), flip])
 
