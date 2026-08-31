@@ -67,6 +67,31 @@ def add_args(parser):
     group.add_argument('--activation', choices=('relu','leaky_relu'), default='relu', help='Activation (default: %(default)s)')
     return parser
 
+# the mask buffers VanillaDecoder registers from masks_params, and how they were normalised
+MASK_BUFFERS = ('com_bodies', 'in_relatives', 'rotate_directions', 'orient_bodies',
+                'principal_axes', 'radius')
+
+def masks_params_from_checkpoint(decoder_state, vol_size):
+    '''Rebuild the mask_params.pkl dict from the buffers a multi-body checkpoint carries.
+
+    VanillaDecoder.__init__ stores the geometry as buffers, dividing the lengths by vol_size,
+    so the pkl written by prepare_multi is recoverable from any multi-body checkpoint. This
+    lets eval_vol run without --masks: masks_params is what switches the decoder's affine head
+    on, and building the decoder without it drops template.affine_out.* in the state-dict
+    filter below and then fails in forward() on `affine[1][i]`.
+    '''
+    missing = [k for k in MASK_BUFFERS if k not in decoder_state]
+    if missing:
+        raise ValueError(f'the checkpoint is multi-body but is missing the mask buffers '
+                         f'{missing}; pass --masks <mask_params.pkl> instead')
+    com = decoder_state['com_bodies']
+    return dict(com_bodies=com,
+                in_relatives=decoder_state['in_relatives']*vol_size + com,
+                rotate_directions=decoder_state['rotate_directions']*vol_size,
+                orient_bodies=decoder_state['orient_bodies'],
+                principal_axes=decoder_state['principal_axes'],
+                radii_bodies=decoder_state['radius']*vol_size)
+
 def check_inputs(args):
     if args.z_start:
         assert args.z_end, "Must provide --z-end with argument --z-start"
@@ -115,12 +140,6 @@ def main(args):
     fov = (D - 1) * Apix * downfrac
     downfrac *= Apix/args.Apix
 
-    # load masks
-    if args.masks:
-        masks_params = torch.load(args.masks, map_location=device)
-    else:
-        masks_params = None
-
     log("Apix: changing from training apix {} to target apix {}".format(Apix, args.Apix))
     log("the output volume by convnet will further downsample by downfrac: {} to achieve desired apix".format(downfrac))
     assert templateres is not None
@@ -131,15 +150,38 @@ def main(args):
         assert args.downsample % 2 == 0, "Boxsize must be even"
         assert args.downsample <= D - 1, "Must be smaller than original box size"
 
+    decoder_state = None
     if args.load:
         log('Loading checkpoint from {}'.format(args.load))
         checkpoint = torch.load(args.load, map_location=device)
         print(checkpoint.keys())
         pretrained_dict = checkpoint['model_state_dict']
         pretrained_dict = checkpoint['decoder_state_dict']
+        decoder_state = pretrained_dict
         if "principal_axes" in pretrained_dict:
             args.num_bodies = pretrained_dict["principal_axes"].shape[0]
             print("principal_axes: ", pretrained_dict["principal_axes"], "num_bodies: ", args.num_bodies)
+
+    # load masks. This runs after the checkpoint peek above so a multi-body run can be
+    # evaluated without --masks -- the geometry is in the checkpoint either way. Silently
+    # leaving masks_params None on a multi-body checkpoint used to build a decoder with no
+    # affine head, which then failed inside forward() with
+    # "'NoneType' object is not subscriptable".
+    if args.masks:
+        masks_params = torch.load(args.masks, map_location=device)
+    elif args.num_bodies > 0 and decoder_state is not None:
+        masks_params = masks_params_from_checkpoint(decoder_state, D - 1)
+        log('--masks was not given; rebuilt the {}-body mask parameters from the buffers in '
+            '{}'.format(args.num_bodies, args.load))
+    else:
+        masks_params = None
+        if args.deform:
+            raise ValueError(
+                '--deform needs a multi-body model, but --masks was not given and '
+                + ('no --load checkpoint was given either' if decoder_state is None else
+                   f'{args.load} has no principal_axes (it was not trained with --masks)')
+                + '. Pass --masks <mask_params.pkl> from `dsdsh prepare_multi`, or --load a '
+                  'multi-body checkpoint.')
 
     #create and load model
     activation={"relu": nn.ReLU, "leaky_relu": nn.LeakyReLU}[args.activation]

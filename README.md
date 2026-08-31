@@ -388,6 +388,7 @@ To reconstruct trajectories along conformation PC, you need to select a template
  dsdsh eval_vol . 16 dpc 1 2.2 --kmeans 16 --dfk 2 --masks ../mask2new.pkl
 ```
 generates volumes along dpc1, i.e., the first principal component of dynamics latent space, and use the class 2 in kmeans16 for epoch 16 as template. 
+```--masks``` is optional: when it is omitted the body geometry is read back from the buffers stored in ```weights.*.pkl```, which hold the same values as the pkl written by ```prepare_multi```.
 You can find volumes in ```/work/sp/defanalyze.16/pc1```.
 
 ## select particles <div id="select">
