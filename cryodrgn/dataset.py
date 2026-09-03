@@ -76,24 +76,40 @@ def load_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
         raise NotImplementedError
     return particles, ctfs, ctf_files
 
-def load_warp_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False, tilt_step=2, tilt_range=50, tilt_limit=None):
+def load_warp_subtomos(
+    mrcs_txt_star, lazy=False, datadir=None, relion31=False, tilt_step=2,
+    tilt_range=50, tilt_limit=None, ctf_cache=None, ctf_cache_workers=16,
+):
     '''
     Load particle stack from either a .mrcs file, a .star file, a .txt file containing paths to .mrcs files, or a cryosparc particles.cs file
 
     lazy (bool): Return numpy array if True, or return list of LazyImages
     datadir (str or None): Base directory overwrite for .star or .cs file parsing
+    ctf_cache (str or None): Optional Warp CTF binary cache path. By default a
+        parameter-tagged sidecar is created next to the input STAR.
     '''
     if mrcs_txt_star.endswith('.star'):
+        if ctf_cache is None:
+            ctf_cache = starfile._default_warp_ctf_cache_path(
+                mrcs_txt_star, tilt_step, tilt_range, tilt_limit
+            )
         # not exactly sure what the default behavior should be for the data paths if parsing a starfile
         try:
             star = starfile.Starfile.load(mrcs_txt_star, relion31=relion31)
             particles = star.get_subtomos(datadir=datadir, lazy=lazy,)# key='_rlnCtfImage')
-            warp_ctfs, ctf_files, ctf_params = star.get_warp3dctfs(datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range, tilt_limit=tilt_limit)
+            warp_ctfs, ctf_files, ctf_params = star.get_warp3dctfs(
+                datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range,
+                tilt_limit=tilt_limit, cache_path=ctf_cache, cache_workers=ctf_cache_workers
+            )
         except Exception as e:
             if datadir is None:
                 datadir = os.path.dirname(mrcs_txt_star) # assume .mrcs files are in the same director as the starfile
                 particles = starfile.Starfile.load(mrcs_txt_star, relion31=relion31).get_particles(datadir=datadir, lazy=lazy)
-                ctfs, ctfs_files, ctf_params = star.get_warp3dctfs(datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range, tilt_limit=tilt_limit)
+                ctfs, ctfs_files, ctf_params = star.get_warp3dctfs(
+                    datadir=datadir, lazy=lazy, tilt_step=tilt_step, tilt_range=tilt_range,
+                    tilt_limit=tilt_limit, cache_path=ctf_cache,
+                    cache_workers=ctf_cache_workers
+                )
             else: raise RuntimeError(e)
     else:
         raise NotImplementedError
@@ -430,7 +446,9 @@ class LazyTomoWARPMRCData(data.Dataset):
         log('Subtomogram Mean, Std are {} +/- {}'.format(*self.norm))
         self.window = window_cos_mask(ny, window_r, .95) if window else None
         self.in_mem = in_mem
-        self.ctfs = np.stack(ctfs, axis=0)
+        # A validated binary cache is returned as a copy-on-write memmap. Keep it mapped so
+        # distributed ranks share the filesystem page cache instead of copying the full array.
+        self.ctfs = ctfs if isinstance(ctfs, np.ndarray) else np.stack(ctfs, axis=0)
         self.ctf_files = ctf_files
         self.warp_ctfs = warp_ctfs
         self.read_ctf = read_ctf
