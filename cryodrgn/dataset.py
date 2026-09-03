@@ -76,6 +76,11 @@ def load_subtomos(mrcs_txt_star, lazy=False, datadir=None, relion31=False):
         raise NotImplementedError
     return particles, ctfs, ctf_files
 
+# what --ctf-cache takes to turn the sidecar off and parse the CSVs on every start. Needed
+# when the STAR sits in a directory this process cannot write, where the cache's lock file
+# cannot be created.
+NO_CTF_CACHE = 'none'
+
 def load_warp_subtomos(
     mrcs_txt_star, lazy=False, datadir=None, relion31=False, tilt_step=2,
     tilt_range=50, tilt_limit=None, ctf_cache=None, ctf_cache_workers=16,
@@ -86,10 +91,13 @@ def load_warp_subtomos(
     lazy (bool): Return numpy array if True, or return list of LazyImages
     datadir (str or None): Base directory overwrite for .star or .cs file parsing
     ctf_cache (str or None): Optional Warp CTF binary cache path. By default a
-        parameter-tagged sidecar is created next to the input STAR.
+        parameter-tagged sidecar is created next to the input STAR; NO_CTF_CACHE
+        parses the CSVs on every start instead, writing nothing.
     '''
     if mrcs_txt_star.endswith('.star'):
-        if ctf_cache is None:
+        if isinstance(ctf_cache, str) and ctf_cache.lower() == NO_CTF_CACHE:
+            ctf_cache = None
+        elif ctf_cache is None:
             ctf_cache = starfile._default_warp_ctf_cache_path(
                 mrcs_txt_star, tilt_step, tilt_range, tilt_limit
             )
@@ -419,14 +427,16 @@ class LazyTomoWARPMRCData(data.Dataset):
     '''
     def __init__(self, mrcfile, norm=None, real_data=True, keepreal=False, invert_data=False, ind=None,
                  window=True, datadir=None, relion31=False, window_r=0.85, in_mem=False, downfrac=0.75,
-                 tilt_step=2, tilt_range=50, tilt_limit=None, read_ctf=False, use_float16=False, rank=0):
+                 tilt_step=2, tilt_range=50, tilt_limit=None, read_ctf=False, use_float16=False, rank=0,
+                 ctf_cache=None, ctf_cache_workers=16):
         #assert not keepreal, 'Not implemented error'
         assert mrcfile.endswith('.star')
         log(f"the maximum tilt_range of loading tilt series is {tilt_range}, \
             the tilt_step of loaded tilt series is {tilt_step}, \
             the tilt_limit of loaded tilt series is {tilt_limit}\n")
         particles, ctfs, ctf_files, warp_ctfs = load_warp_subtomos(mrcfile, True, datadir=datadir, relion31=relion31,
-                                                        tilt_step=tilt_step, tilt_range=tilt_range, tilt_limit=tilt_limit)
+                                                        tilt_step=tilt_step, tilt_range=tilt_range, tilt_limit=tilt_limit,
+                                                        ctf_cache=ctf_cache, ctf_cache_workers=ctf_cache_workers)
         self.tilt_step = tilt_step
         self.tilt_range = tilt_range
         assert len(particles) == len(ctf_files)
