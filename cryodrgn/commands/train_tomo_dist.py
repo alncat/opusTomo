@@ -78,6 +78,12 @@ def add_args(parser):
     group.add_argument('--tilt-step', type=float, default=2, help='the interval between successive tilts (default: %(default)s)')
     group.add_argument('--tilt-range', type=float, default=50, help='the range of tilt angles (default: %(default)s)')
     group.add_argument('--tilt-limit', type=float, default=None, help='the range of tilt angles for training (default: %(default)s)')
+    group.add_argument('--ctf-cache', type=str, default=None,
+                       help="Path for the binary cache of the parsed Warp CTF parameters, or 'none' to parse "
+                            "the CSVs on every start. Default: a sidecar next to the input STAR tagged with the "
+                            "tilt settings, which needs a writable STAR directory (default: %(default)s)")
+    group.add_argument('--ctf-cache-workers', type=int, default=16,
+                       help='Threads used only while the Warp CTF cache is first built (default: %(default)s)')
     group.add_argument('--ctfalpha', type=float, default=0, help='the degree of ctf correction to experimental subtomogram (default: %(default)s)')
     group.add_argument('--ctfbeta', type=float, default=1, help='the degree of ctf correction to reconstruction of decoder (default: %(default)s)')
     group.add_argument('--normalizectf', action='store_true', help='normalize ctf using backprojected grid weights (default: %(default)s)')
@@ -737,6 +743,7 @@ def main(args):
                                    datadir=args.datadir, relion31=args.relion31, window_r=args.window_r, downfrac=args.downfrac,
                                    tilt_step=args.tilt_step, tilt_range=args.tilt_range, tilt_limit=args.tilt_limit,
                                    read_ctf=args.readctf, use_float16=args.float16,
+                                   ctf_cache=args.ctf_cache, ctf_cache_workers=args.ctf_cache_workers,
                                    rank=rank)
     else:
         raise NotImplementedError("Use --lazy-single for on-the-fly image loading")
