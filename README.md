@@ -450,6 +450,17 @@ generates volumes along dpc1, i.e., the first principal component of dynamics la
 ```--masks``` is optional: when it is omitted the body geometry is read back from the buffers stored in ```weights.*.pkl```, which hold the same values as the pkl written by ```prepare_multi```.
 You can find volumes in ```/work/sp/defanalyze.16/pc1```.
 
+```dsdsh eval_vol``` is a wrapper that fills in the paths of a standard analysis directory. Call
+```dsd eval_vol``` directly when the volumes should go somewhere else, or carry another name:
+
+```
+dsd eval_vol --load weights.39.pkl -c config.pkl -o kmeans_volumes \
+    --zfile analyze.39/kmeans20/centers.txt --Apix 3.37 --prefix kmeans_cluster
+```
+
+```-o``` is the output directory, ```--prefix``` the basename of the volumes written into it
+(default ```reference```), and ```--zfile``` any text file of latent codes, one per row.
+
 ## select particles <div id="select">
 Finally, you can also retrieve the star files for subtomograms in each kmeans cluster using
 
@@ -504,6 +515,23 @@ re-clustered, which leaves out the ones carrying the sentinel label. Every form 
 the starfile used for training, so hand ```--labels``` that starfile rather than one that has
 already been filtered.
 
+To merge the clusters you want to keep, chain ```dsdsh combine_star```, which takes two starfiles
+and an output name:
+
+```
+dsdsh combine_star pre9.star pre10.star temp.star
+dsdsh combine_star temp.star pre11.star combined_9_10_11.star
+```
+
+Then write the pose file for the merged set:
+
+```
+dsd parse_pose_star combined_9_10_11.star -D 127 --Apix 3.37 -o combined_9_10_11_pose.pkl
+```
+
+***```-D``` is ```lattice_args['D'] - 1``` from ```config.pkl```***, not the raw value;
+```python opus-et-analysis/scripts/extract_config.py config.pkl``` prints it.
+
 Lastly, you can obtain the reconstruction using OPUS-ET by training the subset with ```--encode-mode fixed```.
 
 ## Interactive filtering with cryoDRGN_filtering_template.ipynb <div id="filtering">
@@ -552,72 +580,53 @@ pip install notebook plotly anywidget ipywidgets
 
 ## AI Skills <div id="skill">
 
-### WARP/OPUS-ET Processing Skill for Coding Agents
+Two Agent Skills ship with this repository.
 
-This repository includes an Agent Skills directory at `warp-opus-et/`. It helps an AI coding agent prepare and validate the WARP -> AreTomo2 -> PyTOM -> OPUS-ET cryo-ET workflow, including SLURM scripts, `pipeline.conf` / `species.conf`, template matching, subtomogram export, OPUS-ET training, and optional WARP/M refinement.
+| directory | what it covers |
+| --- | --- |
+| ```warp-opus-et/``` | the WARP -> AreTomo2 -> PyTOM -> OPUS-ET pipeline: SLURM scripts, ```pipeline.conf``` and ```species.conf```, template matching, subtomogram export, training, and optional WARP/M refinement |
+| ```opus-et-analysis/``` | what to do with a finished run: PCA and KMeans sampling, volume generation, pose parsing, starfile manipulation |
 
-Install it by copying the whole skill directory, not just `SKILL.md`.
+### Installing a skill
 
-For Claude Code personal skills:
-
-```bash
-mkdir -p ~/.claude/skills
-rsync -av warp-opus-et/ ~/.claude/skills/warp-opus-et/
-```
-
-For Claude Code project skills, copy it inside the project and commit it:
+Copy the whole directory, not just ```SKILL.md```. Substitute either name for ```<skill>```:
 
 ```bash
-mkdir -p .claude/skills
-rsync -av warp-opus-et/ .claude/skills/warp-opus-et/
-git add .claude/skills/warp-opus-et
+# Claude Code, personal
+mkdir -p ~/.claude/skills && rsync -av <skill>/ ~/.claude/skills/<skill>/
+
+# Claude Code, committed with the project
+mkdir -p .claude/skills && rsync -av <skill>/ .claude/skills/<skill>/ && git add .claude/skills/<skill>
+
+# Codex
+mkdir -p ~/.codex/skills && rsync -av <skill>/ ~/.codex/skills/<skill>/
+
+# Kimi Code CLI, the cross-agent user directory
+mkdir -p ~/.config/agents/skills && rsync -av <skill>/ ~/.config/agents/skills/<skill>/
 ```
 
-For Codex:
+Kimi can also load from a custom directory with ```kimi --skills-dir "$(pwd)/<skill>"```.
+Restart the agent session afterwards so the skill list is refreshed. The installed names are
+```warp-opus-et``` and ```opus-et-analysis```.
 
-```bash
-mkdir -p ~/.codex/skills
-rsync -av warp-opus-et/ ~/.codex/skills/warp-opus-et/
-```
-
-For Kimi Code CLI, the recommended cross-agent user directory is `~/.config/agents/skills/`:
-
-```bash
-mkdir -p ~/.config/agents/skills
-rsync -av warp-opus-et/ ~/.config/agents/skills/warp-opus-et/
-```
-
-Kimi can also load from a custom directory:
-
-```bash
-kimi --skills-dir "$(pwd)/warp-opus-et"
-```
-
-Restart the agent session after installation so the skill list is refreshed. The installed skill name is `warp-opus-et`.
-
-After installation, you can ask the agent questions such as:
+### Asking for something
 
 ```
 "Use warp-opus-et to set up a WARP to OPUS-ET pipeline for my tilt series"
 "Validate Phase 6 template matching for species ribo"
 "Generate the pipeline.conf and species_ribo.conf I need before submitting SLURM jobs"
+"Analyze epoch 39 with 10 PCs and 20 clusters"
+"Combine clusters 9, 10, 11, 12 and create a pose pickle"
+"Run deformation analysis along PC1 using cluster 17 as template"
 ```
 
-The skill ships these files:
+The commands an agent issues are the ones documented in [training](#training) and
+[analyze result](#analysis) above. What the skill adds is the parameters, which it reads out of
+```config.pkl```, and the order of the steps.
 
-```
-warp-opus-et/
-├── SKILL.md
-├── pipeline.example.conf
-├── species.example.conf
-├── validate.sh
-├── pipeline_flowchart.html
-├── references/
-└── scripts/
-    └── manifest.yml
-```
+### Before running warp-opus-et on a real project
 
-For a real project, copy and edit the example configs before running the validator:
+Copy and edit the example configs, then run the validator:
 
 ```bash
 cd /path/to/installed/warp-opus-et
@@ -626,205 +635,23 @@ cp species.example.conf species_ribo.conf
 bash validate.sh --phase 6 --species species_ribo.conf --dry-run
 ```
 
-### OPUS-ET Analysis Skill for AI Coding Agents
+### Reading config.pkl
 
-OPUS-ET includes an Agent Skills directory at `opus-et-analysis/` that provides AI-assisted analysis workflows. This skill encapsulates best practices for processing training results and can guide you through complex analysis pipelines including PCA/k-means clustering, volume generation, pose parsing, and STAR file manipulation.
-
-#### Installing the Analysis Skill
-
-Install it by copying the whole skill directory, not just `SKILL.md`.
-
-For Claude Code personal skills:
-
-```bash
-mkdir -p ~/.claude/skills
-rsync -av opus-et-analysis/ ~/.claude/skills/opus-et-analysis/
-```
-
-For Claude Code project skills, copy it inside the project and commit it:
-
-```bash
-mkdir -p .claude/skills
-rsync -av opus-et-analysis/ .claude/skills/opus-et-analysis/
-git add .claude/skills/opus-et-analysis
-```
-
-For Codex:
-
-```bash
-mkdir -p ~/.codex/skills
-rsync -av opus-et-analysis/ ~/.codex/skills/opus-et-analysis/
-```
-
-For Kimi Code CLI, the recommended cross-agent user directory is `~/.config/agents/skills/`:
-
-```bash
-mkdir -p ~/.config/agents/skills
-rsync -av opus-et-analysis/ ~/.config/agents/skills/opus-et-analysis/
-```
-
-Kimi can also load from a custom directory:
-
-```bash
-kimi --skills-dir "$(pwd)/opus-et-analysis"
-```
-
-Restart the agent session after installation so the skill list is refreshed. The installed skill name is `opus-et-analysis`.
-
-### Quick Start with the Skill
-
-Once installed, you can ask the agent to help with analysis tasks:
-
-```
-"Analyze epoch 39 with 10 PCs and 20 clusters"
-"Generate volumes for all k-means centers from epoch 39"
-"Combine clusters 9, 10, 11, 12 and create a pose pickle"
-"Run deformation analysis along PC1 using cluster 17 as template"
-```
-
-The skill will automatically extract parameters from `config.pkl` and generate the appropriate commands.
-
-### Key Configuration Parameters
-
-When working with OPUS-ET results, these key parameters are extracted from `config.pkl`:
-
-| Parameter | Source | Description |
-|-----------|--------|-------------|
-| `Apix` | `config['model_args']['Apix']` | Angstrom per pixel |
-| `D` | `config['lattice_args']['D'] - 1` | **Effective box size (lattice D minus 1)** |
-| `particles` | `config['dataset_args']['particles']` | Original STAR file path |
-| `zdim` | `config['model_args']['zdim']` | Latent dimension |
-
-**Important:** The effective box size for `parse_pose_star` is always `lattice_args['D'] - 1`, not the raw D value.
-
-Use the included helper script to extract these values:
 ```bash
 python opus-et-analysis/scripts/extract_config.py config.pkl
 ```
 
-### Standard Analysis Workflows
+| parameter | source | meaning |
+| --- | --- | --- |
+| ```Apix``` | ```config['model_args']['Apix']``` | angstrom per pixel |
+| ```D``` | ```config['lattice_args']['D'] - 1``` | effective box size |
+| ```particles``` | ```config['dataset_args']['particles']``` | the starfile the run was trained on |
+| ```zdim``` | ```config['model_args']['zdim']``` | dimension of the composition latent |
 
-#### 1. Analyze Epoch (PCA + K-means)
+***The box size to pass to ```parse_pose_star -D``` is ```lattice_args['D'] - 1```***, not the
+raw value.
 
-Run PCA and k-means clustering on a specific epoch:
-
-```bash
-dsdsh analyze <workdir> <epoch> <numpc> <numk>
-```
-
-Example:
-```bash
-dsdsh analyze . 39 10 20
-```
-
-Output: `analyze.39/` directory with `kmeans20/`, `pc1/` to `pc10/`, and visualization plots.
-
-#### 2. Generate Volumes for K-means Centers
-
-```bash
-dsd eval_vol --load weights.39.pkl \
-    -c config.pkl \
-    -o kmeans_volumes \
-    --zfile analyze.39/kmeans20/centers.txt \
-    --Apix 3.37 \
-    --prefix kmeans_cluster
-```
-
-#### 3. Generate Volumes for Principal Components
-
-```bash
-mkdir -p pc_volumes/pc1
-dsd eval_vol --load weights.39.pkl \
-    -c config.pkl \
-    -o pc_volumes/pc1 \
-    --zfile analyze.39/pc1/z_pc.txt \
-    --Apix 3.37 \
-    --prefix pc1
-```
-
-#### 4. Create Star Files for Clusters
-
-Parse poses and split by k-means cluster labels:
-
-```bash
-# Extract config to get correct D value
-python opus-et-analysis/scripts/extract_config.py config.pkl
-# Output: Apix=3.37, D=127 (effective box size)
-
-# Parse with correct box size (D-1 from lattice_args)
-dsd parse_pose_star ribotm.star \
-    -D 127 \
-    --Apix 3.37 \
-    --labels analyze.39/kmeans20/labels.pkl \
-    --outdir kmeans_pose
-```
-
-#### 5. Combine Star Files
-
-Merge multiple cluster STAR files:
-
-```bash
-# Chain combine commands for multiple files
-dsdsh combine_star pre9.star pre10.star temp1.star
-dsdsh combine_star temp1.star pre11.star temp2.star
-dsdsh combine_star temp2.star pre12.star combined_9_10_11_12.star
-```
-
-#### 6. Generate Pose Pickle for Combined Clusters
-
-```bash
-dsd parse_pose_star kmeans_pose/combined_9_10_11_12.star \
-    -D 127 \
-    --Apix 3.37 \
-    -o kmeans_pose/combined_9_10_11_12_pose.pkl
-```
-
-### Deformation Analysis Workflow
-
-For models trained with `--masks` (rigid body motion), the analysis generates **both** conformation and deformation latent spaces:
-
-```bash
-# Single command generates both analyze.39/ and defanalyze.39/
-dsdsh analyze . 39 10 30
-```
-
-| Directory | Content | Dimensions | Use Case |
-|-----------|---------|------------|----------|
-| `analyze.<epoch>/` | Full composition latent space | Model zdim (e.g., 12) | Standard volume generation |
-| `defanalyze.<epoch>/` | Deformation parameter space | Conformational zdim (e.g., 4 for 2-body) | Rigid body motion analysis |
-
-#### Generate Deformation Volumes Along PCs
-
-```bash
-# Step 1: Extract k-means center as template
-python3 << 'PYEOF'
-import pickle
-import numpy as np
-centers = pickle.load(open('analyze.39/kmeans30/centers.pkl', 'rb'))
-np.savetxt('template_z17.txt', centers[17].reshape(1, -1), fmt='%.6f')
-PYEOF
-
-# Step 2: Generate deformation volumes
-dsd eval_vol --load weights.39.pkl \
-    -c config.pkl \
-    -o defanalyze_volumes/pc1 \
-    --deform \
-    --masks mask_params.pkl \
-    --template-z template_z17.txt \
-    --template-z-ind 0 \
-    --zfile defanalyze.39/pc1/z_pc.txt \
-    --Apix 3.37 \
-    --prefix reference
-```
-
-**Key parameters for deformation mode:**
-- `--deform`: Enable deformation mode
-- `--masks`: Path to `mask_params.pkl` with rigid body definitions
-- `--template-z`: Base conformation z-values (2D: rows × zdim)
-- `--template-z-ind`: Template row index (0 for first row)
-- `--zfile`: Deformation parameters from `defanalyze.<epoch>/`
-
-#### Inspect Mask Parameters
+### Inspecting mask parameters
 
 ```python
 import torch
@@ -834,57 +661,35 @@ print('COM of bodies:', m['com_bodies'])
 print('Principal axes:', m['principal_axes'])
 ```
 
-### Complete Workflow Example
+The same numbers are stored as buffers in every multi-body ```weights.*.pkl```, which is why
+```dsdsh eval_vol ... dpc``` no longer needs ```--masks```.
 
-Full pipeline from training results to combined particle selection:
-
-```bash
-# 1. Analyze epoch
-dsdsh analyze . 39 10 20
-
-# 2. Generate volumes for k-means centers
-dsd eval_vol --load weights.39.pkl -c config.pkl -o kmeans_volumes \
-    --zfile analyze.39/kmeans20/centers.txt --Apix 3.37 --prefix kmeans_cluster
-
-# 3. Create star files for all clusters
-dsd parse_pose_star ribotm.star -D 127 --Apix 3.37 \
-    --labels analyze.39/kmeans20/labels.pkl --outdir kmeans_pose
-
-# 4. Combine specific clusters
-dsdsh combine_star kmeans_pose/pre9.star kmeans_pose/pre10.star temp.star
-dsdsh combine_star temp.star kmeans_pose/pre11.star temp2.star
-dsdsh combine_star temp2.star kmeans_pose/pre12.star \
-    kmeans_pose/combined_9_10_11_12.star
-
-# 5. Generate pose pickle for combined clusters
-dsd parse_pose_star kmeans_pose/combined_9_10_11_12.star \
-    -D 127 --Apix 3.37 -o kmeans_pose/combined_9_10_11_12_pose.pkl
-```
-
-### Directory Structure Convention
-
-Standard output structure after analysis:
+### Output layout
 
 ```
 .
-├── analyze.<epoch>/              # Conformation latent space analysis
-│   ├── kmeans<numk>/
-│   │   ├── centers.txt          # Cluster center latent codes
-│   │   ├── centers.pkl          # Numpy array of centers
-│   │   ├── labels.pkl           # Particle cluster assignments
-│   │   ├── centers_ind.txt      # Particle indices closest to centers
-│   │   └── pre<N>.star          # Star files per cluster
-│   ├── pc<N>/
-│   │   └── z_pc.txt             # PC trajectory latent codes
-│   └── *.png                    # UMAP, PCA plots
-├── defanalyze.<epoch>/           # Deformation analysis (if --masks used)
-│   └── similar structure to analyze.<epoch>/
-├── kmeans_volumes/               # Generated cluster volumes
-├── pc_volumes/                   # Generated PC trajectory volumes
-└── kmeans_pose/                  # Split star files by cluster
+├── analyze.<epoch>/              # composition latent space
+│   ├── kmeans<K>/
+│   │   ├── centers.txt           # cluster centres, the input to eval_vol
+│   │   ├── centers.pkl           # the same as a numpy array
+│   │   ├── centers_ind.txt       # index of the particle nearest each centre
+│   │   ├── centers_joint.txt     # with --joint: centres plus conformation latents
+│   │   ├── labels.pkl            # cluster of every particle, original stack numbering
+│   │   └── reference*.mrc        # after eval_vol kmeans
+│   ├── pc<N>/z_pc.txt            # PC traversal, and reference*.mrc after eval_vol pc
+│   └── *.png                     # UMAP and PCA plots
+├── analyze.filter.<epoch>/       # with --kpc: same layout, plus
+│   ├── ind.filter.<epoch>.pkl    # rows of the training starfile that were re-clustered
+│   └── particles.filter.<epoch>.star
+└── defanalyze.<epoch>/           # conformation latent space, same layout
+    └── pc<N>/z_pc.txt            # the input to eval_vol dpc
 ```
 
-For complete command reference and advanced workflows, refer to the skill documentation at `opus-et-analysis/references/commands.md` or ask Kimi Code CLI: `"Show me OPUS-ET analysis workflows"`.
+The per-cluster starfiles land wherever ```--outdir``` points, which is why they are not in the
+tree above.
+
+For the full command reference, see ```opus-et-analysis/references/commands.md``` and
+```warp-opus-et/references/```.
 
 ---
 
