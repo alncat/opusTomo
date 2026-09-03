@@ -2,6 +2,13 @@
 Lightweight parser for starfiles
 '''
 
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from functools import partial
+import fcntl
+import hashlib
+import json
+
 import numpy as np
 import pandas as pd
 from datetime import datetime as dt
@@ -12,6 +19,193 @@ import torch
 from . import mrc
 from . import lie_tools
 from .mrc import LazyImage
+
+_WARP_CTF_CACHE_VERSION = 1
+
+
+def _warp_ctf_cache_key(csvs, tilt_step, tilt_range, tilt_limit):
+    digest = hashlib.sha256()
+    digest.update(f'{_WARP_CTF_CACHE_VERSION}|{tilt_step}|{tilt_range}|{tilt_limit}\n'.encode())
+    for path in csvs:
+        digest.update(os.fsencode(path))
+        digest.update(b'\0')
+    return digest.hexdigest()
+
+
+def _default_warp_ctf_cache_path(star_path, tilt_step, tilt_range, tilt_limit):
+    config = json.dumps(
+        {
+            'version': _WARP_CTF_CACHE_VERSION,
+            'tilt_step': tilt_step,
+            'tilt_range': tilt_range,
+            'tilt_limit': tilt_limit,
+        },
+        sort_keys=True,
+    )
+    tag = hashlib.sha256(config.encode()).hexdigest()[:12]
+    return Path(f'{star_path}.warp_ctf_{tag}.npy')
+
+
+def _load_warp_ctf_cache(cache_path, cache_key):
+    metadata_path = Path(f'{cache_path}.json')
+    if not cache_path.exists() or not metadata_path.exists():
+        return None
+    try:
+        metadata = json.loads(metadata_path.read_text())
+        if (
+            metadata.get('version') != _WARP_CTF_CACHE_VERSION
+            or metadata.get('key') != cache_key
+        ):
+            return None
+        cached = np.load(cache_path, mmap_mode='c')
+        if list(cached.shape) != metadata.get('shape') or str(cached.dtype) != metadata.get('dtype'):
+            return None
+        return cached
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _write_warp_ctf_cache_metadata(cache_path, cache_key, array):
+    metadata = {
+        'version': _WARP_CTF_CACHE_VERSION,
+        'key': cache_key,
+        'shape': list(array.shape),
+        'dtype': str(array.dtype),
+    }
+    metadata_path = Path(f'{cache_path}.json')
+    temporary_path = Path(f'{metadata_path}.tmp-{os.getpid()}')
+    temporary_path.write_text(json.dumps(metadata, sort_keys=True))
+    os.replace(temporary_path, metadata_path)
+
+
+@contextmanager
+def _warp_ctf_cache_lock(cache_path):
+    lock_path = Path(f'{cache_path}.lock')
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, 'a+') as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+_WARP_CTF_COLUMNS = (
+    'TiltAngle',
+    'Defocus',
+    'Voltage',
+    'Cs',
+    'Amplitude',
+    'Bfactor',
+    'Scale',
+    'DefocusDelta',
+    'AstigmatismAngle',
+)
+
+
+def _parse_warp_ctf_csv(csv_path, tilt_step, tilt_range, tilt_limit):
+    """Parse one Warp per-particle CSV without constructing a pandas DataFrame."""
+    with open(csv_path, 'r') as f:
+        columns = [column.strip() for column in f.readline().split(',')]
+        missing = [column for column in _WARP_CTF_COLUMNS if column not in columns]
+        if missing:
+            raise ValueError(f'{csv_path} is missing Warp CTF columns: {missing}')
+        values = np.loadtxt(f, delimiter=',', ndmin=2)
+
+    column = {name: values[:, columns.index(name)] for name in _WARP_CTF_COLUMNS}
+    tilt = column['TiltAngle']
+    defocus = -column['Defocus'] * 1e10
+    defocus_delta = -column['DefocusDelta'] * 1e10
+    def_tlt = np.stack(
+        [
+            tilt,
+            defocus + defocus_delta,
+            defocus - defocus_delta,
+            np.rad2deg(column['AstigmatismAngle']),
+            column['Voltage'] / 1e3,
+            column['Cs'] * 1e3,
+            column['Amplitude'],
+            -column['Bfactor'] * 1e20 / 4.0,
+            column['Scale'],
+        ],
+        axis=1,
+    )
+
+    len_tilt = int((tilt_range * 2) / tilt_step) + 1
+    dummy_tlt = np.zeros((len_tilt, 9), dtype=np.float64)
+    dummy_tlt[:, 0] = np.linspace(-tilt_range, tilt_range, len_tilt)
+    dummy_tlt[:, 1:3] = 2e4
+    dummy_tlt[:, 4] = 300
+    dummy_tlt[:, 5] = 2.7
+
+    dummy_angles = dummy_tlt[:, 0]
+    def_angles = def_tlt[:, 0]
+    idx = np.argmin(np.abs(def_angles[:, None] - dummy_angles[None, :]), axis=1)
+    dist = np.abs(def_angles - dummy_angles[idx])
+    valid = dist <= tilt_step / 2
+    _, counts = np.unique(idx[valid], return_counts=True)
+    if np.any(counts > 1) or np.sum(valid) < len(def_angles):
+        print('Warning: multiple def_tlt or insufficient rows map to the same dummy_tlt row', csv_path)
+    dummy_tlt[idx[valid]] = def_tlt[valid]
+    if tilt_limit is not None:
+        dummy_tlt[np.abs(dummy_tlt[:, 0]) > tilt_limit, -1] = 0
+    return dummy_tlt.astype(np.float32)
+
+
+def _iter_warp_ctfs(csvs, tilt_step, tilt_range, tilt_limit, workers):
+    parse = partial(
+        _parse_warp_ctf_csv,
+        tilt_step=tilt_step,
+        tilt_range=tilt_range,
+        tilt_limit=tilt_limit,
+    )
+    workers = max(1, int(workers))
+    if workers == 1:
+        for path in csvs:
+            yield parse(path)
+        return
+
+    # ThreadPoolExecutor.map submits its whole input eagerly on supported Python versions.
+    # Bound it to small batches so a 400k-particle run does not allocate 400k futures.
+    batch_size = max(1024, workers * 32)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        for start in range(0, len(csvs), batch_size):
+            yield from executor.map(parse, csvs[start:start + batch_size])
+
+
+def _build_warp_ctf_cache(
+    cache_path, cache_key, csvs, tilt_step, tilt_range, tilt_limit, workers
+):
+    started = dt.now()
+    print(
+        f'Building Warp CTF cache from {len(csvs)} CSV files with {workers} workers: '
+        f'{cache_path}',
+        flush=True,
+    )
+    len_tilt = int((tilt_range * 2) / tilt_step) + 1
+    temporary_path = Path(f'{cache_path}.tmp-{os.getpid()}')
+    try:
+        output = np.lib.format.open_memmap(
+            temporary_path,
+            mode='w+',
+            dtype=np.float32,
+            shape=(len(csvs), len_tilt, 9),
+        )
+        for i, ctf_params in enumerate(
+            _iter_warp_ctfs(csvs, tilt_step, tilt_range, tilt_limit, workers)
+        ):
+            output[i] = ctf_params
+        output.flush()
+        del output
+        os.replace(temporary_path, cache_path)
+        cached = np.load(cache_path, mmap_mode='c')
+        _write_warp_ctf_cache_metadata(cache_path, cache_key, cached)
+        print(f'Finished Warp CTF cache in {dt.now() - started}: {cache_path}', flush=True)
+        return cached
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+
 
 class Starfile():
 
@@ -417,7 +611,8 @@ class Starfile():
             dataset = np.array([x.get() for x in dataset])
         return dataset
 
-    def get_warp3dctfs(self, datadir=None, lazy=True, tilt_step=2, tilt_range=50, tilt_limit=None):
+    def get_warp3dctfs(self, datadir=None, lazy=True, tilt_step=2, tilt_range=50, tilt_limit=None,
+                       cache_path=None, cache_workers=16):
         '''
         Return ctfs of particles of the starfile
 
@@ -425,6 +620,9 @@ class Starfile():
             datadir (str): Overwrite base directories of particle .mrcs
                 Tries both substituting the base path and prepending to the path
             If lazy=True, returns list of LazyImage instances, else np.array
+            cache_path: Optional binary sidecar. A validated cache is memory-mapped;
+                otherwise one process builds it while concurrent processes wait.
+            cache_workers: Number of bounded threads used only for the first build.
         '''
         particles = self.df['_rlnCtfImage']
 
@@ -438,78 +636,31 @@ class Starfile():
             #mrcs = prefix_paths(mrcs, datadir)
             mrc_files = ['{}/{}'.format(datadir, x) for x in mrc_files]
             csvs = ['{}/{}'.format(datadir, x) for x in csvs]
-        ctfs = []
-        tilt_range = tilt_range
-        tilt_step = tilt_step
-        len_tilt = (int((tilt_range*2)/tilt_step)+1)
-        isotropic = False
-        for csv in csvs:
-            if isotropic:
-                dummy_tlt = np.zeros((len_tilt, 7)) #isotropic
-                dummy_tlt[:, 0] = np.linspace(-tilt_range, tilt_range, len_tilt)
-                dummy_tlt[:, 1] = 2e4 #defocus
-                dummy_tlt[:, 2] = 300 #volt
-                dummy_tlt[:, 3] = 2.7
-            else:
-                dummy_tlt = np.zeros((len_tilt, 9))
-                dummy_tlt[:, 0] = np.linspace(-tilt_range, tilt_range, len_tilt)
-                dummy_tlt[:, 1] = 2e4 #dfu
-                dummy_tlt[:, 2] = 2e4 #dfv
-                dummy_tlt[:, 4] = 300 #volt
-                dummy_tlt[:, 5] = 2.7 #cs
-            assert os.path.exists(csv), f'{csv} not found'
-            #parse csv
-            df = pd.read_csv(csv, skipinitialspace=True)
-            #df.columns = df.columns.str.strip()
-            tilt = df['TiltAngle'].astype(float).to_numpy()
-            defocus = -df['Defocus'].astype(float).to_numpy()*1e10 #defocus from warp is in m, -(dfu + dfv)/2
-            voltage = df['Voltage'].astype(float).to_numpy()/1e3
-            cs = df['Cs'].astype(float).to_numpy()*1e3
-            w = df['Amplitude'].astype(float).to_numpy()
-            bfactor = -df['Bfactor'].astype(float).to_numpy()*1e20/4. #bfactor from warp is in m^2, scale it down a little bit
-            scale = df['Scale'].astype(float).to_numpy()
-            defocus_delta = -df['DefocusDelta'].astype(float).to_numpy()*1e10 # -(dfu - dfv)/2
-            dfu = defocus + defocus_delta # dfu/2 + dfv/2 + dfu/2 - dfv/2
-            dfv = defocus - defocus_delta # dfu/2 + dfv/2 - dfu/2 + dfv/2
+        if cache_path is not None:
+            cache_path = Path(cache_path)
+            cache_key = _warp_ctf_cache_key(csvs, tilt_step, tilt_range, tilt_limit)
+            cached = _load_warp_ctf_cache(cache_path, cache_key)
+            if cached is not None:
+                return None, mrc_files, cached
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with _warp_ctf_cache_lock(cache_path):
+                # Another distributed rank may have completed the cache while this one waited.
+                cached = _load_warp_ctf_cache(cache_path, cache_key)
+                if cached is None:
+                    cached = _build_warp_ctf_cache(
+                        cache_path,
+                        cache_key,
+                        csvs,
+                        tilt_step,
+                        tilt_range,
+                        tilt_limit,
+                        cache_workers,
+                    )
+            return None, mrc_files, cached
 
-            dfangle = df['AstigmatismAngle'].astype(float)/np.pi*180
-            #print(scale)
-            if isotropic:
-                def_tlt = np.stack([tilt, defocus, voltage, cs, w, bfactor, scale], axis=1)
-            else:
-                def_tlt = np.stack([tilt, dfu, dfv, dfangle, voltage, cs, w, bfactor, scale], axis=1)
-            dummy_angles = dummy_tlt[:, 0]
-            def_angles = def_tlt[:, 0]
-            #get nearest neighbor
-            idx = np.argmin(np.abs(def_angles[:, None] - dummy_angles[None, :]), axis=1)
-            dist = np.abs(def_angles - dummy_angles[idx])
-            #keep those within tolerance
-            tol = tilt_step / 2
-            valid = dist <= tol
-
-            #check one-to-one correspondence
-            unique_idx, counts = np.unique(idx[valid], return_counts=True)
-            if np.any(counts > 1) or np.sum(valid) < len(def_angles):
-                print("Warning: multiple def_tlt or insufficient rows map to the same dummy_tlt row", csv)
-
-            dummy_tlt[idx[valid]] = def_tlt[valid]
-
-            ##sort tilt first
-            #def_tlt = def_tlt[def_tlt[:, 0].argsort()]
-            #mask = np.isclose(def_tlt[:, 0, None], dummy_tlt[:, 0], atol=tilt_step/2.-0.1)
-            ##print(def_tlt[:, 0], dummy_tlt[np.where(mask)[1]][:, 0],)
-            #mask_indices = np.where(mask)[1]
-            #try:
-            #    dummy_tlt[mask_indices] = def_tlt
-            #except:
-            #    print(csv, "tilt assignment error!")
-            #    raise RuntimeError
-            #if dummy_tlt[dummy_tlt[:, -1] != 0.].shape[0] != def_tlt.shape[0]:
-            #    print(csv, mask_indices, dummy_tlt, def_tlt)
-            #assert np.sum(np.abs(dummy_tlt[dummy_tlt[:, -1] != 0.] - def_tlt)) == 0.
-            if tilt_limit is not None:
-                dummy_tlt[np.abs(dummy_tlt[:, 0]) > tilt_limit, -1] = 0.
-            ctfs.append(dummy_tlt)
+        ctfs = list(
+            _iter_warp_ctfs(csvs, tilt_step, tilt_range, tilt_limit, cache_workers)
+        )
 
         #header = mrc.parse_header(mrc_files[0])
         #Dx = header.fields['nx'] # image size along one dimension in pixels
