@@ -52,6 +52,7 @@ class HetOnlyVAE(nn.Module):
             masks_params=None,
             num_bodies=0,
             z_affine_dim=4,
+            blend_radius=1.,
             ctf_alpha=0.,
             ctf_beta=1.,
             normalize_ctf=False,
@@ -134,6 +135,7 @@ class HetOnlyVAE(nn.Module):
         self.symm = symm
         self.deform_emb_size = deform_emb_size
         self.masks_params = masks_params
+        self.blend_radius = blend_radius
         self.Apix = Apix
         self.decoder = get_decoder(3+zdim, lattice.D, players, pdim, domain, enc_type, enc_dim,
                                    activation, ref_vol=ref_vol, Apix=Apix,
@@ -143,6 +145,7 @@ class HetOnlyVAE(nn.Module):
                                    fixed_deform=self.fixed_deform, deform_emb_size=self.deform_emb_size,
                                    render_size=self.encoder_image_size, down_vol_size=self.down_vol_size, tmp_prefix=tmp_prefix,
                                    masks_params=self.masks_params, num_bodies=self.num_bodies, affine_dim=self.z_affine_dim,
+                                   blend_radius=self.blend_radius,
                                    ctf_alpha=self.ctf_alpha, ctf_beta=self.ctf_beta, normalize_ctf=self.normalize_ctf, rank=rank,
                                    estimate_pose=self.estimate_pose)
 
@@ -360,6 +363,7 @@ def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activati
                 ref_vol=None, Apix=1., template_type=None, warp_type=None,
                 symm=None, ctf_grid=None, fixed_deform=False, deform_emb_size=2, render_size=140,
                 down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4,
+                blend_radius=1.,
                 ctf_alpha=0, ctf_beta=1, normalize_ctf=False, rank=0, estimate_pose=False):
     if enc_type == 'none':
         if domain == 'hartley':
@@ -375,7 +379,8 @@ def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activati
                               deform_emb_size=deform_emb_size,
                               zdim=in_dim - 3, render_size=render_size,
                               down_vol_size=down_vol_size, tmp_prefix=tmp_prefix, masks_params=masks_params, num_bodies=num_bodies,
-                              affine_dim=affine_dim, ctf_alpha=ctf_alpha, ctf_beta=ctf_beta, normalize_ctf=normalize_ctf, rank=rank,
+                              affine_dim=affine_dim, blend_radius=blend_radius,
+                              ctf_alpha=ctf_alpha, ctf_beta=ctf_beta, normalize_ctf=normalize_ctf, rank=rank,
                               estimate_pose=estimate_pose)
     else:
         model = PositionalDecoder if domain == 'hartley' else FTPositionalDecoder
@@ -1113,6 +1118,7 @@ class VanillaDecoder(nn.Module):
     def __init__(self, D, in_vol=None, Apix=1., template_type=None, templateres=256, warp_type=None, symm_group=None,
                  ctf_grid=None, fixed_deform=False, deform_emb_size=2, zdim=8, render_size=140,
                  use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4,
+                 blend_radius=1.,
                  ctf_alpha=0., ctf_beta=1., normalize_ctf=False, rank=0, estimate_pose=False):
         super(VanillaDecoder, self).__init__()
         self.D = D
@@ -1182,8 +1188,18 @@ class VanillaDecoder(nn.Module):
                     self.register_buffer("principal_axes", masks_params["principal_axes"])
                     self.register_buffer("principal_axesT", torch.transpose(masks_params["principal_axes"], 1, 2).contiguous())
                     self.register_buffer("A_rot90", lie_tools.yrot(torch.tensor(-90)))
+                    if blend_radius <= 0.:
+                        raise ValueError(f'blend_radius must be positive, got {blend_radius}')
                     #scale change the original scale in render_size to the volume size after cropping
-                    self.register_buffer("radius", masks_params["radii_bodies"]/self.vol_size)
+                    # the width each body's motion is blended on. multi_body_grid weights body k
+                    # by exp(-0.2*sum((x.axes_k)^2/radius_k^2)) and normalises across bodies, so
+                    # at the radii the mask file carries a body does not pick up all of its own
+                    # motion at its own centre -- the rest leaks in from its neighbours, whose
+                    # rotations arrive there as a translation. blend_radius narrows or widens
+                    # that gaussian. The scaled value is what gets saved, so eval reads it back
+                    # from the checkpoint and does not need the flag again.
+                    self.register_buffer("radius", masks_params["radii_bodies"]
+                                         /self.vol_size*blend_radius)
                     self.estimate_pose = True
                     if rank == 0:
                         log(f"decoder: com of bodies are {self.com_bodies}, rg of bodies are {self.radius*self.scale}, scale is {self.scale}")
