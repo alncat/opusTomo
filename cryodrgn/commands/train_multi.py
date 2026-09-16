@@ -43,6 +43,13 @@ def add_args(parser):
     parser.add_argument('--zdim', type=int, required=False, help='Dimension of latent variable')
     parser.add_argument('--poses', type=os.path.abspath, required=True, help='Image poses (.pkl)')
     parser.add_argument('--masks', type=os.path.abspath, required=False, help='Masks related parameters (.pkl)')
+    parser.add_argument('--blend-radius', type=float, default=1.,
+                        help="Scale the width of the gaussian each body's motion is blended on, "
+                             "relative to the radii carried by --masks. Below 1 a body keeps more "
+                             "of its own motion at its own centre instead of picking up its "
+                             "neighbours'; above 1 the field is smoother across body boundaries. "
+                             "The density is trained around whatever width it was given, so this "
+                             "is a from-scratch setting (default: %(default)s)")
     parser.add_argument('--ctf', metavar='pkl', type=os.path.abspath, help='CTF parameters (.pkl)')
     parser.add_argument('--group', metavar='pkl', type=os.path.abspath, help='group assignments (.pkl)')
     parser.add_argument('--group-stat', metavar='pkl', type=os.path.abspath, help='group statistics (.pkl)')
@@ -657,7 +664,8 @@ def save_config(args, dataset, lattice, model, out_config):
                       template_type=args.template_type,
                       down_vol_size=model.down_vol_size,
                       Apix=model.decoder.Apix,
-                      templateres=model.templateres)
+                      templateres=model.templateres,
+                      blend_radius=args.blend_radius)
     config = dict(dataset_args=dataset_args,
                   lattice_args=lattice_args,
                   model_args=model_args)
@@ -844,7 +852,8 @@ def main(args):
                 downfrac=args.downfrac,
                 templateres=args.templateres,
                 tmp_prefix=args.tmp_prefix,
-                masks_params=masks_params)
+                masks_params=masks_params,
+                blend_radius=args.blend_radius)
 
 
     flog(model)

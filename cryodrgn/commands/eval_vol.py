@@ -71,7 +71,7 @@ def add_args(parser):
 MASK_BUFFERS = ('com_bodies', 'in_relatives', 'rotate_directions', 'orient_bodies',
                 'principal_axes', 'radius')
 
-def masks_params_from_checkpoint(decoder_state, vol_size):
+def masks_params_from_checkpoint(decoder_state, vol_size, blend_radius=1.):
     '''Rebuild the mask_params.pkl dict from the buffers a multi-body checkpoint carries.
 
     VanillaDecoder.__init__ stores the geometry as buffers, dividing the lengths by vol_size,
@@ -79,6 +79,9 @@ def masks_params_from_checkpoint(decoder_state, vol_size):
     lets eval_vol run without --masks: masks_params is what switches the decoder's affine head
     on, and building the decoder without it drops template.affine_out.* in the state-dict
     filter below and then fails in forward() on `affine[1][i]`.
+
+    The radius buffer also carries the blend_radius the run was trained with, and the decoder
+    multiplies by it again, so divide it back out here to return the radii the mask pkl held.
     '''
     missing = [k for k in MASK_BUFFERS if k not in decoder_state]
     if missing:
@@ -90,7 +93,7 @@ def masks_params_from_checkpoint(decoder_state, vol_size):
                 rotate_directions=decoder_state['rotate_directions']*vol_size,
                 orient_bodies=decoder_state['orient_bodies'],
                 principal_axes=decoder_state['principal_axes'],
-                radii_bodies=decoder_state['radius']*vol_size)
+                radii_bodies=decoder_state['radius']*vol_size/blend_radius)
 
 def check_inputs(args):
     if args.z_start:
@@ -167,10 +170,15 @@ def main(args):
     # leaving masks_params None on a multi-body checkpoint used to build a decoder with no
     # affine head, which then failed inside forward() with
     # "'NoneType' object is not subscriptable".
+    # a run trained with --blend-radius recorded it here; the trained radius buffer below
+    # already carries it, so this only keeps the model that gets built consistent with it
+    blend_radius = cfg['model_args'].get('blend_radius', 1.)
+    if blend_radius != 1.:
+        log('blend_radius from config.pkl: {}'.format(blend_radius))
     if args.masks:
         masks_params = torch.load(args.masks, map_location=device)
     elif args.num_bodies > 0 and decoder_state is not None:
-        masks_params = masks_params_from_checkpoint(decoder_state, D - 1)
+        masks_params = masks_params_from_checkpoint(decoder_state, D - 1, blend_radius)
         log('--masks was not given; rebuilt the {}-body mask parameters from the buffers in '
             '{}'.format(args.num_bodies, args.load))
     else:
@@ -194,7 +202,8 @@ def main(args):
                 device=device, symm=args.symm, ctf_grid=None,
                 deform_emb_size=args.deform_size, downfrac=downfrac,
                 templateres=templateres, window_r=window_r, masks_params=masks_params,
-                num_bodies=args.num_bodies, z_affine_dim=z_affine_dim)
+                num_bodies=args.num_bodies, z_affine_dim=z_affine_dim,
+                blend_radius=blend_radius)
 
     vanilla = args.pe_type == "vanilla"
 

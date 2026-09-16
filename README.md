@@ -3,7 +3,8 @@
 2. [Getting Started](#setup)
 3. [Training](#training)
    1. [train_tomo](#train_tomo)
-   2. [Warp CTF cache](#ctfcache)
+   2. [Multi-body blending width](#blendradius)
+   3. [Warp CTF cache](#ctfcache)
 4. [Analyze Result](#analysis)
    1. [sample latent spaces](#sample)
    2. [reconstruct volumes](#reconstruct)
@@ -261,6 +262,7 @@ The functionality of each argument is explained in the table:
 | --datadir | the root directory before the filename of subtomogram in input starfile |
 | --estpose | estimate a pose correction for each subtomogram during training |
 | --masks | the mask parameters for defining the rigid-body dynamics |
+| --blend-radius | scale the width of the gaussian each body's motion is blended on, relative to the radii in ```--masks```. See [multi-body blending width](#blendradius) below. Default is 1 |
 | --ctfalpha | the degree of ctf correction on the experimental subtomogram, the default value is 0, which is equivalent to phase flipping. You can also try value like 0.5, which will further correct the amplitude of FT of subtomogram by the square root of the ctf function|
 | --ctfbeta | the degree of ctf correction on the reconstruction output by decoder, the default value is 1. You can also try value like 0.5, which will make the voxel values output by decoder smaller since the ctf correction is weaker.|
 | --tilt-step | the interval between successive tilts, default is 2, you need to change it according to your experimental settings when training subtomograms from WARP|
@@ -284,6 +286,44 @@ The functionality of each argument is explained in the table:
 | --optimize-b | optimize the b factor during training |
 | --ind | a pkl of particle indices. ***Not honoured for WARP subtomograms***: ```LazyTomoWARPMRCData``` accepts the argument and never applies it, so the whole star is trained on. Slice the star with ```dsd filter_star``` instead |
 | --amp | mixed precision; ```train_tomo_dist``` does not support it |
+
+### Multi-body blending width <div id="blendradius">
+
+With ```--masks```, the decoder does not cut the volume into disjoint pieces. It computes a
+displacement field for every body and mixes them at each point with a gaussian centred on that
+body:
+
+```
+w_k(x) = exp(-0.2 * sum_i ((x - com_k) . axes_k[i] / (radius_k[i] * blend_radius))^2)
+```
+
+normalised across bodies, with ```com_bodies```, ```principal_axes``` and ```radii_bodies``` all
+coming from the mask pkl. The mixing is what keeps the field continuous where two bodies meet.
+
+At the radii the pkl carries, a body does not pick up all of its own motion even at its own
+centre: the neighbouring gaussians still have value there, so part of what is applied is the
+neighbours' displacement. Over the distance between two body centres a neighbour's rotation is
+very nearly a rigid translation, so what leaks in shifts the body rather than distorting it.
+```--blend-radius``` scales the radii, and with them that width: below 1 each body keeps more of
+its own motion, above 1 the field is smoother across body boundaries.
+
+How much is at stake depends entirely on the mask file — on how far apart the centres are
+relative to the radii — so measure it rather than guessing:
+
+```
+python analysis_scripts/blend_self_weight.py mask_params.pkl
+```
+
+It prints, for each body, the fraction of its own motion it keeps at its own centre over a range
+of values. For the 2-body ribosome masks used here the bodies are well separated and already
+keep 84 and 97 percent at the default, so there is little to recover; a 4-body definition with
+bodies packed closer together can sit near half, where narrowing the width matters.
+
+The decoder is trained around whatever width it was given, so this is a from-scratch setting:
+changing it when restarting from a checkpoint, or at evaluation time, puts the density and the
+field out of step. The scaled radii are what get written into ```weights.*.pkl```, and the value
+is recorded in ```config.pkl```, so ```eval_vol``` reproduces the training geometry without being
+told again.
 
 ### Warp CTF cache <div id="ctfcache">
 

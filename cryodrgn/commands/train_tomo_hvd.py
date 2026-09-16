@@ -49,6 +49,13 @@ def add_args(parser):
     parser.add_argument('--zaffinedim', type=int, default=4, required=False, help='Dimension of latent variable')
     parser.add_argument('--poses', type=os.path.abspath, required=True, help='Image poses (.pkl)')
     parser.add_argument('--masks', type=os.path.abspath, required=False, help='Masks related parameters (.pkl)')
+    parser.add_argument('--blend-radius', type=float, default=1.,
+                        help="Scale the width of the gaussian each body's motion is blended on, "
+                             "relative to the radii carried by --masks. Below 1 a body keeps more "
+                             "of its own motion at its own centre instead of picking up its "
+                             "neighbours'; above 1 the field is smoother across body boundaries. "
+                             "The density is trained around whatever width it was given, so this "
+                             "is a from-scratch setting (default: %(default)s)")
     parser.add_argument('--symm', type=os.path.abspath, required=False, help='Symmetric Operators (.pkl)')
     parser.add_argument('--ctf', metavar='pkl', type=os.path.abspath, help='CTF parameters (.pkl)')
     parser.add_argument('--angpix', type=float, help='angstrom per pixel')
@@ -680,6 +687,7 @@ def save_config(args, dataset, lattice, model, out_config):
                       down_vol_size=model.down_vol_size,
                       Apix=model.decoder.Apix,
                       templateres=model.templateres,
+                      blend_radius=args.blend_radius,
                       encoderres=model.encoderres)
     config = dict(dataset_args=dataset_args,
                   lattice_args=lattice_args,
@@ -865,6 +873,7 @@ def main(args):
                 encoderres=args.encoderres,
                 tmp_prefix=args.tmp_prefix,
                 masks_params=masks_params,
+                blend_radius=args.blend_radius,
                 z_affine_dim=args.zaffinedim,
                 ctf_alpha=args.ctfalpha,
                 ctf_beta=args.ctfbeta,
