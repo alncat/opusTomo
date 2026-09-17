@@ -26,7 +26,7 @@ from cryodrgn import dataset
 from cryodrgn import ctf
 
 from cryodrgn.pose import PoseTracker
-from cryodrgn.models import HetOnlyVAE
+from cryodrgn.models import HetOnlyVAE, validate_blend_radius_on_resume
 from cryodrgn.lattice import Lattice, Grid, CTFGrid
 from cryodrgn.group_stat import GroupStat
 from cryodrgn.beta_schedule import get_beta_schedule, LinearSchedule
@@ -909,6 +909,7 @@ def main(args):
             flog('Loading checkpoint from {} and mapping to {}'.format(args.load, local_rank))
         map_location = {"cuda:0": f"cuda:{local_rank}"}
         checkpoint = torch.load(args.load, map_location=map_location)
+        validate_blend_radius_on_resume(_unparallelize(model.decoder), checkpoint['decoder_state_dict'])
         if rank == 0:
             print(checkpoint.keys())
         #pretrained_dict = checkpoint['model_state_dict']

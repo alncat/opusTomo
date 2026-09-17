@@ -319,11 +319,11 @@ of values. For the 2-body ribosome masks used here the bodies are well separated
 keep 84 and 97 percent at the default, so there is little to recover; a 4-body definition with
 bodies packed closer together can sit near half, where narrowing the width matters.
 
-The decoder is trained around whatever width it was given, so this is a from-scratch setting:
-changing it when restarting from a checkpoint, or at evaluation time, puts the density and the
-field out of step. The scaled radii are what get written into ```weights.*.pkl```, and the value
-is recorded in ```config.pkl```, so ```eval_vol``` reproduces the training geometry without being
-told again.
+The decoder is trained around whatever width it was given, so this is a from-scratch setting.
+When restarting from a checkpoint, pass the original ```--blend-radius``` and ```--masks```;
+training rejects a mismatched radius. The scaled radii are what get written into
+```weights.*.pkl```, and the value is recorded in ```config.pkl```, so ```eval_vol``` reproduces
+the training geometry without being told again.
 
 ### Warp CTF cache <div id="ctfcache">
 

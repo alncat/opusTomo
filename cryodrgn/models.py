@@ -22,6 +22,23 @@ from . import ctf
 log = utils.log
 ALIGN_CORNERS = utils.ALIGN_CORNERS
 
+
+def validate_blend_radius_on_resume(decoder, decoder_state):
+    """Keep a resumed multi-body decoder's trained motion blending width."""
+    saved_radius = decoder_state.get("radius")
+    if saved_radius is None:
+        return
+    current_radius = getattr(decoder, "radius", None)
+    if (current_radius is None or current_radius.shape != saved_radius.shape or
+            not torch.allclose(current_radius, saved_radius.to(current_radius.device))):
+        raise ValueError(
+            "Checkpoint motion blending radius differs from this run. "
+            "Resume with the original --blend-radius and --masks settings."
+        )
+    with torch.no_grad():
+        current_radius.copy_(saved_radius)
+
+
 class HetOnlyVAE(nn.Module):
     # No pose inference
     def __init__(self, lattice, # Lattice object
@@ -978,10 +995,10 @@ class SpatialTransformer(nn.Module):
         #mask_weights = torch.exp(-(roted.detach().pow(2).sum(dim=-1, keepdim=True))*0.5/radius**2) + 1e-5
         if axes is not None:
             rroted = roted.detach() @ axes.unsqueeze(1).unsqueeze(1)
-            mask_weights = torch.exp(-0.2*(rroted.pow(2)/radius**2).sum(dim=-1, keepdim=True)) + 1e-5
+            mask_logits = -0.2*(rroted.pow(2)/radius**2).sum(dim=-1, keepdim=True)
         else:
-            mask_weights = torch.exp(-0.2*(roted.detach().pow(2)/radius**2).sum(dim=-1, keepdim=True)) + 1e-5
-        mask_weights /= mask_weights.sum(dim=0, keepdim=True)
+            mask_logits = -0.2*(roted.detach().pow(2)/radius**2).sum(dim=-1, keepdim=True)
+        mask_weights = torch.softmax(mask_logits, dim=0)
         assert mask_weights.shape == torch.Size([coms.shape[0], grid_size, grid_size, grid_size, 1])
         #sample_grid = self.grid_coarse @ rot_ori
         #sample_grid = torch.permute(sample_grid, dims=[0,4,1,2,3])

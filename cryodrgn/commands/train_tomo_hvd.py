@@ -24,7 +24,7 @@ from cryodrgn import dataset
 from cryodrgn import ctf
 
 from cryodrgn.pose import PoseTracker
-from cryodrgn.models import HetOnlyVAE
+from cryodrgn.models import HetOnlyVAE, validate_blend_radius_on_resume
 from cryodrgn.lattice import Lattice, Grid, CTFGrid
 from cryodrgn.group_stat import GroupStat
 from cryodrgn.beta_schedule import get_beta_schedule, LinearSchedule
@@ -936,10 +936,23 @@ def main(args):
             log('Warning: Masked input image dimension is not a mutiple of 8 -- AMP training speedup is not optimized')
         model, optim = amp.initialize(model, optim, opt_level='O1')
 
+    # Validate on rank 0 and tell every rank before they reach the parameter broadcast.
+    if args.load:
+        radius_mismatch = torch.tensor([0])
+        if hvd.rank() == 0:
+            checkpoint = torch.load(args.load)
+            try:
+                validate_blend_radius_on_resume(model.decoder, checkpoint['decoder_state_dict'])
+            except ValueError:
+                radius_mismatch[0] = 1
+        radius_mismatch = hvd.broadcast(radius_mismatch, root_rank=0)
+        if radius_mismatch.item():
+            raise ValueError("Checkpoint motion blending radius differs from this run. "
+                             "Resume with the original --blend-radius and --masks settings.")
+
     # restart from checkpoint
     if args.load and hvd.rank() == 0:
         flog('Loading checkpoint from {}'.format(args.load))
-        checkpoint = torch.load(args.load)
         print(checkpoint.keys())
         #pretrained_dict = checkpoint['model_state_dict']
         #model_dict = model.state_dict()
