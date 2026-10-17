@@ -104,6 +104,7 @@ def cluster_kmeans(z, K, on_data=True, reorder=True, random_state=0):
     if reorder:
         g = sns.clustermap(centers)
         reordered = g.dendrogram_row.reordered_ind
+        plt.close(g.fig) # only the ordering is needed; the figure would otherwise stay open
         centers = centers[reordered]
         if on_data: centers_ind = centers_ind[reordered]
         tmp = {k:i for i,k in enumerate(reordered)}
@@ -128,6 +129,7 @@ def cluster_sphere_kmeans(z, K, on_data=True, reorder=True):
     if reorder:
         g = sns.clustermap(centers)
         reordered = g.dendrogram_row.reordered_ind
+        plt.close(g.fig) # only the ordering is needed; the figure would otherwise stay open
         centers = centers[reordered]
         if on_data: centers_ind = centers_ind[reordered]
         tmp = {k:i for i,k in enumerate(reordered)}
