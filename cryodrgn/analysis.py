@@ -237,6 +237,39 @@ def annotate_centers(ax, centers, labels=None, colors=None):
     adjust_text(texts, x=centers[:, 0], y=centers[:, 1], ax=ax, expand=(1.5, 1.7),
                 arrowprops=dict(arrowstyle='-', color='0.3', lw=0.6))
 
+def robust_limits(x, y, include=None, q=0.5, pad=0.05):
+    '''Axis limits spanning the central (100-2q)% of the points, widened to cover every
+    point in include (e.g. cluster centers, so none is cut off), plus a margin.
+    A few far outliers otherwise stretch the axes and squeeze the bulk into a corner.'''
+    xy = np.stack([np.asarray(x), np.asarray(y)], axis=1)
+    lo, hi = np.percentile(xy, q, axis=0), np.percentile(xy, 100 - q, axis=0)
+    if include is not None:
+        include = np.asarray(include)[:, :2]
+        lo, hi = np.minimum(lo, include.min(axis=0)), np.maximum(hi, include.max(axis=0))
+    margin = pad * (hi - lo)
+    lo, hi = lo - margin, hi + margin
+    return (lo[0], hi[0]), (lo[1], hi[1])
+
+def _note_outside(ax, x, y, xlim, ylim):
+    '''Say how many points fall outside the plotted range, so clipping is never silent.'''
+    x, y = np.asarray(x), np.asarray(y)
+    n_out = int(np.sum((x < xlim[0]) | (x > xlim[1]) | (y < ylim[0]) | (y > ylim[1])))
+    if n_out:
+        ax.text(0.99, 0.01, f'{n_out} points outside view', transform=ax.transAxes,
+                ha='right', va='bottom', fontsize=8, color='0.4')
+
+def jointplot_view(x, y, xlim=None, ylim=None, **kwargs):
+    '''sns.jointplot restricted to xlim/ylim. Only in-view points are passed on, so the
+    hexbin grid and the marginal histograms are binned over the view rather than over
+    the outliers' full range (which makes the bins coarse).'''
+    x, y = np.asarray(x), np.asarray(y)
+    if xlim is None or ylim is None:
+        return sns.jointplot(x=x, y=y, **kwargs)
+    m = (x >= xlim[0]) & (x <= xlim[1]) & (y >= ylim[0]) & (y <= ylim[1])
+    g = sns.jointplot(x=x[m], y=y[m], xlim=xlim, ylim=ylim, **kwargs)
+    _note_outside(g.ax_joint, x, y, xlim, ylim)
+    return g
+
 def scatter_annotate(x, y, centers=None, centers_ind=None, annotate=True, labels=None, alpha=.1, s=1, xlim=None, ylim=None):
     fig, ax = plt.subplots()
     ax.scatter(x, y, alpha=alpha, s=s, rasterized=True)
@@ -244,6 +277,8 @@ def scatter_annotate(x, y, centers=None, centers_ind=None, annotate=True, labels
         ax.set_xlim(xlim[0], xlim[1])
     if ylim is not None:
         ax.set_ylim(ylim[0], ylim[1])
+    if xlim is not None and ylim is not None:
+        _note_outside(ax, x, y, xlim, ylim)
     ax.set_aspect('equal')
 
     # plot cluster centers
@@ -258,8 +293,8 @@ def scatter_annotate(x, y, centers=None, centers_ind=None, annotate=True, labels
 
     return fig, ax
 
-def scatter_annotate_hex(x, y, centers=None, centers_ind=None, annotate=True, labels=None):
-    g = sns.jointplot(x=x, y=y, kind='hex')
+def scatter_annotate_hex(x, y, centers=None, centers_ind=None, annotate=True, labels=None, xlim=None, ylim=None):
+    g = jointplot_view(x, y, xlim, ylim, kind='hex')
 
     # plot cluster centers
     if centers_ind is not None:
