@@ -17,6 +17,9 @@ from pathlib import Path
 import matplotlib
 matplotlib.use('Agg') # non-interactive backend
 import matplotlib.pyplot as plt
+# every figure below is saved at this resolution, cropped to its contents so axis
+# labels are never clipped at the image edge
+plt.rcParams.update({'savefig.dpi': 200, 'savefig.bbox': 'tight'})
 import seaborn as sns
 import torch
 
@@ -55,16 +58,18 @@ def analyze_z1(z, outdir, vg):
     z = z.reshape(-1)
     N = len(z)
 
-    plt.figure(1)
-    plt.scatter(np.arange(N), z, alpha=.1, s=2)
+    plt.figure()
+    plt.scatter(np.arange(N), z, alpha=.1, s=2, rasterized=True)
     plt.xlabel('particle')
     plt.ylabel('z')
     plt.savefig(f'{outdir}/z.png')
+    plt.close()
 
-    plt.figure(2)
-    sns.distplot(z)
+    plt.figure()
+    sns.histplot(z, kde=True)
     plt.xlabel('z')
     plt.savefig(f'{outdir}/z_hist.png')
+    plt.close()
 
     ztraj = np.linspace(*np.percentile(z,(5,95)), 10) # or np.percentile(z, np.linspace(5,95,10)) ?
     vg.gen_volumes(outdir, ztraj)
@@ -82,7 +87,10 @@ def save_pca(outdir, pc, pca):
     utils.save_pkl(pca, f'{outdir}/pca.pkl')
     np.savetxt(f'{outdir}/explained_variance_ratio.txt', pca.explained_variance_ratio_)
 
-def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=20, joint=False, multi_z=None):
+def analyze_zN(z, outdir, vg, pose_tilt, skip_umap=False, num_pcs=2, num_ksamples=20, joint=False, multi_z=None):
+    '''pose_tilt: per-particle Euler tilt angle in degrees (0-180), or None. Used to color
+    umap.png, so a latent direction that follows particle orientation (and thus the
+    missing wedge) shows up as a color gradient.'''
     zdim = z.shape[1]
     if joint and multi_z is None:
         raise ValueError("joint=True needs multi_z: centers_joint is built by concatenating the "
@@ -94,12 +102,17 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     pc, pca = analysis.run_pca(z)
     log(f'PCA transformed data shape {pc.shape}')
     save_pca(outdir, pc, pca)
+    plot_pca_variance(pca, f'{outdir}/pca_variance.png')
+    # axis labels carry each PC's share of the variance
+    pc_labels = [f'PC{i+1} ({100*r:.1f}%)' for i, r in enumerate(pca.explained_variance_ratio_)]
     print(pc[:4, :])
     log('Generating volumes...')
+    pc_trajs = []
     for i in range(num_pcs):
         start, end = np.percentile(pc[:,i],(1.0,99.0))
         log(f'traversing pc {i} from {start} to {end}')
         z_pc = analysis.get_pc_traj(pca, z.shape[1], 10, i+1, start, end)
+        pc_trajs.append(z_pc)
         if not os.path.exists(f'{outdir}/pc{i+1}'):
             os.mkdir(f'{outdir}/pc{i+1}')
         vg.gen_volumes(f'{outdir}/pc{i+1}', z_pc)
@@ -151,6 +164,7 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     log('Generating volumes...')
     vg.gen_volumes(f'{outdir}/kmeans{K}', centers)
     log(f'{np.bincount(kmeans_labels)}')
+    plot_cluster_sizes(kmeans_labels, K, f'{outdir}/kmeans{K}/cluster_sizes.png')
 
     # UMAP -- slow step
     if zdim > 2:
@@ -172,90 +186,163 @@ def analyze_zN(z, outdir, vg, groups, skip_umap=False, num_pcs=2, num_ksamples=2
     #    tsne_emb = analysis.run_tsne(z)
     #    utils.save_pkl(tsne_emb, tsne_file)
 
-    # Make some plots
+    # Make some plots. Each savefig is followed by plt.close() (the current figure
+    # is always the one just saved), so figures do not pile up across the run.
     log('Generating plots...')
-    plt.figure(1)
     g = sns.jointplot(x=pc[:,0], y=pc[:,1], alpha=.1, s=2)
-    g.set_axis_labels('PC1','PC2')
-    plt.tight_layout()
+    g.set_axis_labels(pc_labels[0], pc_labels[1])
     plt.savefig(f'{outdir}/z_pca.png')
+    plt.close()
 
-    plt.figure(2)
     g = sns.jointplot(x=pc[:,0], y=pc[:,1], kind='hex')
-    g.set_axis_labels('PC1','PC2')
-    plt.tight_layout()
+    g.set_axis_labels(pc_labels[0], pc_labels[1])
     plt.savefig(f'{outdir}/z_pca_hexbin.png')
+    plt.close()
 
     if zdim > 2 and not skip_umap:
-        xmax = np.max(umap_emb[:, 0])
-        xmin = np.min(umap_emb[:, 0])
-        ymax = np.max(umap_emb[:, 1])
-        ymin = np.min(umap_emb[:, 1])
-        pmax = max(xmax, ymax)
-        pmin = min(xmin, ymin)
-        ymax = max(xmax - xmin, ymax - ymin) + ymin
-        xmax = max(xmax - xmin, ymax - ymin) + xmin
-        plt.figure(3)
-        g = sns.jointplot(x=umap_emb[:,0], y=umap_emb[:,1], hue=groups, palette="inferno", s=3., alpha=.3, xlim=(xmin, xmax), ylim=(ymin, ymax))
-        g.ax_joint.set_aspect('equal')
-        #cax = g.fig.add_axes([.98, .4, .01, .2])
-        #plt.colorbar(g.ax_joint, cax=cax)
-        #g = sns.scatterplot(x=umap_emb[:,0], y=umap_emb[:,1], hue=groups, palette="icefire", s=1.5, alpha=.2, xlim=(xmin, xmax), ylim=(ymin, ymax))
-        g.set_axis_labels('UMAP1','UMAP2')
-        #plt.tight_layout()
+        # square plotting box with the same span on both axes
+        xmin, xmax = np.min(umap_emb[:, 0]), np.max(umap_emb[:, 0])
+        ymin, ymax = np.min(umap_emb[:, 1]), np.max(umap_emb[:, 1])
+        span = max(xmax - xmin, ymax - ymin)
+        xmax, ymax = xmin + span, ymin + span
+        if pose_tilt is not None:
+            # fixed 0-180 range so runs can be compared by color
+            analysis.scatter_color(umap_emb[:,0], umap_emb[:,1], pose_tilt, cmap='viridis',
+                                   s=2, alpha=.3, vmin=0, vmax=180, label='Euler tilt (deg)')
+        else:
+            plt.subplots()
+            plt.scatter(umap_emb[:,0], umap_emb[:,1], s=2, alpha=.3, rasterized=True)
+        plt.xlim(xmin, xmax)
+        plt.ylim(ymin, ymax)
+        plt.gca().set_aspect('equal')
+        plt.xlabel('UMAP1')
+        plt.ylabel('UMAP2')
         plt.savefig(f'{outdir}/umap.png')
+        plt.close()
 
-        plt.figure(4)
         g = sns.jointplot(x=umap_emb[:,0], y=umap_emb[:,1], kind='hex')
         g.set_axis_labels('UMAP1','UMAP2')
-        #plt.tight_layout()
         plt.savefig(f'{outdir}/umap_hexbin.png')
-
-        #plt.figure(5)
-        #g = sns.jointplot(x=tsne_emb[:,0], y=tsne_emb[:,1], hue=groups, palette="vlag", s=2)
-        #g.set_axis_labels('TSNE1','TSNE2')
-        #plt.tight_layout()
-        #plt.savefig(f'{outdir}/tsne.png')
+        plt.close()
 
     analysis.scatter_annotate(pc[:,0], pc[:,1], centers_ind=centers_ind, annotate=True)
-    plt.xlabel('PC1')
-    plt.ylabel('PC2')
+    plt.xlabel(pc_labels[0])
+    plt.ylabel(pc_labels[1])
     plt.savefig(f'{outdir}/kmeans{K}/z_pca.png')
+    plt.close()
 
     g = analysis.scatter_annotate_hex(pc[:,0], pc[:,1], centers_ind=centers_ind, annotate=True)
-    g.set_axis_labels('PC1','PC2')
-    plt.tight_layout()
+    g.set_axis_labels(pc_labels[0], pc_labels[1])
     plt.savefig(f'{outdir}/kmeans{K}/z_pca_hex.png')
+    plt.close()
 
     if zdim > 2 and not skip_umap:
-        #analysis.scatter_annotate(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind_pc, annotate=True,
-        #                          xlim=(xmin, xmax), ylim=(ymin, ymax),
-        #                          alpha=.1, s=.5)
-        #plt.xlabel('UMAP1', fontsize=14, weight='bold')
-        #plt.ylabel('UMAP2', fontsize=14, weight='bold')
-        #plt.savefig(f'{outdir}/kmeansPC{K}/umap.png')
-
         analysis.scatter_annotate(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True,
                                   xlim=(xmin, xmax), ylim=(ymin, ymax),
                                   alpha=.15, s=0.5)
-        plt.xlabel('UMAP1', fontsize=14, weight='bold')
-        plt.ylabel('UMAP2', fontsize=14, weight='bold')
+        plt.xlabel('UMAP1')
+        plt.ylabel('UMAP2')
         plt.savefig(f'{outdir}/kmeans{K}/umap.png')
+        plt.close()
+
+        # same view, each particle colored by the k-means cluster it belongs to
+        analysis.plot_by_cluster(umap_emb[:,0], umap_emb[:,1], K, kmeans_labels,
+                                 centers_ind=centers_ind, annotate=True, s=1, alpha=.3)
+        plt.xlim(xmin, xmax)
+        plt.ylim(ymin, ymax)
+        plt.gca().set_aspect('equal')
+        plt.xlabel('UMAP1')
+        plt.ylabel('UMAP2')
+        plt.savefig(f'{outdir}/kmeans{K}/umap_clusters.png')
+        plt.close()
 
         g = analysis.scatter_annotate_hex(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True)
         g.set_axis_labels('UMAP1','UMAP2')
-        #plt.tight_layout()
         plt.savefig(f'{outdir}/kmeans{K}/umap_hex.png')
+        plt.close()
 
     for i in range(num_pcs):
         if zdim > 2 and not skip_umap:
-            analysis.scatter_color(umap_emb[:,0], umap_emb[:,1], pc[:,i], label=f'PC{i+1}')
+            # clip the color range to the same 1-99 percentile span the PC traversal uses,
+            # so a few outliers do not squeeze everyone else into one color
+            vmin, vmax = np.percentile(pc[:,i], (1.0, 99.0))
+            fig, ax = analysis.scatter_color(umap_emb[:,0], umap_emb[:,1], pc[:,i], label=pc_labels[i],
+                                             s=1, alpha=.3, vmin=vmin, vmax=vmax)
+            # mark the particle nearest each traversal point; numbers match vol_000..vol_009
+            # in pc{i+1}/, and the line shows the order the traversal visits them
+            _, traj_ind = analysis.get_nearest_point(z, pc_trajs[i])
+            np.savetxt(f'{outdir}/pc{i+1}/z_pc_nearest_ind.txt', traj_ind, fmt='%d')
+            ax.plot(umap_emb[traj_ind,0], umap_emb[traj_ind,1], '-', color='k', lw=0.8, zorder=2)
+            analysis.annotate_centers(ax, umap_emb[traj_ind])
+            ax.set_aspect('equal')
             plt.xlabel('UMAP1')
             plt.ylabel('UMAP2')
-            plt.tight_layout()
-
             plt.savefig(f'{outdir}/pc{i+1}/umap.png')
+            plt.close()
     return kmeans_labels, umap_emb
+
+def plot_pca_variance(pca, out_png):
+    '''Scree plot: each PC's share of the latent variance plus the running total,
+    to judge how much of the latent space the PC1/PC2 plots actually show.'''
+    ratio = 100 * np.asarray(pca.explained_variance_ratio_)
+    n = np.arange(1, len(ratio) + 1)
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.bar(n, ratio, color='C0', label='per PC')
+    ax.plot(n, np.cumsum(ratio), '-o', color='C1', markersize=3, label='cumulative')
+    ax.set_xticks(n)
+    ax.set_ylim(0, 100)
+    ax.set_xlabel('principal component')
+    ax.set_ylabel('explained variance (%)')
+    ax.grid(True, axis='y', alpha=0.3)
+    ax.legend(frameon=False)
+    fig.savefig(out_png)
+    plt.close(fig)
+
+def plot_cluster_sizes(labels, K, out_png):
+    '''Particles per k-means cluster, in the same colors as kmeans{K}/umap_clusters.png.'''
+    counts = np.bincount(labels, minlength=K)
+    fig, ax = plt.subplots(figsize=(max(6, 0.35 * K), 4))
+    bars = ax.bar(np.arange(K), counts, color=analysis._get_colors(K))
+    ax.bar_label(bars, labels=[str(c) for c in counts], fontsize=7, padding=1)
+    ax.set_xticks(np.arange(K))
+    ax.set_xlabel('k-means cluster')
+    ax.set_ylabel('particles')
+    ax.set_title(f'{len(labels)} particles in {K} clusters', fontsize=10)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    fig.savefig(out_png)
+    plt.close(fig)
+
+def plot_losses(run_log, out_png):
+    '''Plot per-epoch training/validation loss parsed from run.log.
+    Uses its own figure (closed afterwards) so the curves do not leak into the
+    implicit figure 1 that later plots reuse.'''
+    from matplotlib.ticker import MaxNLocator
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    n_max = 0
+    for prefix in ("training", "validation"):
+        losses = analysis.parse_loss_vanilla(run_log, prefix)
+        if len(losses) == 0:
+            continue
+        n_max = max(n_max, len(losses))
+        epochs = np.arange(1, len(losses) + 1)
+        # markers help when there are only a few epochs, but clutter long runs
+        ax.plot(epochs, losses, label=prefix, linewidth=1.5,
+                marker='o' if len(losses) <= 30 else None, markersize=3)
+    # at most ~10 integer ticks regardless of how many epochs were run
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=10, integer=True))
+    if n_max > 0:
+        ax.set_xlim(0.5, n_max + 0.5)
+    ax.set_xlabel('epoch')
+    ax.set_ylabel('loss')
+    ax.grid(True, alpha=0.3)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend(loc="upper right", frameon=False)
+    fig.tight_layout()
+    fig.savefig(out_png)
+    plt.close(fig)
 
 class VolumeGenerator:
     '''Helper class to call analysis.gen_volumes'''
@@ -299,21 +386,11 @@ def main(args):
     # the vanilla branch below reassigns both from the loaded latents / pose tracker.
     multi_z = None
     groups = None
+    pose_tilt = None
 
     if args.vanilla:
         if os.path.isfile(f"{workdir}/run.log"):
-            losses = analysis.parse_loss_vanilla(f"{workdir}/run.log", "validation")
-            #plt.ylabel('validation loss')
-            #plt.xlabel('step')
-            plt.plot(np.arange(1,len(losses)+1), losses, label="validation")
-            #plt.savefig(f"{workdir}/val_losses.png")
-            losses = analysis.parse_loss_vanilla(f"{workdir}/run.log", "training")
-            plt.ylabel('loss')
-            plt.xlabel('epoch')
-            plt.plot(np.arange(1,len(losses)+1), losses, label="training")
-            plt.xticks(range(1, len(losses)+1))
-            plt.legend(loc="upper right")
-            plt.savefig(f"{workdir}/train_losses.png")
+            plot_losses(f"{workdir}/run.log", f"{workdir}/train_losses.png")
         load_kwargs = {}
         if "weights_only" in inspect.signature(torch.load).parameters:
             # PyTorch is new enough to support this arg (e.g. >= 2.x)
@@ -330,11 +407,13 @@ def main(args):
                                        deform=True, deform_emb_size=zdim, latents=zfile, batch_size=4)# hp_order=2)
             groups = posetracker.euler_groups
             utils.save_pkl(groups, f"{workdir}/groups.pkl")
+            # eulers are stored as hopf angles; column 1 equals the ZYZ Euler tilt (0-180 deg)
+            pose_tilt = posetracker.eulers[:, 1].cpu().numpy()
             log("loading {}".format(poses))
         else:
             groups = None
             if args.pose is None:
-                log('WARNING: no --pose given; UMAP plots will not be colored by tilt/euler group '
+                log('WARNING: no --pose given; UMAP plots will not be colored by Euler tilt '
                     'and groups.pkl will not be written')
             else:
                 log(f'WARNING: pose file {args.pose} not found; continuing without particle groups')
@@ -357,7 +436,7 @@ def main(args):
         analyze_z1(z, outdir, vg)
     else:
         if args.kpc is None:
-            analyze_zN(z, outdir, vg, groups, skip_umap=args.skip_umap, num_pcs=args.pc, num_ksamples=args.ksample, joint=args.joint, multi_z=multi_z)
+            analyze_zN(z, outdir, vg, pose_tilt, skip_umap=args.skip_umap, num_pcs=args.pc, num_ksamples=args.ksample, joint=args.joint, multi_z=multi_z)
         # perform pca on selected cluster
         if args.kpc is not None:
             umap_file = f'{outdir}/umap.pkl'
@@ -403,8 +482,8 @@ def main(args):
             #keep only latents in selected classes
             if multi_z is not None:
                 multi_z = multi_z[np.isin(kmeans_labels, selected_pcs)]
-                if groups is not None:
-                    groups = groups[np.isin(kmeans_labels, selected_pcs)]
+                if pose_tilt is not None:
+                    pose_tilt = pose_tilt[np.isin(kmeans_labels, selected_pcs)]
             log(f'Perfoming principal component analysis for class {args.kpc}...')
             pc, pca = analysis.run_pca(z_k)
             outdir = f'{workdir}/analyze.filter.{E}'
@@ -493,16 +572,17 @@ def main(args):
             analysis.scatter_annotate(umap_emb[:,0], umap_emb[:,1], centers_ind=centers_ind, annotate=True,
                                   xlim=(xmin, xmax), ylim=(ymin, ymax),
                                   alpha=.15, s=1.)
-            plt.xlabel('UMAP1', fontsize=10, weight='bold')
-            plt.ylabel('UMAP2', fontsize=10, weight='bold')
+            plt.xlabel('UMAP1')
+            plt.ylabel('UMAP2')
             plt.savefig(f'{outdir}/kmeans{K}/umap.png')
+            plt.close()
 
         if multi_z is not None:
             if args.kpc is not None:
                 outdir_multi = f'{workdir}/defanalyze.filter.{E}'
             if not os.path.exists(outdir_multi):
                 os.mkdir(outdir_multi)
-            analyze_zN(multi_z, outdir_multi, vg, groups, skip_umap=args.skip_umap, num_pcs=min(args.pc, multi_z.shape[1]), num_ksamples=args.ksample)
+            analyze_zN(multi_z, outdir_multi, vg, pose_tilt, skip_umap=args.skip_umap, num_pcs=min(args.pc, multi_z.shape[1]), num_ksamples=args.ksample)
 
     # run manifest -- makes the output dir self-describing so downstream custom
     # analysis knows which latents/pose/config produced it without re-deriving.
