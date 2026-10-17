@@ -104,6 +104,7 @@ def cluster_kmeans(z, K, on_data=True, reorder=True, random_state=0):
     if reorder:
         g = sns.clustermap(centers)
         reordered = g.dendrogram_row.reordered_ind
+        plt.close(g.fig) # only the ordering is needed; the figure would otherwise stay open
         centers = centers[reordered]
         if on_data: centers_ind = centers_ind[reordered]
         tmp = {k:i for i,k in enumerate(reordered)}
@@ -128,6 +129,7 @@ def cluster_sphere_kmeans(z, K, on_data=True, reorder=True):
     if reorder:
         g = sns.clustermap(centers)
         reordered = g.dendrogram_row.reordered_ind
+        plt.close(g.fig) # only the ordering is needed; the figure would otherwise stay open
         centers = centers[reordered]
         if on_data: centers_ind = centers_ind[reordered]
         tmp = {k:i for i,k in enumerate(reordered)}
@@ -207,45 +209,52 @@ def _get_colors(K, cmap=None):
     if cmap is not None:
         cm = plt.get_cmap(cmap)
         colors = [cm(i/float(K)) for i in range(K)]
+    elif K <= 10:
+        colors = ['C{}'.format(i) for i in range(K)]
+    elif K <= 20:
+        # tab20 keeps every cluster distinct; cycling the 10 default colors would
+        # give cluster i and i+10 the same color
+        colors = [plt.get_cmap('tab20')(i) for i in range(K)]
     else:
-        colors = ['C{}'.format(i) for i in range(10)]
-        colors = [colors[i%len(colors)] for i in range(K)]
+        cm = plt.get_cmap('turbo')
+        colors = [cm(i/float(K-1)) for i in range(K)]
     return colors
+
+def annotate_centers(ax, centers, labels=None, colors=None):
+    '''Mark and number cluster centers on ax. adjust_text pushes overlapping labels
+    apart and draws a leader line back to each center, so dense clusters stay readable.
+    colors (one per center) outlines each label box, tying the number to its cluster color.'''
+    if labels is None:
+        labels = range(len(centers))
+    if colors is None:
+        colors = ['none'] * len(centers)
+    ax.scatter(centers[:, 0], centers[:, 1], c='k', s=10, edgecolors='white', linewidths=0.5, zorder=3)
+    texts = [ax.text(float(c[0]), float(c[1]), str(label), ha='center', va='center',
+                     fontsize=9, weight='bold', zorder=4,
+                     bbox=dict(boxstyle='round,pad=0.15', fc='white', ec=color, lw=1.5, alpha=0.85))
+             for c, label, color in zip(centers, labels, colors)]
+    # x/y: also keep labels off the center markers themselves; expand: extra room between labels
+    adjust_text(texts, x=centers[:, 0], y=centers[:, 1], ax=ax, expand=(1.5, 1.7),
+                arrowprops=dict(arrowstyle='-', color='0.3', lw=0.6))
 
 def scatter_annotate(x, y, centers=None, centers_ind=None, annotate=True, labels=None, alpha=.1, s=1, xlim=None, ylim=None):
     fig, ax = plt.subplots()
-    plt.scatter(x, y, alpha=alpha, s=s, rasterized=True)
+    ax.scatter(x, y, alpha=alpha, s=s, rasterized=True)
     if xlim is not None:
-        plt.xlim(xlim[0], xlim[1])
+        ax.set_xlim(xlim[0], xlim[1])
     if ylim is not None:
-        plt.ylim(ylim[0], ylim[1])
-    plt.gca().set_aspect('equal')
+        ax.set_ylim(ylim[0], ylim[1])
+    ax.set_aspect('equal')
 
     # plot cluster centers
     if centers_ind is not None:
         assert centers is None
         centers = np.array([[x[i],y[i]] for i in centers_ind])
-    if centers is not None:
-        plt.scatter(centers[:,0], centers[:,1], c='k', s=3)
     if annotate:
         assert centers is not None
-        if labels is None:
-            labels = range(len(centers))
-        centers_an = centers[:, 0:2]+np.array([.1, .1])
-        #centers_an[10] += np.array([0.3, -0.1])
-        #centers_an[1] += np.array([0.1, -0.2])
-        #centers_an[8] += np.array([-0.3, 0.])
-        #for i in labels:
-        #    ax.annotate(str(i), centers_an[i], fontsize=14, weight="bold")
-        texts = [plt.text(x=float(centers[i, 0]),
-                          y=float(centers[i, 1]),
-                          s=str(label),
-                          ha='center',
-                          va='center', fontsize=14, weight="bold")
-                 for i, label in enumerate(labels)]
-        adjust_text(texts=texts)
-        plt.xticks(fontsize=13, weight="bold")
-        plt.yticks(fontsize=13, weight="bold")
+        annotate_centers(ax, centers, labels)
+    elif centers is not None:
+        ax.scatter(centers[:,0], centers[:,1], c='k', s=10)
 
     return fig, ax
 
@@ -256,27 +265,28 @@ def scatter_annotate_hex(x, y, centers=None, centers_ind=None, annotate=True, la
     if centers_ind is not None:
         assert centers is None
         centers = np.array([[x[i],y[i]] for i in centers_ind])
-    if centers is not None:
-        g.ax_joint.scatter(centers[:,0], centers[:,1], color='k', edgecolor='grey')
     if annotate:
         assert centers is not None
-        if labels is None:
-            labels = range(len(centers))
-        for i in labels:
-            g.ax_joint.annotate(str(i), centers[i,0:2]+np.array([.1,.1]), color='black',
-                                bbox=dict(boxstyle='square,pad=.1', ec='None', fc='1', alpha=.5))
+        annotate_centers(g.ax_joint, centers, labels)
+    elif centers is not None:
+        g.ax_joint.scatter(centers[:,0], centers[:,1], color='k', edgecolor='grey')
     return g
 
-def scatter_color(x, y, c, cmap='viridis', s=1, alpha=.1, label=None, figsize=None):
+def scatter_color(x, y, c, cmap='viridis', s=1, alpha=.1, label=None, figsize=None, vmin=None, vmax=None):
     fig, ax = plt.subplots(figsize=figsize)
     assert len(x) == len(y) == len(c)
-    sc = plt.scatter(x, y, s=s, alpha=alpha, rasterized=True, cmap=cmap, c=c)
-    cbar = plt.colorbar(sc)
-    cbar.set_alpha(1)
-    #cbar.draw_all()
+    # draw in random order: in index order the last particles (e.g. the last tomogram)
+    # are always painted on top and hide the colors underneath
+    order = np.random.default_rng(0).permutation(len(x))
+    x, y, c = np.asarray(x)[order], np.asarray(y)[order], np.asarray(c)[order]
+    sc = ax.scatter(x, y, s=s, alpha=alpha, rasterized=True, cmap=cmap, c=c, vmin=vmin, vmax=vmax)
+    # build the colorbar from an opaque mappable; one built from sc inherits its alpha
+    # and comes out washed out (cbar.set_alpha does not undo that)
+    cbar = fig.colorbar(plt.cm.ScalarMappable(norm=sc.norm, cmap=sc.cmap), ax=ax)
     if label:
         cbar.set_label(label)
     return fig, ax
+
 
 def plot_by_cluster(x, y, K, labels, centers=None, centers_ind=None, annotate=False,
                     s=2, alpha=0.1, colors=None, cmap=None, figsize=None):
@@ -298,12 +308,11 @@ def plot_by_cluster(x, y, K, labels, centers=None, centers_ind=None, annotate=Fa
     if centers_ind is not None:
         assert centers is None
         centers = np.array([[x[i],y[i]] for i in centers_ind])
-    if centers is not None:
-        plt.scatter(centers[:,0], centers[:,1], c='k')
     if annotate:
         assert centers is not None
-        for i in K:
-            ax.annotate(str(i), centers[i,0:2])
+        annotate_centers(ax, np.asarray(centers)[K], labels=K, colors=[colors[i] for i in K])
+    elif centers is not None:
+        plt.scatter(centers[:,0], centers[:,1], c='k')
     return fig, ax
 
 def plot_by_cluster_subplot(x, y, K, labels,
