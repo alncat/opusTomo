@@ -189,22 +189,26 @@ def analyze_zN(z, outdir, vg, pose_tilt, skip_umap=False, num_pcs=2, num_ksample
     # Make some plots. Each savefig is followed by plt.close() (the current figure
     # is always the one just saved), so figures do not pile up across the run.
     log('Generating plots...')
-    g = sns.jointplot(x=pc[:,0], y=pc[:,1], alpha=.1, s=2)
+    # one shared PC1/PC2 view for all four PCA plots: the bulk of the particles plus
+    # every k-means center, so far outliers do not shrink the bulk into the middle
+    pc_xlim, pc_ylim = analysis.robust_limits(pc[:,0], pc[:,1], include=pc[centers_ind])
+    g = analysis.jointplot_view(pc[:,0], pc[:,1], pc_xlim, pc_ylim, alpha=.1, s=2)
     g.set_axis_labels(pc_labels[0], pc_labels[1])
     plt.savefig(f'{outdir}/z_pca.png')
     plt.close()
 
-    g = sns.jointplot(x=pc[:,0], y=pc[:,1], kind='hex')
+    g = analysis.jointplot_view(pc[:,0], pc[:,1], pc_xlim, pc_ylim, kind='hex')
     g.set_axis_labels(pc_labels[0], pc_labels[1])
     plt.savefig(f'{outdir}/z_pca_hexbin.png')
     plt.close()
 
     if zdim > 2 and not skip_umap:
-        # square plotting box with the same span on both axes
-        xmin, xmax = np.min(umap_emb[:, 0]), np.max(umap_emb[:, 0])
-        ymin, ymax = np.min(umap_emb[:, 1]), np.max(umap_emb[:, 1])
-        span = max(xmax - xmin, ymax - ymin)
-        xmax, ymax = xmin + span, ymin + span
+        # square plotting box with the same span on both axes, centered on the data so
+        # the shorter axis is padded evenly on both sides (not all on the far side)
+        lo, hi = umap_emb[:, :2].min(axis=0), umap_emb[:, :2].max(axis=0)
+        mid, half = (lo + hi) / 2, 0.52 * np.max(hi - lo)
+        xmin, xmax = mid[0] - half, mid[0] + half
+        ymin, ymax = mid[1] - half, mid[1] + half
         if pose_tilt is not None:
             # fixed 0-180 range so runs can be compared by color
             analysis.scatter_color(umap_emb[:,0], umap_emb[:,1], pose_tilt, cmap='viridis',
@@ -225,13 +229,15 @@ def analyze_zN(z, outdir, vg, pose_tilt, skip_umap=False, num_pcs=2, num_ksample
         plt.savefig(f'{outdir}/umap_hexbin.png')
         plt.close()
 
-    analysis.scatter_annotate(pc[:,0], pc[:,1], centers_ind=centers_ind, annotate=True)
+    analysis.scatter_annotate(pc[:,0], pc[:,1], centers_ind=centers_ind, annotate=True,
+                              xlim=pc_xlim, ylim=pc_ylim)
     plt.xlabel(pc_labels[0])
     plt.ylabel(pc_labels[1])
     plt.savefig(f'{outdir}/kmeans{K}/z_pca.png')
     plt.close()
 
-    g = analysis.scatter_annotate_hex(pc[:,0], pc[:,1], centers_ind=centers_ind, annotate=True)
+    g = analysis.scatter_annotate_hex(pc[:,0], pc[:,1], centers_ind=centers_ind, annotate=True,
+                                      xlim=pc_xlim, ylim=pc_ylim)
     g.set_axis_labels(pc_labels[0], pc_labels[1])
     plt.savefig(f'{outdir}/kmeans{K}/z_pca_hex.png')
     plt.close()
