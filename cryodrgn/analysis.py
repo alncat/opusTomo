@@ -220,10 +220,11 @@ def _get_colors(K, cmap=None):
         colors = [cm(i/float(K-1)) for i in range(K)]
     return colors
 
-def annotate_centers(ax, centers, labels=None, colors=None):
+def annotate_centers(ax, centers, labels=None, colors=None, box=True):
     '''Mark and number cluster centers on ax. adjust_text pushes overlapping labels
     apart and draws a leader line back to each center, so dense clusters stay readable.
-    colors (one per center) outlines each label box, tying the number to its cluster color.'''
+    colors (one per center) outlines each label box, tying the number to its cluster color.
+    box=False draws the bare numbers with no background box.'''
     if labels is None:
         labels = range(len(centers))
     if colors is None:
@@ -231,7 +232,8 @@ def annotate_centers(ax, centers, labels=None, colors=None):
     ax.scatter(centers[:, 0], centers[:, 1], c='k', s=10, edgecolors='white', linewidths=0.5, zorder=3)
     texts = [ax.text(float(c[0]), float(c[1]), str(label), ha='center', va='center',
                      fontsize=9, weight='bold', zorder=4,
-                     bbox=dict(boxstyle='round,pad=0.15', fc='white', ec=color, lw=1.5, alpha=0.85))
+                     bbox=dict(boxstyle='round,pad=0.15', fc='white', ec=color, lw=1.5, alpha=0.85)
+                     if box else None)
              for c, label, color in zip(centers, labels, colors)]
     # x/y: also keep labels off the center markers themselves; expand: extra room between labels
     adjust_text(texts, x=centers[:, 0], y=centers[:, 1], ax=ax, expand=(1.5, 1.7),
@@ -287,7 +289,7 @@ def scatter_annotate(x, y, centers=None, centers_ind=None, annotate=True, labels
         centers = np.array([[x[i],y[i]] for i in centers_ind])
     if annotate:
         assert centers is not None
-        annotate_centers(ax, centers, labels)
+        annotate_centers(ax, centers, labels, box=False)
     elif centers is not None:
         ax.scatter(centers[:,0], centers[:,1], c='k', s=10)
 
