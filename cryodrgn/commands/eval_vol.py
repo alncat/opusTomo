@@ -203,7 +203,7 @@ def main(args):
                 deform_emb_size=args.deform_size, downfrac=downfrac,
                 templateres=templateres, window_r=window_r, masks_params=masks_params,
                 num_bodies=args.num_bodies, z_affine_dim=z_affine_dim,
-                blend_radius=blend_radius)
+                blend_radius=blend_radius, motion_mask=cfg['model_args'].get('motion_mask', 'follow'))
 
     vanilla = args.pe_type == "vanilla"
 

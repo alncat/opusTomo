@@ -43,6 +43,8 @@ def add_args(parser):
     parser.add_argument('--zdim', type=int, required=False, help='Dimension of latent variable')
     parser.add_argument('--poses', type=os.path.abspath, required=True, help='Image poses (.pkl)')
     parser.add_argument('--masks', type=os.path.abspath, required=False, help='Masks related parameters (.pkl)')
+    parser.add_argument('--motion-mask', choices=('follow', 'fixed'), default='follow',
+                        help='Multi-body data mask: follow body deformation, or fixed with global pose only (default: %(default)s)')
     parser.add_argument('--blend-radius', type=float, default=1.,
                         help="Scale the width of the gaussian each body's motion is blended on, "
                              "relative to the radii carried by --masks. Below 1 a body keeps more "
@@ -665,6 +667,7 @@ def save_config(args, dataset, lattice, model, out_config):
                       down_vol_size=model.down_vol_size,
                       Apix=model.decoder.Apix,
                       templateres=model.templateres,
+                      motion_mask=args.motion_mask,
                       blend_radius=args.blend_radius)
     config = dict(dataset_args=dataset_args,
                   lattice_args=lattice_args,
@@ -853,6 +856,7 @@ def main(args):
                 templateres=args.templateres,
                 tmp_prefix=args.tmp_prefix,
                 masks_params=masks_params,
+                motion_mask=args.motion_mask,
                 blend_radius=args.blend_radius)
 
 

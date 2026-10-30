@@ -262,6 +262,7 @@ The functionality of each argument is explained in the table:
 | --datadir | the root directory before the filename of subtomogram in input starfile |
 | --estpose | estimate a pose correction for each subtomogram during training |
 | --masks | the mask parameters for defining the rigid-body dynamics |
+| --motion-mask | multi-body data mask behavior: `follow` (default) follows body deformation and global pose; `fixed` follows global pose only. Saved in `config.pkl` under `model_args.motion_mask`. |
 | --blend-radius | scale the width of the gaussian each body's motion is blended on, relative to the radii in ```--masks```. See [multi-body blending width](#blendradius) below. Default is 1 |
 | --ctfalpha | the degree of ctf correction on the experimental subtomogram, the default value is 0, which is equivalent to phase flipping. You can also try value like 0.5, which will further correct the amplitude of FT of subtomogram by the square root of the ctf function|
 | --ctfbeta | the degree of ctf correction on the reconstruction output by decoder, the default value is 1. You can also try value like 0.5, which will make the voxel values output by decoder smaller since the ctf correction is weaker.|
@@ -288,6 +289,13 @@ The functionality of each argument is explained in the table:
 | --amp | mixed precision; ```train_tomo_dist``` does not support it |
 
 ### Multi-body blending width <div id="blendradius">
+
+`--motion-mask follow` deforms the reference mask supplied through `--ref_vol` with the
+blended body motion. Use `--motion-mask fixed` to keep that mask fixed relative to the
+global pose, while still deforming the reconstruction. Both modes retain global rotation
+and translation and block pose gradients through the multi-body data mask. This setting
+does not change single-body/global-only behavior or apply a mask to exported volumes.
+When resuming training, repeat the chosen `--motion-mask` value; its default is `follow`.
 
 With ```--masks```, the decoder does not cut the volume into disjoint pieces. It computes a
 displacement field for every body and mixes them at each point with a gaussian centred on that

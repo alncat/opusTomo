@@ -74,7 +74,7 @@ class HetOnlyVAE(nn.Module):
             ctf_beta=1.,
             normalize_ctf=False,
             rank=0,
-            estimate_pose=False):
+            estimate_pose=False, motion_mask='follow'):
         super(HetOnlyVAE, self).__init__()
         self.lattice = lattice
         self.zdim = zdim
@@ -164,7 +164,7 @@ class HetOnlyVAE(nn.Module):
                                    masks_params=self.masks_params, num_bodies=self.num_bodies, affine_dim=self.z_affine_dim,
                                    blend_radius=self.blend_radius,
                                    ctf_alpha=self.ctf_alpha, ctf_beta=self.ctf_beta, normalize_ctf=self.normalize_ctf, rank=rank,
-                                   estimate_pose=self.estimate_pose)
+                                   estimate_pose=self.estimate_pose, motion_mask=motion_mask)
 
     @classmethod
     def load(self, config, weights=None, device=None):
@@ -199,7 +199,8 @@ class HetOnlyVAE(nn.Module):
                           enc_type=c['pe_type'],
                           enc_dim=c['pe_dim'],
                           domain=c['domain'],
-                          activation=activation)
+                          activation=activation,
+                          motion_mask=c.get('motion_mask', 'follow'))
         if weights is not None:
             ckpt = torch.load(weights)
             model.load_state_dict(ckpt['model_state_dict'])
@@ -381,7 +382,7 @@ def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activati
                 symm=None, ctf_grid=None, fixed_deform=False, deform_emb_size=2, render_size=140,
                 down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4,
                 blend_radius=1.,
-                ctf_alpha=0, ctf_beta=1, normalize_ctf=False, rank=0, estimate_pose=False):
+                ctf_alpha=0, ctf_beta=1, normalize_ctf=False, rank=0, estimate_pose=False, motion_mask='follow'):
     if enc_type == 'none':
         if domain == 'hartley':
             model = ResidLinearMLP(in_dim, layers, dim, 1, activation)
@@ -398,7 +399,7 @@ def get_decoder(in_dim, D, layers, dim, domain, enc_type, enc_dim=None, activati
                               down_vol_size=down_vol_size, tmp_prefix=tmp_prefix, masks_params=masks_params, num_bodies=num_bodies,
                               affine_dim=affine_dim, blend_radius=blend_radius,
                               ctf_alpha=ctf_alpha, ctf_beta=ctf_beta, normalize_ctf=normalize_ctf, rank=rank,
-                              estimate_pose=estimate_pose)
+                              estimate_pose=estimate_pose, motion_mask=motion_mask)
     else:
         model = PositionalDecoder if domain == 'hartley' else FTPositionalDecoder
         return model(in_dim, D, layers, dim, activation, enc_type=enc_type, enc_dim=enc_dim)
@@ -1136,8 +1137,11 @@ class VanillaDecoder(nn.Module):
                  ctf_grid=None, fixed_deform=False, deform_emb_size=2, zdim=8, render_size=140,
                  use_fourier=False, down_vol_size=140, tmp_prefix="ref", masks_params=None, num_bodies=0, affine_dim=4,
                  blend_radius=1.,
-                 ctf_alpha=0., ctf_beta=1., normalize_ctf=False, rank=0, estimate_pose=False):
+                 ctf_alpha=0., ctf_beta=1., normalize_ctf=False, rank=0, estimate_pose=False, motion_mask='follow'):
         super(VanillaDecoder, self).__init__()
+        if motion_mask not in ('follow', 'fixed'):
+            raise ValueError(f'Unknown motion_mask mode: {motion_mask}')
+        self.motion_mask = motion_mask
         self.D = D
         self.vol_size = (D - 1)
         self.Apix = Apix
@@ -1291,6 +1295,13 @@ class VanillaDecoder(nn.Module):
             #self.register_buffer("mask_sum", (torch.sum(self.sphere_mask, axis=-3) > 0).sum().detach())
 
         self.warp_type = warp_type
+
+    def sample_motion_mask(self, affine_grid, global_rot, global_trans):
+        """Sample the data mask with global pose and optional body deformation."""
+        grid = affine_grid if self.motion_mask == 'follow' else self.transformer.rotate(global_rot)
+        # The mask selects experimental data; do not optimize poses through its boundary.
+        pos = (grid + global_trans/self.vol_size*self.scale).detach()
+        return F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
 
     def bfactor_blurring(self, img, bfactor):
         s2 = self.freqs3d.pow(2).sum(dim=-1)
@@ -1641,16 +1652,7 @@ class VanillaDecoder(nn.Module):
                                                                      t_i_3d, body_trans_i, radius=self.radius, axes=self.principal_axesT)
 
                     #body_trans_pred.append(trans_img[..., :3]*self.vol_size/self.scale)
-                    # place the 3D mask with the same deformation field the model output uses
-                    # below, so the region kept in the data follows the bodies. transformer.rotate
-                    # here only carried the global rotation, so a body that swings out was masked
-                    # off the data while the model still rendered density there. same shape as
-                    # transformer.rotate(rot_i), so no extra memory -- affine_grid_i is already
-                    # computed. detached because valid multiplies the experimental data: letting
-                    # gradients reach the body poses through the mask would let the model move a
-                    # body to mask out data it cannot fit.
-                    pos = (affine_grid_i + global_trans_i/self.vol_size*self.scale).detach()
-                    valid = F.grid_sample(self.ref_mask, pos, align_corners=ALIGN_CORNERS)
+                    valid = self.sample_motion_mask(affine_grid_i, rot_i, global_trans_i)
                     #if save_mrc and i == 0:
                     #    self.save_mrc(valid, self.tmp_prefix+"mas")
                 else:
